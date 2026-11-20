@@ -1,4 +1,4 @@
-# Nihil — Language Specification (v2.8)
+# Nihil — Language Specification (v2.9)
 
 > **Nihil**: an imperative, minimalist language compiled straight to x86_64 machine
 > code, with no libc, no linker and no VM. The name is Latin for
@@ -258,8 +258,9 @@ from. Use `[0 ; 0]`.
   assignment only if the matching `]` is followed by `=`; otherwise it is an
   expression, as in `flags[i] { … }` or `v[0] == 3 { … }`.
 - Arrays cannot be compared with `==`.
-- Arrays live in a heap that only grows. It is requested from the kernel in
-  16 MiB blocks (`mmap`) and never freed.
+- Arrays (and STRINGs and records) live in a heap with a **garbage
+  collector**: what the program can no longer reach is freed and its memory
+  used again (§12.4). There is nothing to free by hand.
 
 ---
 
@@ -620,7 +621,8 @@ closing it drops the block's symbols.
 
   | Offset | Contents |
   |---|---|
-  | `+0x0`–`+0x28` | pending output bytes, heap (position and end), input (position, size, end) |
+  | `+0x0`–`+0x28` | pending output bytes, (unused), input (position, size, end) |
+  | `+0x40`–`+0x1A8` | the garbage collector's state and its 21 free lists (§12.4) |
   | `+0x1000` | standard output buffer, 64 KiB |
   | `+0x11000` | standard input buffer, 64 KiB |
   | `+0x21000` | globals, 8 bytes each (16 for optionals) |
@@ -629,6 +631,37 @@ closing it drops the block's symbols.
   line of the program runs, and is never a null pointer.
 - The fixed address `0x40000000` gives absolute addresses known in advance that
   fit in a `disp32`.
+
+### 12.4 Memory and the garbage collector
+
+The heap is one reservation of address space (64 GiB, or a quarter of that
+until the kernel accepts it), in 64 KiB pages. Every block starts with a header
+word (`n << 8 | marked << 1 | used`) and then the length word the program sees,
+so a value points 16 bytes into its block; the layout of §3 is unchanged.
+Blocks up to 32 KiB come in 21 size classes (32, 48, 64, 96, 128 … 32768 bytes),
+each page holding blocks of one class; larger blocks take whole pages. New
+memory is always zero, as the code relies on (§ Appendix, v1.5).
+
+The collector is **conservative mark and sweep**. Values carry no type at run
+time, so every qword in the registers, on the stack and in the globals (from
+`+0x21000` to the end of the data segment, read from the ELF header) that
+points into a used block keeps it, and the blocks reached are scanned the same
+way. The top of the stack comes from `prctl(PR_GET_AUXV)` (AT_EXECFN) or, on
+an older kernel, `/proc/self/maps`; without it nothing is collected. Large
+blocks are scanned only where the kernel has memory for them (`mincore`), so
+big arrays never written cost nothing.
+
+A collection runs when the new blocks since the last one pass the larger of
+16 MiB and what was in use after it. It frees unmarked blocks into the free
+lists of their class, keeps up to 16 MiB of empty small pages for reuse, and
+gives the other free pages back to the kernel (`madvise(MADV_DONTNEED)`).
+
+Everything lives in the runtime: the compilers emit the same code as before,
+so stage 0 and stage 1 still produce identical bytes. A number that happens to
+look like an address keeps a block alive for no reason (the price of being
+conservative); nothing reachable is ever freed. `make gcstress` builds a copy
+whose runtime collects every 256 KiB and runs the stage 1 tests, the fixed
+point and floatcheck with it.
 
 ---
 
@@ -982,7 +1015,7 @@ conversions are prelude methods (§18) that receive those constants; programs
 with models always get the prelude. The prelude builds text one byte per character, in a
 STRING it has just allocated (`__nihil_bytes(n)`, `__nihil_poke(s, i, b)`), and
 the FLOAT conversion reuses one buffer: writing or reading a table costs about
-two to three times the size of the file in memory, since nothing is freed.
+two to three times the size of the file in memory at its peak.
 
 ## Appendix A — What changed since v1.0, and why
 
@@ -1025,6 +1058,7 @@ two to three times the size of the file in memory, since nothing is freed.
 | **v1.9:** saved registers learned between passes | The prologue comes before the body; using the count from the previous pass avoids saving registers for nothing |
 | **v2.1:** `... ms;` waits | Animations need a fixed speed; a busy loop depends on the machine. The ellipsis reads as a pause and cannot start any valid expression |
 | **v2.2:** renamed from Ket to Nihil | Latin for *nothing*: no keywords, and `_` for the missing value |
+| **v2.9:** a garbage collector (conservative mark and sweep) | Programs that run for a long time or make many temporary texts grew without limit: a loop of 3 million small texts and arrays used 633 MB, now 19 MB. Conservative, so the compilers need no change and keep producing identical bytes |
 | **v2.8:** `NAME @{k} path = _;` deletes by key | Completes the key-value store. The record "becomes nothing": `_` already means no value. Moving the last record into the hole keeps the table a plain file without deleted lines, which every other read would have to skip |
 | **v2.7:** key fields `#name`, `NAME @{k} path`, `@{}>> path, r;` | A key-value store: finding a record by its key without reading the table. The index lives in its own file as a cache that is rebuilt when it does not match the table, so the table stays a plain text file that any write or editor may change. `#` reads as "number"; `{}` after `@` was never valid |
 | **v2.6:** `@[i]>> path, r;` | A key-value store needs to change one record without rewriting the table. With fixed widths the line's position is known, so one `pwrite` replaces it. `@[i]` already meant "record i" and `>>` "write"; a command never started with `@[` before |

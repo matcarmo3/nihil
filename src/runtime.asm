@@ -230,54 +230,144 @@ rt_error:
     syscall
 
 ; ---- arrays and heap ----------------------------------------------------------
-; "Bump" heap: 16 MiB (or larger) blocks requested from the kernel with mmap, never
-; freed. An array is [length: 8 bytes][8-byte elements]; the value of the
-; array points to the first element.
-%define BLOCK_HEAP (16 << 20)
+; An array is [length: 8 bytes][8-byte elements]; the value of the array points
+; to the first element. A STRING is the same block with its length in bytes.
+;
+; Garbage collector: conservative mark and sweep. Values carry no type at run
+; time, so every qword in the registers, on the stack, in the globals and in a
+; live block is taken as a possible reference: if it points into a block of the
+; heap, that block stays. What no path reaches is freed and its memory used again.
+;
+; The heap is one reservation of address space (64 GiB, or less if refused) in
+; 64 KiB pages, each described by one qword in GC_DESC:
+;   0           free (or never used)
+;   PD_SMALL    blocks of one size class (class in the bits above the kind)
+;   PD_LARGE    first page of a large block (its pages above the kind)
+;   PD_CONT     a later page of a large block (pages back to the first one)
+;   PD_DIRTY    an empty page of small blocks kept for reuse without giving it
+;               back (up to GC_KEEP of them): its old bytes are cleared on reuse
+; Small blocks (up to 32 KiB) come in 21 size classes: 32, 48, 64, 96, 128 …
+; 32768 bytes. A block starts with a header [n << 8 | marked << 1 | used] and
+; then the length word the program sees, so the value points 16 bytes in.
+; Free small blocks have header 0 and link to the next free one at +8.
+; New memory is always zero: fresh pages come zeroed from the kernel, freed
+; pages are given back with madvise(MADV_DONTNEED) (zero again when touched),
+; and a reused small block is cleared before it is handed out. A large block
+; is scanned only where the kernel has memory for it (mincore): a big array
+; never written costs nothing, as before.
+%define GC_PAGE_SHIFT 16
+%define GC_PAGE       (1 << GC_PAGE_SHIFT)
+%define GC_SMALL_MAX  32768
+%ifdef GC_STRESS                    ; make gcstress: a collection every 256 KiB
+%define GC_MIN        (256 << 10)
+%else
+%define GC_MIN        (16 << 20)    ; collect after at least 16 MiB of new blocks
+%endif
+%define GC_RESERVE    (64 << 30)
+%define PD_SMALL 1
+%define PD_LARGE 2
+%define PD_CONT  3
+%define PD_DIRTY 4
+%define GC_KEEP  (GC_MIN >> GC_PAGE_SHIFT)   ; empty small pages kept: 16 MiB
 
-rt_alloc:                           ; rcx = n → rax
+rt_alloc:                           ; rcx = n → rax (keeps every register but rax, rdx, r8)
     test rcx, rcx
     js .negativo
     mov rax, 1 << 40
     cmp rcx, rax
     jae .large
-    lea rdx, [rcx * 8 + 8]          ; bytes
-    mov rax, [HEAP_POS]
-    lea r8, [rax + rdx]
-    cmp r8, [HEAP_END]
-    ja .new_block
-.fits:
-    mov [HEAP_POS], r8
-    mov [rax], rcx
-    add rax, 8
-    ret
-.new_block:
     push rcx
-    push rdx
-    mov rsi, rdx
-    cmp rsi, BLOCK_HEAP
-    jae .size
-    mov esi, BLOCK_HEAP
-.size:
     push rsi
-    mov eax, 9                      ; sys_mmap
-    xor edi, edi
-    mov edx, 3                      ; PROT_READ | PROT_WRITE
-    mov r10d, 0x4022                ; MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE
-    mov r8, -1
-    xor r9d, r9d
-    syscall
-    pop rsi
+    push rdi
+    push r9
+    push r10
+    push r11
+    cmp qword [GC_STATE], 0
+    jne .ready
+    call gc_init
+.ready:
+    mov r11, rcx                    ; n
+    lea rdx, [rcx * 8 + 16]         ; bytes, with the header and the length
+    add [GC_ALLOCATED], rdx
+    mov rax, [GC_ALLOCATED]
+    cmp rax, [GC_THRESHOLD]
+    jbe .alloc
+    call gc_collect                 ; keeps every register
+.alloc:
+    cmp rdx, GC_SMALL_MAX
+    ja .big
+    xor r8d, r8d                    ; the size class: 32, 48, 64, 96, 128, 192 …
+    cmp rdx, 32
+    jbe .class
+    lea r9, [rdx - 1]
+    bsr r9, r9                      ; 2^b < bytes <= 2^(b+1)
+    lea ecx, [r9 - 1]
+    mov r10d, 3
+    shl r10, cl                     ; 3 · 2^(b-1)
+    lea r8, [r9 * 2 - 9]
+    cmp rdx, r10
+    jbe .class
+    inc r8                          ; 2^(b+1)
+.class:
+    mov rax, [GC_FREE + r8 * 8]
     test rax, rax
-    js .without_memory
-    mov [HEAP_POS], rax
-    add rsi, rax
-    mov [HEAP_END], rsi
-    pop rdx
+    jnz .take
+    call gc_small_page              ; a new page of free blocks of class r8
+    mov rax, [GC_FREE + r8 * 8]
+.take:
+    mov r9, [rax + 8]
+    mov [GC_FREE + r8 * 8], r9
+    mov r9, rax                     ; clear the n elements (and the 0 after a STRING)
+    lea rdi, [rax + 16]
+    mov rcx, r11
+    xor eax, eax
+    rep stosq
+    mov rax, r9
+    jmp .header
+.big:
+    lea rcx, [rdx + GC_PAGE - 1]
+    shr rcx, GC_PAGE_SHIFT          ; pages
+    call gc_get_pages
+    test rax, rax
+    jnz .pages
+    call gc_collect
+    call gc_get_pages
+    test rax, rax
+    jz .without_memory
+.pages:                             ; zero already: only the descriptors and the header
+    mov r9, rax
+    sub r9, [GC_HEAP_BASE]
+    shr r9, GC_PAGE_SHIFT
+    mov rdi, [GC_DESC]
+    lea rdi, [rdi + r9 * 8]
+    mov r10, rcx
+    shl r10, 8
+    or r10, PD_LARGE
+    mov [rdi], r10
+    mov r10d, 1
+.cont:
+    cmp r10, rcx
+    jae .header
+    mov r9, r10
+    shl r9, 8
+    or r9, PD_CONT
+    mov [rdi + r10 * 8], r9
+    inc r10
+    jmp .cont
+.header:
+    mov rcx, r11
+    shl rcx, 8
+    or rcx, 1                       ; used
+    mov [rax], rcx
+    mov [rax + 8], r11              ; the length
+    add rax, 16
+    pop r11
+    pop r10
+    pop r9
+    pop rdi
+    pop rsi
     pop rcx
-    mov rax, [HEAP_POS]
-    lea r8, [rax + rdx]
-    jmp .fits
+    ret
 .negativo:
     lea rsi, [rel s_size_negativo]
     jmp rt_error
@@ -287,6 +377,692 @@ rt_alloc:                           ; rcx = n → rax
 .without_memory:
     lea rsi, [rel s_without_memory]
     jmp rt_error
+
+gc_class_size:
+    dq 32, 48, 64, 96, 128, 192, 256, 384, 512, 768, 1024, 1536, 2048, 3072
+    dq 4096, 6144, 8192, 12288, 16384, 24576, 32768
+
+; r8 = class: puts a new page of free blocks of that class in its list
+; (collecting first if there is no page left). Keeps every register but rax.
+gc_small_page:
+    push rcx
+    push rdx
+    push rsi
+    push r9
+    push r10
+    mov rax, [GC_NDIRTY]            ; an empty page kept from a collection
+    test rax, rax
+    jz .fresh
+    dec rax
+    mov [GC_NDIRTY], rax
+    mov rcx, [GC_DIRTY]
+    mov rax, [rcx + rax * 8]
+    shl rax, GC_PAGE_SHIFT
+    add rax, [GC_HEAP_BASE]
+    jmp .carve
+.fresh:
+    mov ecx, 1
+    call gc_get_pages
+    test rax, rax
+    jnz .carve
+    call gc_collect
+    cmp qword [GC_FREE + r8 * 8], 0 ; the collection may have freed blocks of this class
+    jne .done
+    mov ecx, 1
+    call gc_get_pages
+    test rax, rax
+    jz rt_alloc.without_memory
+.carve:
+    mov rsi, rax                    ; the page
+    mov rcx, rax
+    sub rcx, [GC_HEAP_BASE]
+    shr rcx, GC_PAGE_SHIFT
+    mov r9, [GC_DESC]
+    mov r10, r8
+    shl r10, 8
+    or r10, PD_SMALL
+    mov [r9 + rcx * 8], r10
+    lea r9, [rel gc_class_size]
+    mov r9, [r9 + r8 * 8]           ; block size
+    mov eax, GC_PAGE
+    xor edx, edx
+    div r9
+    imul rax, r9                    ; past the last block that fits
+    xor r10d, r10d                  ; the list, built from the end
+.link:
+    sub rax, r9
+    lea rcx, [rsi + rax]
+    mov qword [rcx], 0              ; free (a kept page still has old bytes)
+    mov [rcx + 8], r10
+    mov r10, rcx
+    test rax, rax
+    jnz .link
+    mov [GC_FREE + r8 * 8], r10
+.done:
+    pop r10
+    pop r9
+    pop rsi
+    pop rdx
+    pop rcx
+    ret
+
+; rcx = pages → rax = the first one (zeroed memory), or 0 if there is no room.
+; First fit among the runs of free pages, else new pages. Keeps rcx; uses rdx, r9, r10.
+gc_get_pages:
+    mov r9, [GC_RUNS]
+    xor r10d, r10d
+.find:
+    cmp r10, [GC_NRUNS]
+    jae .new
+    mov rax, r10
+    shl rax, 4
+    mov rdx, [r9 + rax + 8]         ; its pages
+    cmp rdx, rcx
+    jae .take
+    inc r10
+    jmp .find
+.take:
+    add r9, rax                     ; the run
+    mov rax, [r9]                   ; its first page
+    sub rdx, rcx
+    jz .whole
+    mov [r9 + 8], rdx               ; what is left starts after the pages taken
+    lea rdx, [rax + rcx]
+    mov [r9], rdx
+    jmp .address
+.whole:                             ; the last run takes its place
+    mov rdx, [GC_NRUNS]
+    dec rdx
+    mov [GC_NRUNS], rdx
+    shl rdx, 4
+    add rdx, [GC_RUNS]
+    mov r10, [rdx]
+    mov [r9], r10
+    mov r10, [rdx + 8]
+    mov [r9 + 8], r10
+.address:
+    shl rax, GC_PAGE_SHIFT
+    add rax, [GC_HEAP_BASE]
+    ret
+.new:
+    mov rax, [GC_BUMP]
+    mov rdx, rcx
+    shl rdx, GC_PAGE_SHIFT
+    add rdx, rax
+    cmp rdx, [GC_HEAP_LIMIT]
+    ja .none
+    mov [GC_BUMP], rdx
+    ret
+.none:
+    xor eax, eax
+    ret
+
+; gc_mmap: rsi = bytes → rax = new zeroed memory (address space only), or a
+; negative errno. Uses rcx, rdx, rdi, r8–r11.
+gc_mmap:
+    mov eax, 9                      ; sys_mmap
+    xor edi, edi
+    mov edx, 3                      ; PROT_READ | PROT_WRITE
+    mov r10d, 0x4022                ; MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE
+    mov r8, -1
+    xor r9d, r9d
+    syscall
+    ret
+
+; the first allocation: reserves the heap and its tables, finds the roots
+gc_init:
+    push rax
+    push rcx
+    push rdx
+    push rsi
+    push rdi
+    push r8
+    push r9
+    push r10
+    push r11
+    push rbx
+    mov rbx, GC_RESERVE
+.reserve:
+    lea rsi, [rbx + GC_PAGE]        ; one page more, to align the start
+    call gc_mmap
+    cmp rax, -4096
+    jb .reserved
+    shr rbx, 2                      ; refused: a quarter of that
+    cmp rbx, 64 << 20
+    jae .reserve
+    jmp rt_alloc.without_memory
+.reserved:
+    add rax, GC_PAGE - 1
+    and rax, -GC_PAGE
+    mov [GC_HEAP_BASE], rax
+    mov [GC_BUMP], rax
+    add rax, rbx
+    mov [GC_HEAP_LIMIT], rax
+    mov rsi, rbx
+    shr rsi, GC_PAGE_SHIFT - 3      ; 8 bytes per page
+    call gc_mmap
+    cmp rax, -4096
+    jae rt_alloc.without_memory
+    mov [GC_DESC], rax
+    mov rsi, rbx
+    shr rsi, GC_PAGE_SHIFT - 4      ; 16 bytes per run
+    call gc_mmap
+    cmp rax, -4096
+    jae rt_alloc.without_memory
+    mov [GC_RUNS], rax
+    mov rsi, rbx
+    shr rsi, 2                      ; a block has at least 32 bytes: 8 per block
+    call gc_mmap
+    cmp rax, -4096
+    jae rt_alloc.without_memory
+    mov [GC_MSTACK], rax
+    add rax, rsi
+    mov [GC_MSTACK_END], rax
+    mov rsi, rbx
+    shr rsi, GC_PAGE_SHIFT - 3      ; kept pages: 8 bytes per page
+    call gc_mmap
+    cmp rax, -4096
+    jae rt_alloc.without_memory
+    mov [GC_DIRTY], rax
+    mov rsi, rbx
+    shr rsi, 12                     ; mincore: a byte per 4 KiB
+    call gc_mmap
+    cmp rax, -4096
+    jae rt_alloc.without_memory
+    mov [GC_MINCORE], rax
+    mov rax, [BASE_CODE + 64 + 56 + 16]   ; the data PT_LOAD: p_vaddr …
+    add rax, [BASE_CODE + 64 + 56 + 40]   ; … + p_memsz
+    mov [GC_DATA_END], rax
+    call gc_stack_top
+    mov [GC_STACK_TOP], rax
+    mov rax, GC_MIN
+    cmp qword [GC_STACK_TOP], 0
+    jne .threshold
+    mov rax, -1                     ; roots unknown: never collect
+    shr rax, 1
+.threshold:
+    mov [GC_THRESHOLD], rax
+    mov qword [GC_STATE], 1
+    pop rbx
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rdi
+    pop rsi
+    pop rdx
+    pop rcx
+    pop rax
+    ret
+
+; → rax = an address above every frame of the program's stack, or 0: the
+; file name the kernel put at the top of the stack (AT_EXECFN), from
+; prctl(PR_GET_AUXV); else the end of "[stack]" in /proc/self/maps
+gc_stack_top:
+    push rbx
+    push r12
+    sub rsp, 1024
+    mov eax, 157                    ; sys_prctl(PR_GET_AUXV, buffer, size)
+    mov edi, 0x41555856
+    mov rsi, rsp
+    mov edx, 1024
+    xor r10d, r10d
+    xor r8d, r8d
+    syscall
+    test rax, rax
+    jle .maps
+    mov rcx, rsp
+.aux:
+    mov rdx, [rcx]
+    test rdx, rdx                   ; AT_NULL
+    jz .maps
+    cmp rdx, 31                     ; AT_EXECFN
+    je .execfn
+    add rcx, 16
+    jmp .aux
+.execfn:
+    mov rax, [rcx + 8]
+    jmp .end
+.maps:
+    mov rsi, 1 << 20                ; the file, read into a temporary block
+    call gc_mmap
+    cmp rax, -4096
+    jae .none
+    mov rbx, rax
+    lea rsi, [rel s_maps]
+    mov eax, 257                    ; sys_openat(AT_FDCWD, "/proc/self/maps", O_RDONLY)
+    mov rdi, -100
+    xor edx, edx
+    syscall
+    test rax, rax
+    js .free
+    mov r12, rax
+    xor ecx, ecx                    ; bytes read
+.read:
+    push rcx
+    xor eax, eax                    ; sys_read
+    mov rdi, r12
+    lea rsi, [rbx + rcx]
+    mov rdx, (1 << 20) - 1
+    sub rdx, rcx
+    syscall
+    pop rcx
+    test rax, rax
+    jle .close
+    add rcx, rax
+    cmp rcx, (1 << 20) - 1
+    jb .read
+.close:
+    push rcx
+    mov eax, 3
+    mov rdi, r12
+    syscall
+    pop rcx
+    xor eax, eax                    ; looking for "[stack]"
+    xor edx, edx                    ; start of the current line
+.scan:
+    lea rsi, [rax + 7]
+    cmp rsi, rcx
+    ja .not_found
+    cmp byte [rbx + rax], 10
+    jne .compare
+    lea rdx, [rax + 1]
+.compare:
+    cmp dword [rbx + rax], '[sta'
+    jne .next
+    cmp dword [rbx + rax + 3], 'ack]'
+    je .line
+.next:
+    inc rax
+    jmp .scan
+.line:                              ; "start-end …": the hexadecimal after '-'
+    cmp byte [rbx + rdx], '-'
+    je .hex
+    inc rdx
+    jmp .line
+.hex:
+    inc rdx
+    xor eax, eax
+.digit:
+    movzx ecx, byte [rbx + rdx]
+    sub ecx, '0'
+    cmp ecx, 9
+    jbe .add
+    sub ecx, 'a' - '0' - 10
+    cmp ecx, 10
+    jb .found
+    cmp ecx, 15
+    ja .found
+.add:
+    shl rax, 4
+    add rax, rcx
+    inc rdx
+    jmp .digit
+.not_found:
+    xor eax, eax
+.found:
+    push rax
+    mov eax, 11                     ; sys_munmap
+    mov rdi, rbx
+    mov rsi, 1 << 20
+    syscall
+    pop rax
+    jmp .end
+.free:
+    mov eax, 11
+    mov rdi, rbx
+    mov rsi, 1 << 20
+    syscall
+.none:
+    xor eax, eax
+.end:
+    add rsp, 1024
+    pop r12
+    pop rbx
+    ret
+
+; a collection: keeps every register (they are roots, so they go on the stack
+; that is scanned)
+gc_collect:
+    push rax
+    push rbx
+    push rcx
+    push rdx
+    push rsi
+    push rdi
+    push rbp
+    push r8
+    push r9
+    push r10
+    push r11
+    push r12
+    push r13
+    push r14
+    push r15
+    mov r14, [GC_HEAP_BASE]
+    mov r13, [GC_BUMP]
+    sub r13, r14                    ; bytes of the heap in use (pages handed out)
+    mov r12, [GC_DESC]
+    mov r15, [GC_MSTACK]
+    mov rsi, rsp                    ; the stack, with the registers just pushed
+    mov rdi, [GC_STACK_TOP]
+    call gc_scan
+    mov rsi, GLOBALS
+    mov rdi, [GC_DATA_END]
+    call gc_scan
+.drain:                             ; the blocks reached, until none is left
+    cmp r15, [GC_MSTACK]
+    je .sweep
+    sub r15, 8
+    mov rbx, [r15]
+    mov rcx, [rbx]
+    shr rcx, 8                      ; n
+    lea rsi, [rbx + 16]
+    lea rdi, [rsi + rcx * 8]
+    cmp rcx, GC_SMALL_MAX / 8
+    ja .large
+    call gc_scan
+    jmp .drain
+.large:
+    call gc_scan_resident
+    jmp .drain
+.sweep:
+    call gc_sweep
+    inc qword [GC_COUNT]
+    mov qword [GC_ALLOCATED], 0
+%ifdef GC_STRESS
+    mov eax, GC_MIN
+%else
+    mov rax, [GC_LIVE]              ; the next one after as many new bytes as are in use
+    cmp rax, GC_MIN
+    jae .threshold
+    mov eax, GC_MIN
+%endif
+.threshold:
+    mov [GC_THRESHOLD], rax
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rbp
+    pop rdi
+    pop rsi
+    pop rdx
+    pop rcx
+    pop rbx
+    pop rax
+    ret
+
+; every qword in [rsi, rdi) that points into a used block marks it and puts it
+; on the mark stack (r15). r12 = descriptors, r13 = heap bytes, r14 = heap.
+gc_scan:
+    lea rax, [rsi + 8]
+    cmp rax, rdi
+    ja .done
+    mov rax, [rsi]
+    add rsi, 8
+    sub rax, r14
+    cmp rax, r13
+    jae gc_scan                     ; not in the heap (most values)
+    mov r8, rax
+    shr r8, GC_PAGE_SHIFT
+    mov r9, [r12 + r8 * 8]
+    movzx ecx, r9b
+    cmp ecx, PD_SMALL
+    je .small
+    cmp ecx, PD_LARGE
+    je .large
+    cmp ecx, PD_CONT
+    jne gc_scan
+    shr r9, 8
+    sub r8, r9                      ; the first page of the block
+.large:
+    shl r8, GC_PAGE_SHIFT
+    lea r9, [r14 + r8]
+    jmp .mark
+.small:
+    shr r9, 8
+    lea rcx, [rel gc_class_size]
+    mov r9, [rcx + r9 * 8]          ; block size
+    and eax, GC_PAGE - 1            ; offset in the page
+    xor edx, edx
+    div r9
+    imul rax, r9                    ; offset of the block
+    lea rcx, [rax + r9]
+    cmp rcx, GC_PAGE
+    ja gc_scan                      ; the unused end of the page
+    shl r8, GC_PAGE_SHIFT
+    add rax, r8
+    lea r9, [r14 + rax]
+.mark:
+    mov rax, [r9]
+    test al, 1
+    jz gc_scan                      ; a free block
+    test al, 2
+    jnz gc_scan                     ; already marked
+    or rax, 2
+    mov [r9], rax
+    cmp r15, [GC_MSTACK_END]
+    jae .overflow
+    mov [r15], r9
+    add r15, 8
+    jmp gc_scan
+.done:
+    ret
+.overflow:
+    lea rsi, [rel s_without_memory]
+    jmp rt_error
+
+; gc_scan of a large block [rsi, rdi), skipping the 4 KiB pages the kernel has
+; no memory for (never written: zero, so they hold no references)
+gc_scan_resident:
+    push rbx
+    push rbp
+    mov rbx, rsi
+    and rbx, -4096                  ; first page
+    mov rbp, rdi                    ; end
+    mov rsi, rdi
+    sub rsi, rbx
+    add rsi, 4095                   ; bytes, in whole pages
+    and rsi, -4096
+    mov eax, 27                     ; sys_mincore(start, length, vector)
+    mov rdi, rbx
+    mov rdx, [GC_MINCORE]
+    syscall
+    test rax, rax
+    jz .pages
+    lea rsi, [rbx + 16]             ; mincore failed: scan it all
+    mov rdi, rbp
+    call gc_scan
+    jmp .end
+.pages:
+    mov rdx, [GC_MINCORE]
+.page:
+    cmp rbx, rbp
+    jae .end
+    test byte [rdx], 1
+    jz .next
+    mov rsi, rbx
+    lea rdi, [rbx + 4096]
+    cmp rdi, rbp
+    jbe .scan
+    mov rdi, rbp
+.scan:
+    push rdx
+    call gc_scan
+    pop rdx
+.next:
+    add rbx, 4096
+    inc rdx
+    jmp .page
+.end:
+    pop rbp
+    pop rbx
+    ret
+
+; frees what was not marked, clears the marks, rebuilds the free lists and the
+; runs of free pages, and gives free pages back to the kernel
+gc_sweep:
+    xor eax, eax
+.clear:
+    mov qword [GC_FREE + rax * 8], 0
+    inc eax
+    cmp eax, 21
+    jb .clear
+    mov qword [GC_LIVE], 0
+    mov qword [GC_NDIRTY], 0
+    mov r11, r13
+    shr r11, GC_PAGE_SHIFT          ; pages in use
+    xor ebx, ebx                    ; page
+.page:
+    cmp rbx, r11
+    jae .runs
+    mov r9, [r12 + rbx * 8]
+    movzx ecx, r9b
+    cmp ecx, PD_SMALL
+    je .small
+    cmp ecx, PD_LARGE
+    je .large
+    cmp ecx, PD_DIRTY
+    je .empty
+    inc rbx
+    jmp .page
+.empty:                             ; an empty small page: kept, up to GC_KEEP
+    mov rax, [GC_NDIRTY]
+    cmp rax, GC_KEEP
+    jae .give
+    mov rcx, [GC_DIRTY]
+    mov [rcx + rax * 8], rbx
+    inc qword [GC_NDIRTY]
+    mov qword [r12 + rbx * 8], PD_DIRTY
+    inc rbx
+    jmp .page
+.give:
+    mov qword [r12 + rbx * 8], 0    ; free: given back with its run
+    inc rbx
+    jmp .page
+.large:
+    shr r9, 8                       ; its pages
+    mov rax, rbx
+    shl rax, GC_PAGE_SHIFT
+    lea rdi, [r14 + rax]
+    mov rax, [rdi]
+    test al, 2
+    jz .free_large
+    and rax, ~2
+    mov [rdi], rax
+    mov rax, r9
+    shl rax, GC_PAGE_SHIFT
+    add [GC_LIVE], rax
+    add rbx, r9
+    jmp .page
+.free_large:
+    mov qword [r12 + rbx * 8], 0
+    inc rbx
+    dec r9
+    jnz .free_large
+    jmp .page
+.small:
+    mov r10, r9
+    shr r10, 8                      ; class
+    lea rcx, [rel gc_class_size]
+    mov r9, [rcx + r10 * 8]         ; block size
+    mov rdi, rbx
+    shl rdi, GC_PAGE_SHIFT
+    add rdi, r14                    ; the page
+    lea rsi, [rdi + GC_PAGE]
+    sub rsi, r9                     ; the last block that fits starts at or before this
+    xor edx, edx                    ; blocks still in use
+    mov rcx, rdi
+.pass1:
+    cmp rcx, rsi
+    ja .pass1_done
+    mov rax, [rcx]
+    test al, 2
+    jz .not_marked
+    and rax, ~2
+    mov [rcx], rax
+    inc edx
+    jmp .pass1_next
+.not_marked:
+    mov qword [rcx], 0              ; unused (or freed now)
+.pass1_next:
+    add rcx, r9
+    jmp .pass1
+.pass1_done:
+    test edx, edx
+    jz .empty                       ; no block left
+.keep:
+    add qword [GC_LIVE], GC_PAGE
+    mov rcx, rdi
+    mov r8, [GC_FREE + r10 * 8]
+.pass2:
+    cmp rcx, rsi
+    ja .pass2_done
+    cmp qword [rcx], 0
+    jne .pass2_next
+    mov [rcx + 8], r8
+    mov r8, rcx
+.pass2_next:
+    add rcx, r9
+    jmp .pass2
+.pass2_done:
+    mov [GC_FREE + r10 * 8], r8
+    inc rbx
+    jmp .page
+.runs:                              ; the free pages, in runs; the last run goes back to new
+    mov qword [GC_NRUNS], 0
+    xor ebx, ebx
+.run_find:
+    cmp rbx, r11
+    jae .runs_done
+    cmp qword [r12 + rbx * 8], 0
+    je .run_start
+    inc rbx
+    jmp .run_find
+.run_start:
+    mov r10, rbx                    ; first page of the run
+.run_end:
+    inc rbx
+    cmp rbx, r11
+    jae .run_last
+    cmp qword [r12 + rbx * 8], 0
+    je .run_end
+    mov rdx, [GC_NRUNS]             ; (first page, pages)
+    shl rdx, 4
+    add rdx, [GC_RUNS]
+    mov [rdx], r10
+    mov rax, rbx
+    sub rax, r10
+    mov [rdx + 8], rax
+    inc qword [GC_NRUNS]
+    call .give_back
+    jmp .run_find
+.run_last:                          ; a run at the end: those pages count as never used
+    call .give_back
+    mov rax, r10
+    shl rax, GC_PAGE_SHIFT
+    add rax, r14
+    mov [GC_BUMP], rax
+.runs_done:
+    ret
+.give_back:                         ; madvise(pages r10 … rbx, MADV_DONTNEED)
+    push r11
+    mov rdi, r10
+    shl rdi, GC_PAGE_SHIFT
+    add rdi, r14
+    mov rsi, rbx
+    sub rsi, r10
+    shl rsi, GC_PAGE_SHIFT
+    mov eax, 28                     ; sys_madvise
+    mov edx, 4                      ; MADV_DONTNEED
+    syscall
+    pop r11
+    ret
 
 rt_array_rep:                       ; rcx = n, rdx = value → rax = [value ; n]
     push rdx
@@ -1019,6 +1795,7 @@ rt_concat:
 s_true:     db "true"
 s_absent:  db "_"
 s_false:    db "false"
+s_maps:       db "/proc/self/maps", 0
 s_nihil:      db "nihil: "
 s_nihil_len   equ $ - s_nihil
 s_nl:       db 10

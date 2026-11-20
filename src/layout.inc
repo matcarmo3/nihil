@@ -15,6 +15,26 @@
 %define IN_POS         (BASE_DATA + 24)       ; next byte to hand out from the input buffer
 %define IN_SIZE         (BASE_DATA + 32)       ; valid bytes in the input buffer
 %define IN_END         (BASE_DATA + 40)       ; 1 = input has ended
+; the garbage collector (runtime.asm, "heap"): its state, below OUTPUT_BUF
+%define GC_STATE        (BASE_DATA + 0x40)     ; 0 = not started, 1 = ready
+%define GC_HEAP_BASE    (BASE_DATA + 0x48)     ; first page of the heap (64 KiB aligned)
+%define GC_HEAP_LIMIT   (BASE_DATA + 0x50)     ; end of the reserved address space
+%define GC_BUMP         (BASE_DATA + 0x58)     ; first page never handed out
+%define GC_DESC         (BASE_DATA + 0x60)     ; one descriptor (qword) per page
+%define GC_RUNS         (BASE_DATA + 0x68)     ; runs of free pages: (first page, pages)
+%define GC_NRUNS        (BASE_DATA + 0x70)
+%define GC_MSTACK       (BASE_DATA + 0x78)     ; mark stack (objects still to scan)
+%define GC_MSTACK_END   (BASE_DATA + 0x80)
+%define GC_STACK_TOP    (BASE_DATA + 0x88)     ; top of the program's stack (0: no collection)
+%define GC_DATA_END     (BASE_DATA + 0x90)     ; end of the globals
+%define GC_ALLOCATED    (BASE_DATA + 0x98)     ; bytes allocated since the last collection
+%define GC_THRESHOLD    (BASE_DATA + 0xA0)     ; collect when GC_ALLOCATED passes it
+%define GC_LIVE         (BASE_DATA + 0xA8)     ; bytes in use after the last collection
+%define GC_COUNT        (BASE_DATA + 0xB0)     ; collections so far
+%define GC_DIRTY        (BASE_DATA + 0xB8)     ; empty small pages kept for reuse (page numbers)
+%define GC_NDIRTY       (BASE_DATA + 0xC0)
+%define GC_MINCORE      (BASE_DATA + 0xC8)     ; buffer for mincore: one byte per 4 KiB
+%define GC_FREE         (BASE_DATA + 0x100)    ; 21 free lists, one per size class
 %define OUTPUT_BUF       (BASE_DATA + 0x1000)   ; standard output buffer
 %define OUTPUT_CAP       65536
 %define IN_BUF         (BASE_DATA + 0x11000)  ; standard input buffer

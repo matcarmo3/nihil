@@ -48,6 +48,7 @@ make test1-O0        # the same, without optimizations
 make compare         # nihilc and nihilc1 -O0 produce identical bytes for every test program
 make fixedpoint      # nihilc1 compiles itself to a fixed point
 make floatcheck      # FLOAT ⇄ text conversions checked against Python
+make gcstress        # the suite and the fixed point with a collection every 256 KiB
 
 ./build/nihilc program.nihil program && ./program
 ./nihilc1.sh program.nihil program && ./program
@@ -77,7 +78,8 @@ After the plan: `... ms;` (sleep), `@>> path, text;` and `@+>> path, text;`
 fixed-width table files (`PRODUCT = @[code: INT(6); name: STRING(30)];`), read whole
 (`PRODUCT @ path`) or one record at a time (`PRODUCT @[i] path`, `PRODUCT @# path`),
 one record changed in place (`@[i]>> path, r;`), keys with an index on disk
-(`@[#code: INT(6); …]`, `PRODUCT @{42} path`, `@{}>> path, p;`, `PRODUCT @{42} path = _;`), and `examples/doom_fire.nihil`, the PSX Doom
+(`@[#code: INT(6); …]`, `PRODUCT @{42} path`, `@{}>> path, p;`, `PRODUCT @{42} path = _;`),
+a garbage collector (conservative mark and sweep, in the runtime only), and `examples/doom_fire.nihil`, the PSX Doom
 fire effect on a 24-bit color terminal (`./nihilc1.sh examples/doom_fire.nihil fire && ./fire`).
 
 ## IDE

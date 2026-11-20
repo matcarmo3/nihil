@@ -66,7 +66,14 @@ floatcheck: build/nihilc
 	build/nihilc tests/float/conversion_check.nihil build/conversion_check
 	python3 tests/float/check.py build/conversion_check 100000
 
+# the collector under pressure: a copy whose runtime collects every 256 KiB,
+# whatever is in use, runs the stage 1 suite, the fixed point and floatcheck
+gcstress:
+	rm -rf build/stress && mkdir -p build/stress
+	cp -r src src1 tests Makefile nihilc1.sh build/stress/
+	$(MAKE) -C build/stress NASMFLAGS="$(NASMFLAGS) -DGC_STRESS" test1 fixedpoint floatcheck
+
 clean:
 	rm -rf build
 
-.PHONY: all test test1 test1-O0 compare fixedpoint floatcheck clean
+.PHONY: all test test1 test1-O0 compare fixedpoint floatcheck gcstress clean
