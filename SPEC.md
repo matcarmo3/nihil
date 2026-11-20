@@ -1,4 +1,4 @@
-# Nihil — Language Specification (v3.4)
+# Nihil — Language Specification (v3.5)
 
 > **Nihil**: an imperative, minimalist language compiled straight to x86_64 machine
 > code, with no libc, no linker and no VM. The name is Latin for
@@ -1104,6 +1104,33 @@ the program and costs no call per element. Only `sort` calls the prelude, with
 the keys already computed. The records are the same ones (a record is a
 reference, §20.2): `where` and `sort` make new ARRAYs, not new records.
 
+### 21.2 JSON
+
+A JSON value stays **text**: each call finds a part of it and gives that part's
+text, so reading JSON needs no type that changes at run time. Numbers become
+INT or FLOAT with `.int()` and `.float()`; `true`, `false` and `null` are compared as text.
+
+```text
+plano = linha.json("structure") || "{}";        // STRING?: the value of a key, as JSON text
+modulos = plano.json_values();                  // the values of an object, in order
+largura = (modulos[0].json("width") || "0").float() || 0.0;
+nome = (p.json("name") || "").json_text() || "";   // the text of a JSON string: quotes and \n, \u00e9 … decoded
+>> nome.json_quote();                           // and back: a JSON string, for writing JSON
+```
+
+| Call | Result |
+|---|---|
+| `s.json(key)` | `STRING?`: the text of the value of `key` in the object `s`, or `_` |
+| `s.json_items()` | `ARRAY of STRING`: the texts of the items of the array `s` |
+| `s.json_keys()`, `s.json_values()` | the keys (decoded) and the value texts of the object `s`, in the same order |
+| `s.json_text()` | `STRING?`: the decoded text of the JSON string `s` (UTF-8, surrogate pairs included), or `_` |
+| `s.json_quote()` | `s` as a JSON string, with its quotes and escapes |
+
+Each call reads its part from the start, so to visit every value of a large
+object use `json_values()` (one pass) rather than `json(key)` for each key.
+Reading is tolerant: an array or object that is cut short gives what was
+complete. A 10 MB file of planograms is read in about a second.
+
 A name the type does not have is a compile error that lists the ones it has:
 
 ```text
@@ -1194,6 +1221,7 @@ about 3.5 s and 160 MB.
 | **v1.9:** saved registers learned between passes | The prologue comes before the body; using the count from the previous pass avoids saving registers for nothing |
 | **v2.1:** `... ms;` waits | Animations need a fixed speed; a busy loop depends on the machine. The ellipsis reads as a pause and cannot start any valid expression |
 | **v2.2:** renamed from Ket to Nihil | Latin for *nothing*: no keywords, and `_` for the missing value |
+| **v3.5:** JSON as text: `s.json(key)`, `json_items`, `json_keys`, `json_values`, `json_text`, `json_quote` | Importing and serving data needs JSON. Keeping each value as its text needs no dynamic type: the compiler still knows every type, and the existing `.int()`/`.float()` convert numbers |
 | **v3.4:** `MAP of K to V`: `{k: v}`, `m[k]`, `m[k] = v`, `m[k] = _`, `#m`, `has`, `keys`, `values` | Grouping and adding up by key (sales by product, store and month) needed a table in memory; the one on disk syncs every write. Braces after `=` or `(` never started an expression before, and `m[k] = _` deletes as `NAME @{k} path = _` does |
 | **v3.3:** queries `rows.where(cond)`, `count`, `first`, `sort(key)`, `sum(expr)` | Tables could be read but not searched or ordered by a field. Field names inside the call need no new symbol and no function values; compiling the loop in place lets the condition use the program's locals |
 | **v3.2:** only the prelude methods a program reaches are compiled | With the library, every program that used FLOAT, records or `.` carried all of the prelude: `x = 1.5; >> x;` was 66 KB, now 20 KB. The passes already redo everything, so the set of methods is found like a type: from the calls of one pass, for the next |

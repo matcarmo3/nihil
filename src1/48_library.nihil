@@ -43,6 +43,12 @@ lib_target(t = 0, s = 0, n = 0) {
         name_is(s, n, "repeat") { : "__nihil_s_repeat"; }
         name_is(s, n, "int") { : "__nihil_s_int"; }
         name_is(s, n, "float") { : "__nihil_s_float"; }
+        name_is(s, n, "json") { : "__nihil_s_json"; }
+        name_is(s, n, "json_items") { : "__nihil_s_json_items"; }
+        name_is(s, n, "json_keys") { : "__nihil_s_json_keys"; }
+        name_is(s, n, "json_values") { : "__nihil_s_json_values"; }
+        name_is(s, n, "json_text") { : "__nihil_s_json_text"; }
+        name_is(s, n, "json_quote") { : "__nihil_s_json_quote"; }
         : "";
     }
     t == TYPE_ARR | TYPE_INT {
@@ -82,7 +88,7 @@ lib_missing(t = 0, s = 0, n = 0) {
     t == TYPE_STR {
         put_str(" has no method '");
         put_source(s, n);
-        put_str("': it has find, has, starts, ends, slice, split, replace, trim, upper, lower, repeat, int and float");
+        put_str("': it has find, has, starts, ends, slice, split, replace, trim, upper, lower, repeat, int, float, json, json_items, json_keys, json_values, json_text and json_quote");
         error_end();
     }
     t == TYPE_ARR | TYPE_INT || t == TYPE_ARR | TYPE_FLOAT {
