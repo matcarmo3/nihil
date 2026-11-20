@@ -5,6 +5,8 @@
   </picture>
 </p>
 
+<p align="center"><a href="https://github.com/wnmonzine/nihil/actions/workflows/tests.yml"><img src="https://github.com/wnmonzine/nihil/actions/workflows/tests.yml/badge.svg" alt="tests"></a></p>
+
 # Nihil
 
 A minimalist language with **no keywords**, compiled straight to x86_64 ELF64
@@ -53,6 +55,9 @@ make gcstress        # the suite and the fixed point with a collection every 256
 ./build/nihilc program.nihil program && ./program
 ./nihilc1.sh program.nihil program && ./program
 ```
+
+GitHub Actions runs all of these checks on every push, on a clean Ubuntu
+(`.github/workflows/tests.yml`).
 
 ## Status
 
