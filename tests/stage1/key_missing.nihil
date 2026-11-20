@@ -1,0 +1,4 @@
+U = @[id: INT(3); #login: STRING(8)];
+@>> "build/km.dat", "";
+@{}>> "build/km.dat", U(1, "ana");
+>> (U @{"zed"} "build/km.dat").id;

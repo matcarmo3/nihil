@@ -1,4 +1,4 @@
-# Nihil — Language Specification (v2.6)
+# Nihil — Language Specification (v2.7)
 
 > **Nihil**: an imperative, minimalist language compiled straight to x86_64 machine
 > code, with no libc, no linker and no VM. The name is Latin for
@@ -338,6 +338,7 @@ m > 20 add(5);       // calls if m > 20
 | `@>> path, text;` | **Writes a file**: creates it or replaces its contents with the STRING `text` (stage 1). Atomic: the text goes to `path.nihil-tmp`, which is synced to disk (`fsync`) and renamed over `path`, so a crash leaves the old file or the new one, never a mix. A new file gets mode `0644` (minus the umask); a replaced file gets those permissions too. |
 | `@+>> path, text;` | **Appends** `text` to the file, creating it if needed, and syncs it to disk before going on (stage 1). |
 | `@[i]>> path, r;` | **Changes record `i`** of a table file in place, writing only that line (§20.4, stage 1). |
+| `@{}>> path, r;` | **Writes `r` under its key**: replaces the record with the same key, or adds `r` (§20.5, stage 1). |
 
 ### 8.1.1 Writing files
 
@@ -481,6 +482,7 @@ command         ::= method                      (* top level only *)
                   | "..." expression ";"
                   | ( "@>>" | "@+>>" ) expression "," expression ";"
                   | "@" "[" expression "]" ">>" expression "," expression ";"
+                  | "@" "{" "}" ">>" expression "," expression ";"   (* by key, §20.5 *)
                   | ">>>" expression ";"
                   | "<<"  IDENT ";"
                   | "<<<" IDENT ";"
@@ -494,7 +496,7 @@ command         ::= method                      (* top level only *)
 method          ::= IDENT "(" [ param ( "," param )* ] ")" block
 param           ::= IDENT [ "?" ] "=" ( literal | IDENT "(" ")" | "[" IDENT "(" ")" "]" )
 model           ::= IDENT "=" "@" "[" field ( ";" field )* [ ";" ] "]" ";"
-field           ::= IDENT ":" ( ( "INT" | "STRING" | "FLOAT" ) "(" INTEGER ")" | "BOOL" )
+field           ::= [ "#" ] IDENT ":" ( ( "INT" | "STRING" | "FLOAT" ) "(" INTEGER ")" | "BOOL" )
 block           ::= "{" command* "}"
 assignment      ::= IDENT [ "?" ] [ "[" expression "]" ] "=" expression
                   | IDENT ( "[" expression "]" | "." IDENT )* "." IDENT "=" expression
@@ -519,6 +521,7 @@ primary         ::= INTEGER | CHARACTER | FLOAT | STRING | "true" | "false" | "_
                   | IDENT ( "@" | "@?" ) unary  (* IDENT is a model: reads a table *)
                   | IDENT ( "@" | "@?" ) "[" expression "]" unary   (* one record, §20.4 *)
                   | IDENT "@" "#" unary         (* how many records *)
+                  | IDENT ( "@" | "@?" ) "{" expression "}" unary   (* by key, §20.5 *)
                   | IDENT
                   | "(" expression ")"
 ```
@@ -901,7 +904,55 @@ p.price = 13.75;
 nihil: 'products.dat' has no record 7 to write (it has 5: 0 to 4, or 5 to add one)
 ```
 
-### 20.5 Implementation
+### 20.5 Keys
+
+One field of a model can be its **key**, marked with `#`. It must be INT or
+STRING, and no two records of a table may have the same key.
+
+```text
+PRODUCT = @[#code: INT(6); name: STRING(24); price: FLOAT(10)];
+
+@{}>> "products.dat", PRODUCT(42, "Coffee", 12.5);   // adds it (a new key)
+p = PRODUCT @{42} "products.dat";                    // the record with code 42
+p.price = 13.75;
+@{}>> "products.dat", p;                             // same key: replaced in place
+q? = PRODUCT @?{99} "products.dat";                  // _ : there is none
+```
+
+| Form | Result |
+|---|---|
+| `NAME @{k} path` | the record whose key is `k` (an INT or STRING, the key's type); an error if there is none |
+| `NAME @?{k} path` | `NAME?`: the same, but `_` when there is none or the file does not exist |
+| `@{}>> path, r;` | writes `r` under its own key: replaces that record in place (one line), or adds `r` at the end |
+
+A STRING key is compared without the spaces on its right, as the table file
+keeps it. The table stays an ordinary table file: `NAME @ path`, `@[i]`, `@#`
+and the other writes still work on it.
+
+**The index.** Next to the table, `path.nihil-idx` holds a hash table on disk:
+16 bytes of header, then one 4-byte slot per position, with the record number
+(+ 1) or 0 for an empty slot. Finding a key costs a few small reads (the slot,
+then the record, whose key is always checked), whatever the size of the table;
+adding one costs a write of the line and of one slot. The index has at least
+twice as many slots as records and doubles when it gets half full.
+
+The index is a **cache** of the table: its header keeps the size and the
+*stamp* (modification time and inode) the table had when the index was last
+right. When they do not match, because the table was written by `@>>`, `@+>>`,
+another program or an editor, the next key operation reads the whole table
+once and rebuilds the index (atomically, like `@>>`). A missing or damaged
+index is rebuilt the same way, so it can always be deleted. `@[i]>>` keeps the
+index right when the key of line *i* does not change.
+
+Each key write syncs the table and then the index to disk (`fsync`), so a
+crash leaves at worst an index that no longer matches, and that is rebuilt.
+
+```text
+nihil: 'products.dat' has no PRODUCT with code = 99
+nihil: 'products.dat', line 3: the key code = 1 is also in line 1, and a key is unique
+```
+
+### 20.6 Implementation
 
 A record is a block of 8-byte slots with the ARRAY layout (§3); a STRING field
 holds the address of its text. Its type is a model number, so each model is a
@@ -952,6 +1003,7 @@ with models always get the prelude.
 | **v1.9:** saved registers learned between passes | The prologue comes before the body; using the count from the previous pass avoids saving registers for nothing |
 | **v2.1:** `... ms;` waits | Animations need a fixed speed; a busy loop depends on the machine. The ellipsis reads as a pause and cannot start any valid expression |
 | **v2.2:** renamed from Ket to Nihil | Latin for *nothing*: no keywords, and `_` for the missing value |
+| **v2.7:** key fields `#name`, `NAME @{k} path`, `@{}>> path, r;` | A key-value store: finding a record by its key without reading the table. The index lives in its own file as a cache that is rebuilt when it does not match the table, so the table stays a plain text file that any write or editor may change. `#` reads as "number"; `{}` after `@` was never valid |
 | **v2.6:** `@[i]>> path, r;` | A key-value store needs to change one record without rewriting the table. With fixed widths the line's position is known, so one `pwrite` replaces it. `@[i]` already meant "record i" and `>>` "write"; a command never started with `@[` before |
 | **v2.5:** `NAME @[i] path`, `NAME @?[i] path`, `NAME @# path` | Reading one record should not cost reading the whole table: with fixed widths its position is known, and `pread` reads only that line. The count comes from the file's size, which also detects a file cut in the middle of a record |
 | **v2.4:** data models `NAME = @[field: TYPE(width); …];`, records, `r.field`, `NAME @ path` | Programs needed structured data that matches a file layout. Fixed widths make a file a table where record *n* has a known position, which a key-value store will need; names without quotes let the compiler check every field. `@[` keeps the "file" meaning of `@`; `.` after a value was never valid before |

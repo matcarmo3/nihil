@@ -54,5 +54,5 @@
 %define RT_SLEEP            135 ; ... rax: flushes the output and waits rax milliseconds
 %define RT_WRITE_FILE       140 ; @>> rax, rcx: file at path rax (STRING) gets text rcx (STRING), atomically
 %define RT_APPEND_FILE      145 ; @+>> rax, rcx: appends text rcx to the file at path rax
-%define RT_READ_AT          150 ; rax = path, rcx = offset, rdx = bytes → rax = STRING read there (0: no file), rdx = file size
+%define RT_READ_AT          150 ; rax = path, rcx = offset, rdx = bytes → rax = STRING read there (0: no file), rdx = file size, rcx = stamp (mtime + inode)
 %define RT_WRITE_AT         155 ; rax = path, rcx = text, rdx = offset: writes the text there (pwrite + fsync)

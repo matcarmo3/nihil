@@ -76,7 +76,8 @@ After the plan: `... ms;` (sleep), `@>> path, text;` and `@+>> path, text;`
 (write and append files, crash-safe), data models and records that map to
 fixed-width table files (`PRODUCT = @[code: INT(6); name: STRING(30)];`), read whole
 (`PRODUCT @ path`) or one record at a time (`PRODUCT @[i] path`, `PRODUCT @# path`),
-one record changed in place (`@[i]>> path, r;`), and `examples/doom_fire.nihil`, the PSX Doom
+one record changed in place (`@[i]>> path, r;`), keys with an index on disk
+(`@[#code: INT(6); …]`, `PRODUCT @{42} path`, `@{}>> path, p;`), and `examples/doom_fire.nihil`, the PSX Doom
 fire effect on a 24-bit color terminal (`./nihilc1.sh examples/doom_fire.nihil fire && ./fire`).
 
 ## IDE

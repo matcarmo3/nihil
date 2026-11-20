@@ -1,0 +1,29 @@
+// #field: the key; NAME @{k} path finds a record through "<path>.nihil-idx"
+P = @[#code: INT(4); name: STRING(6)];
+F = "build/key.dat";
+@>> F, "";
+@{}>> F, P(42, "tea");                      // new keys are added at the end
+@{}>> F, P(7, "milk");
+@{}>> F, P(42, "TEA");                      // the same key replaces, in place
+>> $(P @ F);
+>> (P @{7} F).name; >> " "; >> (P @?{99} F) == _; >> "\n";
+i = 0;
+* i < 40 { @{}>> F, P(100 + i, "n"); i = i + 1; }   // the index grows by itself
+>> P @# F; >> " "; >> (P @{139} F).code; >> " "; >> (P @{42} F).name; >> "\n";
+// writes by other means make the index old, and it is rebuilt
+@>> F, [P(5, "e"), P(2, "b")];
+>> (P @{2} F).name; >> " "; >> (P @?{42} F) == _; >> "\n";
+@[0]>> F, P(5, "E");                        // same key: the index stays right
+@[1]>> F, P(9, "i");                        // another key: marked old
+>> (P @{5} F).name; >> (P @{9} F).name; >> (P @?{2} F) == _; >> "\n";
+@+>> F, P(3, "c");
+>> (P @{3} F).name; >> "\n";
+// a STRING key (an old index file is rebuilt)
+U = @[id: INT(3); #login: STRING(8)];
+G = "build/key_users.dat";
+@>> G + ".nihil-idx", "";
+@>> G, "";
+@{}>> G, U(1, "ana");
+@{}>> G, U(2, "bob");
+@{}>> G, U(3, "ana");
+>> (U @{"ana"} G).id; >> (U @{"bob"} G).id; >> (U @?{"zed"} G) == _; >> "\n";

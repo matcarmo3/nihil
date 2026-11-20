@@ -399,3 +399,230 @@ __nihil_rec_at(i = 0, path = "", chunk = 0, size = 0, schema = [0], names = "", 
     }
     : __nihil_rec_parse(__text, 0, schema, names, path, i + 1);
 }
+
+// ---- the key index (§20.5): "<path>.nihil-idx" -------------------------------
+// A hash table on disk: 16 bytes of header (the table's size and stamp when
+// the index last matched it), then C slots of 4 bytes, little-endian, holding
+// the record number + 1 (0 = empty). C is a power of two at least twice the
+// number of records, so a search (linear probing) ends on an empty slot.
+// The index is only a cache: when the header does not match the table, it is
+// rebuilt from the table.
+
+__nihil_key_hash(s = "") {
+    __h = -3750763034362895579;               // FNV-1a, 64 bits
+    __i = 0;
+    #s { __h = (__h ^ s[__i]) * 1099511628211; __i = __i + 1; }
+    : __h;
+}
+
+// n bytes of v, little-endian
+__nihil_le(v = 0, n = 0) {
+    __b = [0 ; n];
+    __i = 0;
+    n { __b[__i] = (v >> (__i * 8)) & 255; __i = __i + 1; }
+    : $__b;
+}
+
+__nihil_le_put(b = [0], at = 0, v = 0, n = 0) {
+    __i = 0;
+    n { b[at + __i] = (v >> (__i * 8)) & 255; __i = __i + 1; }
+}
+
+__nihil_le_at(s = "", at = 0, n = 0) {
+    __v = 0;
+    __i = n;
+    * __i > 0 {
+        __i = __i - 1;
+        __v = (__v << 8) | s[at + __i];
+    }
+    : __v;
+}
+
+// the key as text, from a value: an INT in decimal, a STRING without the
+// spaces on its right (as a table file keeps it)
+__nihil_key_value(v = 0, ty = 0) {
+    ty == 1 { : __nihil_int_text(v); }
+    __s = __nihil_str_at(v);
+    __e = #__s;
+    * __e > 0 && __s[__e - 1] == ' ' { __e = __e - 1; }
+    __e == #__s { : __s; }
+    __b = [0 ; __e];
+    __i = 0;
+    __e { __b[__i] = __s[__i]; __i = __i + 1; }
+    : $__b;
+}
+
+// the key as text, from the line that starts at position at of text
+__nihil_key_at(text = "", at = 0, schema = [0], names = "", path = "", line = 0, kf = 0) {
+    __a = at;
+    __i = 0;
+    kf { __a = __a + schema[2 + __i * 2]; __i = __i + 1; }
+    __ty = schema[1 + kf * 2];
+    __b = __a + schema[2 + kf * 2];
+    __ty == 1 { * __a < __b && text[__a] == ' ' { __a = __a + 1; } }
+    * __b > __a && text[__b - 1] == ' ' { __b = __b - 1; }
+    __f = [0 ; __b - __a];
+    __k = 0;
+    __b - __a { __f[__k] = text[__a + __k]; __k = __k + 1; }
+    __ty == 1 { : __nihil_int_text(__nihil_field_int($__f, path, line, names, kf)); }
+    : $__f;
+}
+
+__nihil_key_header(path = "") {
+    : __nihil_le(__nihil_fsize(path), 8) + __nihil_le(__nihil_fstamp(path), 8);
+}
+
+// the capacity of the index if it matches the table (size and stamp), else 0
+__nihil_key_current(idx = "", size = 0, stamp = 0) {
+    __isz = __nihil_fsize(idx);
+    __isz < 80 { : 0; }
+    __c = (__isz - 16) / 4;
+    __isz != 16 + __c * 4 || (__c & (__c - 1)) != 0 { : 0; }
+    __p = __nihil_pread(idx, 0, 16);
+    __p == 0 { : 0; }
+    __h = __nihil_str_at(__p);
+    #__h != 16 || __nihil_le_at(__h, 0, 8) != size || __nihil_le_at(__h, 8, 8) != stamp { : 0; }
+    : __c;
+}
+
+// reads the whole table and writes a new index (atomically); → its capacity.
+// Two records with the same key are an error.
+__nihil_key_rebuild(path = "", size = 0, stamp = 0, schema = [0], names = "", model = "", kf = 0) {
+    __n = __nihil_rec_count(path, size, schema, model);
+    __c = 16;
+    * __c < 2 * (__n + 1) { __c = __c * 2; }
+    __w = __nihil_rec_width(schema) + 1;
+    __text = "";
+    size > 0 { __text = __nihil_str_at(__nihil_pread(path, 0, size)); }
+    __slots = [0 ; __c];
+    __i = 0;
+    * __i < __n {
+        __at = __i * __w;
+        __at + __w <= #__text && __text[__at + __w - 1] != 10 {
+            __nihil_table_bad(path, __i + 1, "the line does not have the width of a " + model + " record");
+        }
+        __k = __nihil_key_at(__text, __at, schema, names, path, __i + 1, kf);
+        __j = __nihil_key_hash(__k) & (__c - 1);
+        * __slots[__j] != 0 {
+            __o = __slots[__j] - 1;
+            __nihil_key_at(__text, __o * __w, schema, names, path, __o + 1, kf) == __k {
+                __nihil_table_bad(path, __i + 1, "the key " + __nihil_word(names, kf) + " = " + __k + " is also in line " + __nihil_int_text(__o + 1) + ", and a key is unique");
+            }
+            __j = (__j + 1) & (__c - 1);
+        }
+        __slots[__j] = __i + 1;
+        __i = __i + 1;
+    }
+    __b = [0 ; 16 + __c * 4];
+    __nihil_le_put(__b, 0, size, 8);
+    __nihil_le_put(__b, 8, stamp, 8);
+    __i = 0;
+    __c { __nihil_le_put(__b, 16 + __i * 4, __slots[__i], 4); __i = __i + 1; }
+    @>> path + ".nihil-idx", $__b;
+    : __c;
+}
+
+// where the key is: [record number or -1, its slot (or the empty one where it
+// would go), the capacity]. Every slot found is checked against the record.
+__nihil_key_find(key = "", path = "", size = 0, stamp = 0, schema = [0], names = "", model = "", kf = 0) {
+    __idx = path + ".nihil-idx";
+    __c = __nihil_key_current(__idx, size, stamp);
+    __c == 0 { __c = __nihil_key_rebuild(path, size, stamp, schema, names, model, kf); }
+    __w = __nihil_rec_width(schema) + 1;
+    __j = __nihil_key_hash(key) & (__c - 1);
+    __left = __c;
+    * __left > 0 {
+        __v = 0;
+        __p = __nihil_pread(__idx, 16 + __j * 4, 4);
+        __p != 0 {
+            __s = __nihil_str_at(__p);
+            #__s == 4 { __v = __nihil_le_at(__s, 0, 4); }
+        }
+        __v == 0 { : [-1, __j, __c]; }
+        __o = __v - 1;
+        __a = __nihil_pread(path, __o * __w, __w - 1);
+        __a != 0 {
+            __t = __nihil_str_at(__a);
+            #__t == __w - 1 && __nihil_key_at(__t, 0, schema, names, path, __o + 1, kf) == key { : [__o, __j, __c]; }
+        }
+        __j = (__j + 1) & (__c - 1);
+        __left = __left - 1;
+    }
+    : [-1, __j, __c];
+}
+
+// NAME @{k} path / NAME @?{k} path → the record's address, or 0 (= _)
+__nihil_key_get(k = 0, path = "", schema = [0], names = "", model = "", kf = 0, opt = false) {
+    __size = __nihil_fsize(path);
+    __size < 0 {
+        opt { : 0; }
+        !>> "nihil: could not read '" + path + "'\n";
+        :: 2;
+    }
+    __ty = schema[1 + kf * 2];
+    __key = __nihil_key_value(k, __ty);
+    __f = __nihil_key_find(__key, path, __size, __nihil_fstamp(path), schema, names, model, kf);
+    __f[0] < 0 {
+        opt { : 0; }
+        __q = __key;
+        __ty == 3 { __q = "\"" + __key + "\""; }
+        !>> "nihil: '" + path + "' has no " + model + " with " + __nihil_word(names, kf) + " = " + __q + "\n";
+        :: 2;
+    }
+    __w = __nihil_rec_width(schema);
+    __t = __nihil_str_at(__nihil_pread(path, __f[0] * (__w + 1), __w));
+    : __nihil_rec_parse(__t, 0, schema, names, path, __f[0] + 1);
+}
+
+// @{}>> path, r : replaces the record with r's key, or adds r at the end
+__nihil_key_put(path = "", r = 0, schema = [0], names = "", model = "", kf = 0) {
+    __text = __nihil_rec_text(r, schema, names, model);   // a value that does not fit stops here
+    __key = __nihil_key_value(__nihil_arr_at(r)[kf], schema[1 + kf * 2]);
+    __size = __nihil_fsize(path);
+    __size < 0 { __size = 0; }
+    __f = __nihil_key_find(__key, path, __size, __nihil_fstamp(path), schema, names, model, kf);
+    __w = #__text;
+    __idx = path + ".nihil-idx";
+    __f[0] >= 0 {
+        __nihil_pwrite(path, __f[0] * __w, __text);
+    } || {
+        __n = __nihil_rec_count(path, __size, schema, model);
+        __at = __n * __w;
+        __size % __w != 0 {                         // the last line lacks its "\n"
+            __text = "\n" + __text;
+            __at = __at - 1;
+        }
+        __nihil_pwrite(path, __at, __text);
+        (__n + 1) * 2 > __f[2] {                    // over half full: a bigger index
+            __nihil_key_rebuild(path, __nihil_fsize(path), __nihil_fstamp(path), schema, names, model, kf);
+            :;
+        }
+        __nihil_pwrite(__idx, 16 + __f[1] * 4, __nihil_le(__n + 1, 4));
+    }
+    __nihil_pwrite(__idx, 0, __nihil_key_header(path));
+}
+
+// @[i]>> path, r for a model with a key: the index stays right when the key
+// of line i does not change, and is marked old (rebuilt later) when it does
+__nihil_key_write_at(i = 0, path = "", r = 0, schema = [0], names = "", model = "", kf = 0) {
+    __size = __nihil_fsize(path);
+    __stamp = __nihil_fstamp(path);
+    __text = __nihil_rec_place(i, path, r, __size, schema, names, model);
+    __w = __nihil_rec_width(schema) + 1;
+    __idx = path + ".nihil-idx";
+    __c = __nihil_key_current(__idx, __size, __stamp);
+    __same = false;
+    __c > 0 && i < __nihil_rec_count(path, __size, schema, model) {
+        __p = __nihil_pread(path, i * __w, __w - 1);
+        __p != 0 {
+            __old = __nihil_str_at(__p);
+            __same = #__old == __w - 1 && __nihil_key_at(__old, 0, schema, names, path, i + 1, kf) == __nihil_key_value(__nihil_arr_at(r)[kf], schema[1 + kf * 2]);
+        }
+    }
+    __nihil_pwrite(path, (i + 1) * __w - #__text, __text);
+    __same {
+        __nihil_pwrite(__idx, 0, __nihil_key_header(path));
+    } || __c > 0 {
+        __nihil_pwrite(__idx, 0, __nihil_le(-1, 16));
+    }
+}

@@ -416,6 +416,10 @@ primary_name() {
         k < 0 && name_is(pi, pl, "__nihil_addr") { : intrinsic(TYPE_INT); }
         k < 0 && name_is(pi, pl, "__nihil_str_at") { : intrinsic(TYPE_STR); }
         k < 0 && name_is(pi, pl, "__nihil_arr_at") { : intrinsic(TYPE_ARR | TYPE_INT); }
+        k < 0 && name_is(pi, pl, "__nihil_fsize") { : file_intrinsic(1); }
+        k < 0 && name_is(pi, pl, "__nihil_fstamp") { : file_intrinsic(2); }
+        k < 0 && name_is(pi, pl, "__nihil_pread") { : file_intrinsic(3); }
+        k < 0 && name_is(pi, pl, "__nihil_pwrite") { : file_intrinsic(4); }
         is_model(k) { : new_record(k); }
         : call_method(k);
     }

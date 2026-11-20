@@ -1,0 +1,28 @@
+// A small stock register: items are found by their SKU, a STRING key.
+// "#sku" makes it the key; the index lives in stock.dat.nihil-idx and is
+// rebuilt by itself whenever it does not match the table.
+ITEM = @[#sku: STRING(12); name: STRING(24); qty: INT(6)];
+FILE = "ide/workspace/stock.dat";
+
+>> "Items in stock: "; >> ITEM @# FILE; >> "\n";
+>> "SKU (Enter to quit): ";
+sku = "";
+<< sku;
+#sku == 0 { :: 0; }
+
+found? = ITEM @?{sku} FILE;            // a few small reads, whatever the size
+item = found || ITEM(sku, "", 0);
+found == _ {
+    >> "New item. Name: ";
+    name = "";
+    << name;
+    item.name = name;
+} || {
+    >> item.name; >> ": "; >> item.qty; >> " in stock.\n";
+}
+>> "Quantity to add (negative to take out): ";
+n = 0;
+<< n;
+item.qty = item.qty + n;
+@{}>> FILE, item;                       // replaces it in place, or adds it
+>> "Saved: "; >> item.name; >> " now has "; >> item.qty; >> ".\n";

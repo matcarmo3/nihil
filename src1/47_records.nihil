@@ -105,12 +105,18 @@ parse_model() {
     m_sym[m] = k;
     m_first[m] = n_fields;
     m_n[m] = 0;
+    m_key[m] = -1;
     n_models = n_models + 1;
     next_token();                        // name → "="
     next_token();                        // → "@"
     next_token();                        // → "["
     next_token();
     * tok_type != ']' {
+        is_key = tok_type == '#';
+        is_key {
+            m_key[m] >= 0 { error("a data model has only one key field (#)"); }
+            next_token();
+        }
         tok_type != T_IDENT { error_expected("a field: name: TYPE(width)"); }
         fs = tok_start; fl = tok_len; fn = tok_line; fli = tok_lstart;
         j = m_first[m];
@@ -165,6 +171,11 @@ parse_model() {
         } || tok_type == '(' {
             error("a BOOL field takes no width: it is always one character, T or F");
         }
+        is_key && ty != TYPE_INT && ty != TYPE_STR {
+            restore_pos(fs, fl, fn, fli);
+            error("the key field (#) must be INT or STRING");
+        }
+        is_key { m_key[m] = m_n[m]; }
         n_fields >= MAX_FIELD { error("too many fields in the data models"); }
         f_start[n_fields] = fs;
         f_len[n_fields] = fl;
@@ -499,6 +510,7 @@ table_read(k = 0) {
     next_token();
     tok_type == '[' { : record_at(m, opt); }
     tok_type == '#' && !opt { : record_count(m); }
+    tok_type == '{' { : record_by_key(m, opt); }
     model_path(m, "@");
     emit(0x50);                            // push rax (the path)
     opt {
@@ -594,6 +606,17 @@ cmd_write_record() {
     is_rec(t) {
         m = t >> 8;
         w = line_width(m);
+        m_key[m] >= 0 {
+            emit(0x50);                    // push rax (the record)
+            push_model(m);
+            emit(0xB8);                    // mov eax, key field ; push rax
+            emit_d(m_key[m]);
+            emit(0x50);
+            call_prelude("__nihil_key_write_at", 56);   // writes it and keeps the index right
+            eb(0x48, 0x83, 0xC4, 0x10);     // add rsp, 16 (i, path)
+            expect(';', "';'");
+            :;
+        }
         emit(0x50);                        // push rax (the record)
         eb(0x48, 0x8B, 0x44, 0x24, 0x08);   // mov rax, [rsp + 8] (path)
         eb(0x31, 0xC9, 0x31, 0xD2);         // xor ecx, ecx ; xor edx, edx (only the size)
@@ -622,6 +645,127 @@ cmd_write_record() {
         eb(0x48, 0x83, 0xC4, 0x20);         // add rsp, 32
     }
     expect(';', "';'");
+}
+
+// the key field of model m; an error if it has none
+model_key(m = 0) {
+    m_key[m] < 0 {
+        error_start();
+        put_str("'");
+        put_type(model_type(m));
+        put_str("' has no key field: mark one with #, like @[#code: INT(6); …]");
+        error_end();
+    }
+    : m_key[m];
+}
+
+// tok = "{" of NAME @{key} path / NAME @?{key} path: the record with that key,
+// found through the index "<path>.nihil-idx" (built when missing or old)
+record_by_key(m = 0, opt = false) {
+    kf = model_key(m);
+    next_token();
+    pi = tok_start; pl = tok_len; pn = tok_line; pli = tok_lstart;
+    u = expression();
+    kt = f_type[m_first[m] + kf];
+    u != kt && u != TYPE_UNKNOWN {
+        restore_pos(pi, pl, pn, pli);
+        error_start();
+        put_str("the key of ");
+        put_type(model_type(m));
+        put_str(" is '");
+        put_source(f_start[m_first[m] + kf], f_len[m_first[m] + kf]);
+        put_str("' (");
+        put_type(kt);
+        put_str("), but the expression is ");
+        put_type(u);
+        error_end();
+    }
+    expect('}', "'}'");
+    emit(0x50);                            // push rax (the key)
+    model_path(m, "@{key}");
+    emit(0x50);                            // push rax (path)
+    push_model(m);
+    emit(0xB8);                            // mov eax, key field ; push rax
+    emit_d(kf);
+    emit(0x50);
+    opt { eb(0xB8, 1, 0, 0, 0); } || { eb(0x31, 0xC0); }
+    emit(0x50);                            // push the "optional" flag
+    call_prelude("__nihil_key_get", 56);
+    opt {
+        eb(0x31, 0xD2, 0x48, 0x85, 0xC0, 0x0F, 0x95, 0xC2);   // xor edx,edx ; test rax,rax ; setne dl
+        : model_type(m) | TYPE_OPT;
+    }
+    : model_type(m);
+}
+
+// @{}>> path, r;  writes r under its key: replaces the record with the same
+// key in place, or adds r at the end of the table
+cmd_put_key() {
+    next_token();                        // "@" → "{"
+    next_token();
+    expect('}', "'}' (the key comes from the record: @{}>> path, r;)");
+    expect(T_SHR, "'>>' after '@{}'");
+    pi = tok_start; pl = tok_len; pn = tok_line; pli = tok_lstart;
+    u = expression();
+    write_file_arg(u, "@{}>>", "the path", pi, pl, pn, pli);
+    expect(',', "',' between the path and the record");
+    emit(0x50);                            // push rax (path)
+    pi = tok_start; pl = tok_len; pn = tok_line; pli = tok_lstart;
+    t = expression();
+    is_rec(t) {
+        m = t >> 8;
+        m_key[m] < 0 { restore_pos(pi, pl, pn, pli); }
+        kf = model_key(m);
+        emit(0x50);                        // push rax (the record)
+        push_model(m);
+        emit(0xB8);                        // mov eax, key field ; push rax
+        emit_d(kf);
+        emit(0x50);
+        call_prelude("__nihil_key_put", 48);
+    } || {
+        t != TYPE_UNKNOWN {
+            restore_pos(pi, pl, pn, pli);
+            error_start();
+            put_str("'@{}>>' writes a record, but the expression is ");
+            put_type(t);
+            error_end();
+        }
+        eb(0x48, 0x83, 0xC4, 0x08);         // add rsp, 8
+    }
+    expect(';', "';'");
+}
+
+// file access for the prelude: __nihil_fsize(path) → INT (-1: no file),
+// __nihil_fstamp(path) → INT, __nihil_pread(path, offset, n) → INT (STRING
+// address, 0: no file), __nihil_pwrite(path, offset, text) (pwrite + fsync)
+file_intrinsic(kind = 0) {
+    next_token();                        // name → "("
+    next_token();
+    expression();
+    kind <= 2 {
+        eb(0x31, 0xC9, 0x31, 0xD2);         // xor ecx, ecx ; xor edx, edx
+        emit_call_rt(RT_READ_AT);
+        kind == 1 { eb(0x48, 0x89, 0xD0); } || { eb(0x48, 0x89, 0xC8); }   // mov rax, rdx | rcx
+        expect(')', "')'");
+        : TYPE_INT;
+    }
+    emit(0x50);
+    expect(',', "','");
+    expression();
+    emit(0x50);
+    expect(',', "','");
+    expression();
+    kind == 3 {
+        eb(0x48, 0x89, 0xC2, 0x59, 0x58);   // mov rdx, rax ; pop rcx ; pop rax
+        emit_call_rt(RT_READ_AT);
+        expect(')', "')'");
+        : TYPE_INT;
+    }
+    eb(0x48, 0x89, 0xC1, 0x5A, 0x58);       // mov rcx, rax ; pop rdx ; pop rax
+    emit_call_rt(RT_WRITE_AT);
+    call_end = size_code;                // a command by itself, like a call
+    expect(')', "')'");
+    : TYPE_NONE;
 }
 
 // ---- casts for the prelude (no code): __nihil_addr(x) → INT,

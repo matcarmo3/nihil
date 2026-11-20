@@ -837,6 +837,8 @@ rt_write_file:
 ; → rax = a new STRING with the bytes at that offset (fewer at the end of the
 ;   file, none if the offset is negative or past the end), or 0 if the file
 ;   does not open; rdx = the file's size (-1 if it does not open).
+; rcx = the file's stamp: its st_mtime in nanoseconds mixed with its inode, so it
+;   changes when the file is written or replaced (0 if it does not open).
 ; Reads only those bytes (pread), whatever the size of the file.
 rt_read_at:
     push rbx
@@ -862,14 +864,19 @@ rt_read_at:
     test rax, rax
     js .no_file
     mov r14, rax                    ; fd
-    mov eax, 8                      ; sys_lseek(fd, 0, SEEK_END) = size
+    mov eax, 5                      ; sys_fstat(fd, buffer): the path is no longer needed
     mov rdi, r14
-    xor esi, esi
-    mov edx, 2
+    mov rsi, rsp
     syscall
     test rax, rax
     js .close_no_file
-    mov r15, rax                    ; size
+    mov r15, [rsp + 48]             ; st_size
+    imul rax, [rsp + 88], 1000000000 ; the stamp: st_mtime in nanoseconds …
+    add rax, [rsp + 96]
+    mov rdx, 0x9E3779B97F4A7C15     ; … mixed with st_ino (a rename gives a new file)
+    imul rdx, [rsp + 8]
+    add rax, rdx
+    mov [rsp + 256], rax            ; kept for the return (past the stat buffer)
     xor ecx, ecx                    ; bytes to read: 0 outside the file …
     test r12, r12
     js .count
@@ -921,6 +928,7 @@ rt_read_at:
     syscall
     mov rax, rbx
     mov rdx, r15
+    mov rcx, [rsp + 256]
     jmp .back
 .close_no_file:
     mov eax, 3
@@ -929,6 +937,7 @@ rt_read_at:
 .no_file:
     xor eax, eax
     mov rdx, -1
+    xor ecx, ecx
 .back:
     add rsp, 4096
     pop r15

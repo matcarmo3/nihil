@@ -4,3 +4,4 @@ __pycache__/
 *.nihil-tmp
 ide/workspace/*.dat
 ide/workspace/*.txt
+*.nihil-idx
