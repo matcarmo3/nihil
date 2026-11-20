@@ -1,0 +1,38 @@
+// @>> creates or replaces a file atomically; @+>> appends to it
+path = "build/write_file_test.txt";
+@>> path, "first\n";
+>> @path;
+@>> path, "second\n";                       // replaces the whole file
+>> @path;
+@+>> path, "third\n";
+@+>> path, "fourth" + "\n";                 // any STRING expression
+>> @path;
+>> #@path; >> "\n";
+@>> path, "";                               // an empty file
+>> #@path; >> "\n";
+t? = @?(path + ".nihil-tmp");               // no temporary file is left behind
+>> t == _; >> "\n";
+@>> path, $[0, 255, 10];                    // raw bytes, through $
+s = @path;
+>> #s; >> " "; >> s[0]; >> " "; >> s[1]; >> " "; >> s[2]; >> "\n";
+// a log built line by line, read back
+log = "build/write_file_log.txt";
+@>> log, "";
+i = 1;
+3 { @+>> log, "line " + text_of(i) + "\n"; i = i + 1; }
+>> @log;
+// from a method, with a computed path
+save(name = "", body = "") { @>> "build/" + name + ".txt", body; }
+save("write_file_m", "from a method");
+>> @"build/write_file_m.txt"; >> "\n";
+
+text_of(n = 0) {
+    n == 0 { : "0"; }
+    digits = [0 ; 20];
+    k = 0;
+    * n > 0 { digits[19 - k] = '0' + n % 10; n = n / 10; k = k + 1; }
+    out = [0 ; k];
+    j = 0;
+    k { out[j] = digits[20 - k + j]; j = j + 1; }
+    : $out;
+}

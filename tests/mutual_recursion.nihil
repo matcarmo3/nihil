@@ -1,0 +1,10 @@
+// 'is_even' calls 'is_odd', which is only declared later
+is_even(n = 0) {
+    n == 0 { : true; }
+    : is_odd(n - 1);
+}
+is_odd(n = 0) {
+    n == 0 { : false; }
+    : is_even(n - 1);
+}
+>> is_even(10); >> " "; >> is_odd(7); >> " "; >> is_even(3); >> "\n";

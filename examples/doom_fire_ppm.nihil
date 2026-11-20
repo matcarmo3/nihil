@@ -1,0 +1,13 @@
+// The Doom fire after 120 frames, as a binary PPM image on stdout:
+//   ./nihilc1.sh examples/doom_fire_ppm.nihil fire_ppm && ./fire_ppm > fire.ppm
+@ "fire_core.nihil";
+
+fire_source(MAX_HEAT);
+120 { fire_step(); }
+>> "P6\n"; >> FIRE_W; >> " "; >> FIRE_H; >> "\n255\n";
+i = 0;
+FIRE_W * FIRE_H {
+    heat = fire[i];
+    >>> PALETTE[heat * 3]; >>> PALETTE[heat * 3 + 1]; >>> PALETTE[heat * 3 + 2];
+    i = i + 1;
+}

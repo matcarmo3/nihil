@@ -1,0 +1,6 @@
+// line comment
+a = 1; /* bloco
+spanning several lines */ a = a + /* in the middle */ 1;
+>> a; // after the command
+/**/ >> "/"; >> "/* not a comment */"; >> "// nor this";
+/* ends at the end */

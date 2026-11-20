@@ -1,0 +1,50 @@
+// =============================================================================
+// The PSX Doom fire effect on a terminal (24-bit color, 80 × 24 characters).
+//
+//   ./nihilc1.sh examples/doom_fire.nihil fire && ./fire
+//
+// Each character is "▀": its foreground color is the upper pixel and its
+// background the lower one, so 24 lines show 48 rows of fire. The fire burns
+// for a while and then goes out, like the original.
+// Each frame waits FRAME_MS milliseconds with "..." (about 30 frames per second).
+// =============================================================================
+
+@ "fire_core.nihil";
+
+BURN_FRAMES = 500;
+FADE_FRAMES = 90;
+FRAME_MS = 33;
+
+// a color escape: 38 = foreground, 48 = background
+color(code = 38, heat = 0) {
+    >> "\x1b["; >> code; >> ";2;";
+    >> PALETTE[heat * 3]; >> ";"; >> PALETTE[heat * 3 + 1]; >> ";"; >> PALETTE[heat * 3 + 2];
+    >> "m";
+}
+
+draw() {
+    >> "\x1b[H";                        // cursor to the top left
+    row = 0;
+    * row < FIRE_H {
+        last_top = -1;
+        last_bottom = -1;
+        x = 0;
+        * x < FIRE_W {
+            top = fire[row * FIRE_W + x];
+            bottom = fire[(row + 1) * FIRE_W + x];
+            top != last_top { color(38, top); last_top = top; }
+            bottom != last_bottom { color(48, bottom); last_bottom = bottom; }
+            >> "▀";
+            x = x + 1;
+        }
+        >> "\x1b[0m\n";
+        row = row + 2;
+    }
+}
+
+>> "\x1b[2J\x1b[?25l";                  // clear the screen, hide the cursor
+fire_source(MAX_HEAT);
+BURN_FRAMES { fire_step(); draw(); ... FRAME_MS; }
+fire_source(0);
+FADE_FRAMES { fire_step(); draw(); ... FRAME_MS; }
+>> "\x1b[0m\x1b[?25h";                  // restore colors and the cursor

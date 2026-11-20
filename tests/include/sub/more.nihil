@@ -1,0 +1,2 @@
+@ "two.nihil";
+triplo(x = 0) { : x * 3 + two(); }

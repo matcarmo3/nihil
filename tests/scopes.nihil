@@ -1,0 +1,18 @@
+g = 1;
+{
+    x = 10;            // local to the block
+    g = g + x;         // changes the global
+    {
+        y = x + 1;     // sees the outer local
+        >> y; >> " ";
+    }
+}
+>> g; >> "\n";
+// sibling blocks reuse the name with another type
+{ t = 1; >> t; }
+{ t = "one"; >> t; }
+{ t = true; >> t; }
+>> "\n";
+// a local inside a loop is created again on every turn
+3 { c = 0; c = c + 1; >> c; }
+>> "\n";

@@ -1,0 +1,31 @@
+nums = [10, 20, 30];
+>> nums[0]; >> " "; >> nums[2]; >> " "; >> #nums; >> "\n";
+nums[0] = 99;
+>> nums[0] + nums[1]; >> "\n";
+// repetition
+zeros = [0 ; 5];
+>> #zeros; >> " "; >> zeros[4]; >> "\n";
+empty = [0 ; 0];
+>> #empty; >> "\n";
+// walking through
+sum = 0; i = 0;
+#nums { sum = sum + nums[i]; i = i + 1; }
+>> sum; >> "\n";
+// arrays of BOOL and STRING
+flags = [true, false, true];
+names = ["ana", "bia", "caio"];
+i = 0;
+#names { flags[i] { >> names[i]; >> " "; } i = i + 1; }
+>> "\n";
+// reference: both names point to the same block
+other = nums;
+other[1] = 1;
+>> nums[1]; >> "\n";
+// computed index and nested expressions
+idx = [2, 0, 1];
+>> nums[idx[0]]; >> " "; >> nums[idx[idx[1]]]; >> "\n";
+// name[i] followed by '{' or by an operator is an expression, not an assignment
+flags[0] { >> "yes"; }
+nums[2] == 30 { >> "!"; }
+nums[1] { >> "."; }
+>> "\n";

@@ -1,0 +1,1 @@
+'*' needs a BOOL condition (to repeat N times use 'N { … }'), but the expression is INT

@@ -1,0 +1,6 @@
+// inclusions: path relative to the including file; each file is included once
+@ "include/util.nihil";
+@ "include/util.nihil";    // repeated: ignored
+>> double(21); >> " "; >> name_util; >> "\n";
+@ "include/sub/more.nihil";
+>> triplo(5); >> "\n";

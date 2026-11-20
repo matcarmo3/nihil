@@ -1,0 +1,24 @@
+// example from the specification
+max(a = 0, b = 0) {
+    a > b {
+        : a;
+    }
+    : b;
+}
+
+b = 0;
+add_in_b(x = 0) {
+    b = b + x;
+}
+
+m = max(10, 25);    // 25
+>> m; >> "\n";
+3 add_in_b(2);      // b = 6
+m > 20 add_in_b(5); // b = 11
+m > 99 add_in_b(1000);
+>> b; >> "\n";
+add_in_b(4);
+>> b; >> "\n";
+>> max(max(1, 5), max(7, 2)); >> "\n";
+// omitted arguments get the default
+>> max(); >> " "; >> max(-3); >> " "; >> max(3); >> "\n";

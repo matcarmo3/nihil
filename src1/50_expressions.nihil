@@ -1,0 +1,689 @@
+// =============================================================================
+// Expressions — each method emits the code that leaves the value in rax and returns
+// the TYPE of the value
+// =============================================================================
+
+is_bool(t = 0) {
+    : t == TYPE_BOOL || t == TYPE_UNKNOWN;
+}
+
+is_element(t = 0) {
+    : t == TYPE_INT || t == TYPE_BOOL || t == TYPE_STR || t == TYPE_FLOAT || t == TYPE_UNKNOWN || is_rec(t);
+}
+
+expression() {
+    : expr_or();
+}
+
+// or ::= and ( "||" and )*      — BOOL, short-circuit
+expr_or() {
+    t = expr_and();
+    * tok_type == T_OR {
+        pi = tok_start; pl = tok_len; pn = tok_line; pli = tok_lstart;
+        is_opt(t) {
+            // fallback: the value of t if present, otherwise the right one
+            next_token();
+            eb(0x48, 0x85, 0xD2, 0x0F, 0x85);   // test rdx, rdx ; jnz end
+            pos = size_code;
+            emit_d(0);
+            u = expr_and();
+            b = base_opt(t);
+            r = 0;
+            u == b && load_simple(pos + 4) > 0 {
+                // no jump: mov rcx, fallback ; cmovz rax, rcx
+                move_code_back(pos + 4, pos - 2);
+                reload_in_rcx(pos - 2);
+                eb(0x48, 0x0F, 0x44, 0xC1);     // cmovz rax, rcx
+                pos = -1;
+                r = b;
+            } || u == b || u == TYPE_UNKNOWN {
+                r = b;
+            } || u == t || u == TYPE_ABSENT {
+                r = t;
+            } || {
+                restore_pos(pi, pl, pn, pli);
+                error_start();
+                put_str("the fallback value of '||' for ");
+                put_type(t);
+                put_str(" must be ");
+                put_type(b);
+                put_str(" or ");
+                put_type(t);
+                put_str(", but it is ");
+                put_type(u);
+                error_end();
+            }
+            pos >= 0 { patch_here(pos); }
+            t = r;
+        } || {
+            // logical OR, with short-circuit
+            !is_bool(t) { error_op_types(pi, pl, pn, pli, t, 0); }
+            next_token();
+            eb(0x48, 0x85, 0xC0, 0x0F, 0x85);   // test rax, rax ; jnz end
+            pos = size_code;
+            emit_d(0);
+            u = expr_and();
+            t == TYPE_UNKNOWN && !is_bool(u) {
+                u = TYPE_BOOL;                  // may be a fallback: decided in the next pass
+            }
+            !is_bool(u) { error_op_types(pi, pl, pn, pli, t, u); }
+            t = TYPE_BOOL;
+            patch_here(pos);
+        }
+    }
+    : t;
+}
+
+// and ::= comp ( "&&" comp )*  — BOOL, short-circuit
+expr_and() {
+    t = binary(0);
+    * tok_type == T_AND {
+        pi = tok_start; pl = tok_len; pn = tok_line; pli = tok_lstart;
+        !is_bool(t) { error_op_types(pi, pl, pn, pli, t, 0); }
+        next_token();
+        eb(0x48, 0x85, 0xC0, 0x0F, 0x84);   // test rax, rax ; jz end
+        pos = size_code;
+        emit_d(0);
+        u = binary(0);
+        !is_bool(u) { error_op_types(pi, pl, pn, pli, t, u); }
+        t = TYPE_BOOL;
+        patch_here(pos);
+    }
+    : t;
+}
+
+// operator of the level (0 = comparisons … 6 = * / %), or -1. The id is the token.
+find_op(nv = 0, t = 0) {
+    nv == 0 {
+        t == T_EQ || t == T_NE || t == '<' || t == '>' || t == T_LE || t == T_GE { : t; }
+        : -1;
+    }
+    nv == 1 { t == '|' { : t; } : -1; }
+    nv == 2 { t == '^' { : t; } : -1; }
+    nv == 3 { t == '&' { : t; } : -1; }
+    nv == 4 { t == T_SHL || t == T_SHR { : t; } : -1; }
+    nv == 5 { t == '+' || t == '-' { : t; } : -1; }
+    nv == 6 { t == '*' || t == '/' || t == '%' { : t; } : -1; }
+    : -1;
+}
+
+mode_op(t = 0) {
+    t == T_EQ || t == T_NE { : MODE_EQUAL; }
+    t == '<' || t == '>' || t == T_LE || t == T_GE { : MODE_ORDER; }
+    : MODE_INT;
+}
+
+// left in rax, right in rcx
+emit_op(t = 0) {
+    t == T_EQ { eb(0x48, 0x39, 0xC8, 0x0F, 0x94, 0xC0, 0x0F, 0xB6, 0xC0); }
+    || t == T_NE { eb(0x48, 0x39, 0xC8, 0x0F, 0x95, 0xC0, 0x0F, 0xB6, 0xC0); }
+    || t == '<' { eb(0x48, 0x39, 0xC8, 0x0F, 0x9C, 0xC0, 0x0F, 0xB6, 0xC0); }
+    || t == '>' { eb(0x48, 0x39, 0xC8, 0x0F, 0x9F, 0xC0, 0x0F, 0xB6, 0xC0); }
+    || t == T_LE { eb(0x48, 0x39, 0xC8, 0x0F, 0x9E, 0xC0, 0x0F, 0xB6, 0xC0); }
+    || t == T_GE { eb(0x48, 0x39, 0xC8, 0x0F, 0x9D, 0xC0, 0x0F, 0xB6, 0xC0); }
+    || t == '|' { eb(0x48, 0x09, 0xC8); }
+    || t == '^' { eb(0x48, 0x31, 0xC8); }
+    || t == '&' { eb(0x48, 0x21, 0xC8); }
+    || t == T_SHL { eb(0x48, 0xD3, 0xE0); }
+    || t == T_SHR { eb(0x48, 0xD3, 0xF8); }
+    || t == '+' { eb(0x48, 0x01, 0xC8); }
+    || t == '-' { eb(0x48, 0x29, 0xC8); }
+    || t == '*' { eb(0x48, 0x0F, 0xAF, 0xC1); }
+    || t == '/' { emit_call_rt(RT_DIV); }
+    || t == '%' { emit_call_rt(RT_MOD); }
+}
+
+// FLOAT × FLOAT (rax, rcx = bits): SSE2 in xmm0, xmm1 → type of the result
+emit_op_float(op = 0, pi = 0, pl = 0, pn = 0, pli = 0) {
+    op == '%' || op == '|' || op == '^' || op == '&' || op == T_SHL || op == T_SHR {
+        error_op_types(pi, pl, pn, pli, TYPE_FLOAT, TYPE_FLOAT);
+    }
+    eb(0x66, 0x48, 0x0F, 0x6E, 0xC0);       // movq xmm0, rax
+    eb(0x66, 0x48, 0x0F, 0x6E, 0xC9);       // movq xmm1, rcx
+    op == '+' || op == '-' || op == '*' || op == '/' {
+        op == '+' { eb(0xF2, 0x0F, 0x58, 0xC1); }       // addsd
+        || op == '-' { eb(0xF2, 0x0F, 0x5C, 0xC1); }    // subsd
+        || op == '*' { eb(0xF2, 0x0F, 0x59, 0xC1); }    // mulsd
+        || { eb(0xF2, 0x0F, 0x5E, 0xC1); }              // divsd
+        eb(0x66, 0x48, 0x0F, 0x7E, 0xC0);   // movq rax, xmm0
+        : TYPE_FLOAT;
+    }
+    // comparisons (NaN: only != is true)
+    op == '>' {
+        eb(0x66, 0x0F, 0x2E, 0xC1, 0x0F, 0x97, 0xC0);   // ucomisd xmm0, xmm1 ; seta al
+    } || op == T_GE {
+        eb(0x66, 0x0F, 0x2E, 0xC1, 0x0F, 0x93, 0xC0);   // ucomisd xmm0, xmm1 ; setae al
+    } || op == '<' {
+        eb(0x66, 0x0F, 0x2E, 0xC8, 0x0F, 0x97, 0xC0);   // ucomisd xmm1, xmm0 ; seta al
+    } || op == T_LE {
+        eb(0x66, 0x0F, 0x2E, 0xC8, 0x0F, 0x93, 0xC0);   // ucomisd xmm1, xmm0 ; setae al
+    } || op == T_EQ {
+        eb(0x66, 0x0F, 0x2E, 0xC1, 0x0F, 0x94, 0xC0);   // ucomisd ; sete al
+        eb(0x0F, 0x9B, 0xC1, 0x20, 0xC8);               // setnp cl ; and al, cl
+    } || {
+        eb(0x66, 0x0F, 0x2E, 0xC1, 0x0F, 0x95, 0xC0);   // ucomisd ; setne al
+        eb(0x0F, 0x9A, 0xC1, 0x08, 0xC8);               // setp cl ; or al, cl
+    }
+    eb(0x0F, 0xB6, 0xC0);                   // movzx eax, al
+    : TYPE_BOOL;
+}
+
+// binary: level 0 … 6; from 7 on it becomes unary
+binary(nv = 0) {
+    nv >= 7 { : unary(); }
+    t = binary(nv + 1);
+    op = find_op(nv, tok_type);
+    * op >= 0 {
+        pi = tok_start; pl = tok_len; pn = tok_line; pli = tok_lstart;
+        nv == 0 && (op == T_EQ || op == T_NE) && peek_type() == T_UNDERSCORE {
+            // x == _  /  x != _  — tests for presence
+            !is_opt(t) && t != TYPE_UNKNOWN {
+                restore_pos(pi, pl, pn, pli);
+                error_start();
+                put_str("only optionals can be compared with '_', but the expression is ");
+                put_type(t);
+                error_end();
+            }
+            next_token();
+            next_token();
+            eb(0x48, 0x85, 0xD2);               // test rdx, rdx
+            op == T_EQ {
+                eb(0x0F, 0x94, 0xC0, 0x0F, 0xB6, 0xC0);   // sete al ; movzx eax, al
+            } || {
+                eb(0x0F, 0x95, 0xC0, 0x0F, 0xB6, 0xC0);   // setne al ; movzx eax, al
+            }
+            t = TYPE_BOOL;
+            op = find_op(nv, tok_type);
+            op >= 0 { error("comparisons cannot be chained (use '&&')"); }
+            : t;
+        }
+        next_token();
+        pos_push = size_code;
+        emit(0x50);                        // push rax
+        u = binary(nv + 1);
+        load_simple(pos_push + 1) > 0 {
+            // the right side is a simple load: load it straight into rcx
+            move_code_back(pos_push + 1, pos_push);
+            reload_in_rcx(pos_push);
+        } || {
+            eb(0x48, 0x89, 0xC1, 0x58);     // mov rcx, rax ; pop rax
+        }
+        mode = mode_op(op);
+        r = 0;
+        t == TYPE_NONE || u == TYPE_NONE { error_op_types(pi, pl, pn, pli, t, u); }
+        t == TYPE_UNKNOWN || u == TYPE_UNKNOWN {
+            // one side has no type yet: a comparison gives BOOL; the rest stays
+            // provisional (it may be INT, FLOAT or STRING)
+            r = TYPE_UNKNOWN;
+            mode == MODE_EQUAL || mode == MODE_ORDER { r = TYPE_BOOL; }
+            emit_op(op);
+        } || t == TYPE_FLOAT && u == TYPE_FLOAT {
+            r = emit_op_float(op, pi, pl, pn, pli);
+        } || t == TYPE_STR && u == TYPE_STR && op == '+' {
+            emit_call_rt(RT_CONCAT);       // STRING + STRING
+            r = TYPE_STR;
+        } || mode == MODE_EQUAL {
+            t != u || t & (TYPE_ARR | TYPE_REC) != 0 || is_opt(t) || t == TYPE_ABSENT { error_op_types(pi, pl, pn, pli, t, u); }
+            r = TYPE_BOOL;
+            t == TYPE_STR {
+                emit_call_rt(RT_STR_EQUAL);        // STRING: compares the contents
+                op == T_NE { eb(0x83, 0xF0, 0x01); }
+            } || {
+                emit_op(op);
+            }
+        } || {
+            t != TYPE_INT || u != TYPE_INT { error_op_types(pi, pl, pn, pli, t, u); }
+            r = TYPE_INT;
+            mode == MODE_ORDER { r = TYPE_BOOL; }
+            emit_op(op);
+        }
+        t = r;
+        op = find_op(nv, tok_type);
+        nv == 0 && op >= 0 { error("comparisons cannot be chained (use '&&')"); }
+    }
+    : t;
+}
+
+// unario ::= ( "-" | "!" | "~" | "#" | "@" | "@?" | "$" | "." ) unario | posfixo
+unary() {
+    t = tok_type;
+    t == '-' || t == '!' || t == '~' || t == '#' || t == '@' || t == '$' || t == T_AT_OPT || t == '.' {
+        pi = tok_start; pl = tok_len; pn = tok_line; pli = tok_lstart;
+        next_token();
+        u = unary();
+        ok = u == TYPE_UNKNOWN;
+        t == '#' && u & TYPE_ARR != 0 && !is_opt(u) { ok = true; }
+        t == T_AT_OPT {
+            !ok && u != TYPE_STR { error_op_types(pi, pl, pn, pli, u, 0); }
+            emit_call_rt(RT_READ_FILE_OPT);   // @? path → STRING? (_ if it does not open)
+            eb(0x31, 0xD2, 0x48, 0x85, 0xC0, 0x0F, 0x95, 0xC2);   // xor edx,edx ; test rax,rax ; setne dl
+            : TYPE_STR | TYPE_OPT;
+        }
+        t == '-' && u == TYPE_FLOAT {
+            eb(0x48, 0x0F, 0xBA, 0xF8, 0x3F);   // btc rax, 63 (flips the sign)
+            : TYPE_FLOAT;
+        }
+        t == '.' {
+            !ok && u != TYPE_INT { error_op_types(pi, pl, pn, pli, u, 0); }
+            eb(0xF2, 0x48, 0x0F, 0x2A, 0xC0);   // cvtsi2sd xmm0, rax
+            eb(0x66, 0x48, 0x0F, 0x7E, 0xC0);   // movq rax, xmm0
+            : TYPE_FLOAT;
+        }
+        t == '#' && u == TYPE_FLOAT {
+            eb(0x66, 0x48, 0x0F, 0x6E, 0xC0);   // movq xmm0, rax
+            eb(0xF2, 0x48, 0x0F, 0x2C, 0xC0);   // cvttsd2si rax, xmm0 (trunca)
+            : TYPE_INT;
+        }
+        t == '-' {
+            !ok && u != TYPE_INT { error_op_types(pi, pl, pn, pli, u, 0); }
+            eb(0x48, 0xF7, 0xD8);           // neg rax
+            : TYPE_INT;
+        }
+        t == '!' {
+            !ok && u != TYPE_BOOL { error_op_types(pi, pl, pn, pli, u, 0); }
+            eb(0x83, 0xF0, 0x01);           // xor eax, 1
+            : TYPE_BOOL;
+        }
+        t == '~' {
+            !ok && u != TYPE_INT { error_op_types(pi, pl, pn, pli, u, 0); }
+            eb(0x48, 0xF7, 0xD0);           // not rax
+            : TYPE_INT;
+        }
+        t == '@' {
+            !ok && u != TYPE_STR { error_op_types(pi, pl, pn, pli, u, 0); }
+            emit_call_rt(RT_READ_FILE);   // @ path → contents of the file
+            : TYPE_STR;
+        }
+        t == '$' && (is_rec(u) || is_rec_array(u)) {
+            emit_rec_text(u);             // $ record → its line; $ rows → the table
+            : TYPE_STR;
+        }
+        t == '$' {
+            !ok && u != (TYPE_ARR | TYPE_INT) { error_op_types(pi, pl, pn, pli, u, 0); }
+            emit_call_rt(RT_TEXT);        // $ bytes → STRING
+            : TYPE_STR;
+        }
+        !ok && u != TYPE_STR { error_op_types(pi, pl, pn, pli, u, 0); }
+        eb(0x48, 0x8B, 0x40, 0xF8);         // mov rax, [rax-8]
+        : TYPE_INT;
+    }
+    : postfix();
+}
+
+// postfix ::= primary ( "[" expression "]" | "." field )*
+postfix() {
+    : postfix_rest(primary(), false);
+}
+
+// stop: halts before a final ". field =" (the target of a field assignment)
+postfix_rest(t = 0, stop = false) {
+    going = true;
+    * going {
+        tok_type == '.' {
+            stop && field_then_equals() { : t; }
+            t = field_access(t);
+        } || tok_type != '[' {
+            going = false;
+        } || {
+            t = index_step(t);
+        }
+    }
+    : t;
+}
+
+// tok = "[" after a value of type t (in rax) → the element; returns its type
+index_step(t = 0) {
+    target_ok = t == TYPE_STR || t == TYPE_UNKNOWN || t & TYPE_ARR != 0 && !is_opt(t);
+    !target_ok {
+        error_start();
+        put_str("only ARRAY and STRING can be indexed, but the expression is ");
+        put_type(t);
+        error_end();
+    }
+    emit(0x50);                        // push rax
+    next_token();
+    u = expression();
+    u != TYPE_INT && u != TYPE_UNKNOWN {
+        error_start();
+        put_str("the index must be INT, but it is ");
+        put_type(u);
+        error_end();
+    }
+    expect(']', "']'");
+    eb(0x48, 0x89, 0xC1, 0x58);         // mov rcx, rax ; pop rax
+    emit_check_limit();
+    t == TYPE_STR {
+        eb(0x0F, 0xB6, 0x04, 0x08);     // movzx eax, byte [rax + rcx]
+        t = TYPE_INT;
+    } || {
+        eb(0x48, 0x8B, 0x04, 0xC8);     // mov rax, [rax + rcx*8]
+        t = t & ~TYPE_ARR;
+    }
+    : t;
+}
+
+primary() {
+    t = tok_type;
+    t == T_INT {
+        emit_immediate(tok_value);
+        next_token();
+        : TYPE_INT;
+    }
+    t == T_FLOAT {
+        emit_immediate(tok_value);          // the bits of the double
+        next_token();
+        : TYPE_FLOAT;
+    }
+    t == T_TRUE {
+        eb(0xB8, 1, 0, 0, 0);               // mov eax, 1
+        next_token();
+        : TYPE_BOOL;
+    }
+    t == T_FALSE {
+        eb(0x31, 0xC0);                     // xor eax, eax
+        next_token();
+        : TYPE_BOOL;
+    }
+    t == T_STR {
+        eb(0x48, 0x8D, 0x05);               // lea rax, [rip + rel32]
+        register_fixup(size_code, tok_value, false);
+        emit_d(0);
+        next_token();
+        : TYPE_STR;
+    }
+    t == T_IDENT { : primary_name(); }
+    t == '(' {
+        next_token();
+        u = expression();
+        expect(')', "')'");
+        : u;
+    }
+    t == T_UNDERSCORE {
+        eb(0x31, 0xC0, 0x31, 0xD2);         // xor eax, eax ; xor edx, edx
+        next_token();
+        : TYPE_ABSENT;
+    }
+    t == '[' { : primary_array(); }
+    error_expected("an expression");
+    : 0;
+}
+
+primary_name() {
+    pi = tok_start; pl = tok_len; pn = tok_line; pli = tok_lstart;
+    k = lookup(tok_start, tok_len);
+    e = peek_type();
+    e == '(' {
+        k < 0 && name_is(pi, pl, "__nihil_addr") { : intrinsic(TYPE_INT); }
+        k < 0 && name_is(pi, pl, "__nihil_str_at") { : intrinsic(TYPE_STR); }
+        k < 0 && name_is(pi, pl, "__nihil_arr_at") { : intrinsic(TYPE_ARR | TYPE_INT); }
+        is_model(k) { : new_record(k); }
+        : call_method(k);
+    }
+    is_model(k) {
+        e == '@' || e == T_AT_OPT { : table_read(k); }
+        error_start();
+        put_str("'");
+        put_source(pi, pl);
+        put_str("' is a data model: create a record with ");
+        put_source(pi, pl);
+        put_str("(…) or read a table with ");
+        put_source(pi, pl);
+        put_str(" @ \"file\"");
+        error_end();
+    }
+    k < 0 {
+        restore_pos(pi, pl, pn, pli);
+        error_start();
+        put_str("variable '");
+        put_source(pi, pl);
+        put_str("' does not exist");
+        error_end();
+    }
+    s_flags[k] & FLAG_METHOD != 0 {
+        restore_pos(pi, pl, pn, pli);
+        error_start();
+        put_str("'");
+        put_source(pi, pl);
+        put_str("' is a method; call it as '");
+        put_source(pi, pl);
+        put_str("(…)'");
+        error_end();
+    }
+    next_token();
+    s_flags[k] & FLAG_GLOBAL != 0 {
+        method_current >= 0 {
+            s_type[k] == 0 {
+                emit_load_var(k);
+                : global_unknown(k);
+            }
+        } || s_flags[k] & FLAG_CREATED == 0 {
+            // top level: only after the creation in the text
+            restore_pos(pi, pl, pn, pli);
+            error_start();
+            put_str("variable '");
+            put_source(pi, pl);
+            put_str("' does not exist here yet (it is created on line ");
+            put_line(s_extra[k]);
+            put_str(")");
+            error_end();
+        }
+    }
+    emit_load_var(k);
+    s_type[k] == 0 { : TYPE_UNKNOWN; }        // created with a provisional value
+    : s_type[k];
+}
+
+// a global used in a method before its type is known
+global_unknown(k = 0) {
+    final_pass {
+        error_start();
+        put_str("could not find out the type of the global '");
+        put_name_method(k);
+        put_str("'");
+        error_end();
+    }
+    unknowns = unknowns + 1;
+    : TYPE_UNKNOWN;
+}
+
+primary_array() {
+    next_token();
+    tok_type == ']' { error("'[]' has no type; for an empty array use [0 ; 0]"); }
+    pi = tok_start; pl = tok_len; pn = tok_line; pli = tok_lstart;
+    t = expression();
+    !is_element(t) {
+        restore_pos(pi, pl, pn, pli);
+        error_start();
+        put_str("array elements must be INT, BOOL, STRING, FLOAT or records (arrays of arrays are not supported yet), but this one is ");
+        put_type(t);
+        error_end();
+    }
+    tok_type == ';' {
+        // [value ; n]
+        emit(0x50);
+        next_token();
+        pi = tok_start; pl = tok_len; pn = tok_line; pli = tok_lstart;
+        u = expression();
+        u != TYPE_INT && u != TYPE_UNKNOWN {
+            restore_pos(pi, pl, pn, pli);
+            error_start();
+            put_str("the size in [value ; size] must be INT, but it is ");
+            put_type(u);
+            error_end();
+        }
+        is_rec(t) {
+            // [record ; n]: n independent copies of the record
+            emit(0x50);
+            push_const(m_schema[t >> 8]);
+            call_prelude("__nihil_rec_rep", 24);
+        } || {
+            eb(0x48, 0x89, 0xC1, 0x5A);     // mov rcx, rax ; pop rdx
+            emit_call_rt(RT_ARRAY_REP);
+        }
+        expect(']', "']' (in [value ; size])");
+    } || {
+        // [a, b, c]: pushes the values, allocates, pops from the last to the first
+        emit(0x50);
+        n = 1;
+        * tok_type == ',' {
+            next_token();
+            pi = tok_start; pl = tok_len; pn = tok_line; pli = tok_lstart;
+            u = expression();
+            u != t && u != TYPE_UNKNOWN && t != TYPE_UNKNOWN {
+                restore_pos(pi, pl, pn, pli);
+                error_start();
+                put_str("all array elements must be ");
+                put_type(t);
+                put_str(", but this one is ");
+                put_type(u);
+                error_end();
+            }
+            emit(0x50);
+            n = n + 1;
+        }
+        expect(']', "']'");
+        emit(0xB9);                        // mov ecx, n
+        emit_d(n);
+        emit_call_rt(RT_ALLOC);
+        r = n;
+        * r > 0 {
+            r = r - 1;
+            eb(0x59, 0x48, 0x89, 0x88);     // pop rcx ; mov [rax + disp32], rcx
+            emit_d(r * 8);
+        }
+    }
+    t == TYPE_UNKNOWN { : t; }
+    : t | TYPE_ARR;
+}
+
+// -----------------------------------------------------------------------------
+// call_method: k = symbol of the name (or -1); tok = name, followed by "(".
+// Pushes the arguments from left to right (the omitted ones get their
+// default), calls and removes the arguments. Returns the return type.
+call_method(k = 0) {
+    pi = tok_start; pl = tok_len; pn = tok_line; pli = tok_lstart;
+    k < 0 {
+        restore_pos(pi, pl, pn, pli);
+        error_start();
+        put_str("method '");
+        put_source(pi, pl);
+        put_str("' does not exist");
+        level == 0 {
+            put_str(" (to declare one, every parameter needs a default value: ");
+            put_source(pi, pl);
+            put_str("(x = 0) { … })");
+        }
+        error_end();
+    }
+    s_flags[k] & FLAG_METHOD == 0 {
+        restore_pos(pi, pl, pn, pli);
+        error_start();
+        put_str("'");
+        put_source(pi, pl);
+        put_str("' is not a method");
+        error_end();
+    }
+    next_token();
+    next_token();
+    np = s_nparam[k];
+    base = s_extra[k];
+    i = 0;
+    * tok_type != ')' {
+        i >= np {
+            error_start();
+            put_str("'");
+            put_name_method(k);
+            put_str("' takes ");
+            put_num(np);
+            put_str(" parameter(s), but the call passes more");
+            error_end();
+        }
+        ai = tok_start; al = tok_len; an = tok_line; ali = tok_lstart;
+        u = expression();
+        pt = p_type[base + i];
+        !convert(u, pt) {
+            restore_pos(ai, al, an, ali);
+            error_start();
+            put_str("argument ");
+            put_num(i + 1);
+            put_str(" of '");
+            put_name_method(k);
+            put_str("' must be ");
+            put_type(pt);
+            put_str(", but it is ");
+            put_type(u);
+            error_end();
+        }
+        is_opt(pt) { emit(0x52); }         // push rdx (presence)
+        emit(0x50);                        // push rax
+        i = i + 1;
+        tok_type == ',' {
+            next_token();
+            tok_type == ')' { error_expected("an expression"); }
+        } || tok_type != ')' {
+            error_expected("',' or ')'");
+        }
+    }
+    // defaults of the omitted ones
+    * i < np {
+        e = base + i;
+        p_type[e] & TYPE_ARR != 0 {
+            // ARRAY: a new one-element array on every call
+            eb(0xB9, 1, 0, 0, 0);           // mov ecx, 1
+            emit_call_rt(RT_ALLOC);
+            emit(0x50);
+            emit_default(e);
+            eb(0x48, 0x8B, 0x0C, 0x24, 0x48, 0x89, 0x01, 0x58);   // mov rcx,[rsp] ; mov [rcx],rax ; pop rax
+        } || {
+            emit_default(e);
+        }
+        is_opt(p_type[e]) {
+            eb(0xBA, 1, 0, 0, 0);           // mov edx, 1 (the default is present)
+            emit(0x52);                    // push rdx
+        }
+        emit(0x50);
+        i = i + 1;
+    }
+    next_token();                        // consome ")"
+    emit(0xE8);                            // call method (patched at the end of the pass)
+    register_fixup(size_code, k, true);
+    emit_d(0);
+    np > 0 {
+        total = 0;
+        j = 0;
+        np { total = total + size_param(base + j); j = j + 1; }
+        eb(0x48, 0x81, 0xC4);               // add rsp, size of the arguments
+        emit_d(total);
+    }
+    call_end = size_code;
+    r = s_type[k];
+    r == 0 {
+        // return type not known yet (body not seen, or dependent)
+        final_pass {
+            restore_pos(pi, pl, pn, pli);
+            error_start();
+            put_str("could not find out what '");
+            put_name_method(k);
+            put_str("' returns: every ':' in it depends on calls that have no type yet");
+            error_end();
+        }
+        unknowns = unknowns + 1;
+        : TYPE_UNKNOWN;
+    }
+    : r;
+}
+
+emit_default(e = 0) {
+    b = p_type[e] & ~(TYPE_ARR | TYPE_OPT);
+    b & TYPE_REC != 0 {
+        emit_alloc_record(b >> 8);        // NAME(): a new empty record on every call
+        :;
+    }
+    b == TYPE_STR {
+        eb(0x48, 0x8D, 0x05);               // lea rax, [rip + string]
+        register_fixup(size_code, p_default[e], false);
+        emit_d(0);
+    } || {
+        emit_immediate(p_default[e]);
+    }
+}

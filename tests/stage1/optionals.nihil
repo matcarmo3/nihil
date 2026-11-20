@@ -1,0 +1,31 @@
+// example from the specification (§2.2)
+a = 10;
+b? = 10;
+>> b; >> " ";
+b = _;
+>> b; >> " ";
+val = b || 5;
+>> val; >> "\n";
+b == _ {
+    >> "Empty";
+} || {
+    >> b;
+}
+>> "\n";
+b = 7;
+b != _ { >> "has "; >> b || 0; } >> "\n";
+// STRING? and BOOL?
+s? = "text";
+>> s; >> " "; s = _; >> s; >> " "; >> s || "default"; >> "\n";
+f? = false;
+>> f; >> " "; >> f || true; >> "\n";
+f = _;
+>> f || true; >> "\n";
+// chaining: (x || y) is INT?, (… || 0) is INT
+x? = 1; y? = 2; x = _;
+>> x || y || 0; >> "\n";
+y = _;
+>> x || y || 99; >> "\n";
+z? = 5;
+z = x || y;
+>> z; >> "\n";

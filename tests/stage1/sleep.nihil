@@ -1,0 +1,11 @@
+// "..." waits a number of milliseconds; output written before it is flushed first
+>> "a";
+... 1;
+>> "b";
+... 0;              // zero or negative: no wait
+... -5;
+n = 2;
+... n * 10;
+wait(ms = 0) { ... ms; }
+wait(3);
+>> "c";

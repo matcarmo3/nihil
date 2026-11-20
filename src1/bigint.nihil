@@ -1,0 +1,183 @@
+// =============================================================================
+// Unsigned big integers, to convert FLOAT ⇄ text exactly.
+//
+// A big integer is an ARRAY of INT: [0] = how many "limbs" are in use,
+// [1 ..] = 30-bit limbs, from the least to the most significant (with 30
+// bits, products and carries fit in an INT without overflowing).
+//
+// Written with INT only (no FLOAT, no optionals): it is included in nihilc1 itself
+// and also in the programs' prelude. Names with __nihil_ are reserved.
+// =============================================================================
+
+__NIHIL_BI_BASE = 1 << 30;
+__NIHIL_BI_MASK = (1 << 30) - 1;
+__NIHIL_BI_CAP = 220;                         // membros (6600 bits)
+
+__nihil_bi_new() {
+    : [0 ; __NIHIL_BI_CAP + 2];
+}
+
+// a = v (0 ≤ v < 2^60)
+__nihil_bi_define(a = [0], v = 0) {
+    a[0] = 0;
+    * v > 0 {
+        a[0] = a[0] + 1;
+        a[a[0]] = v & __NIHIL_BI_MASK;
+        v = v >> 30;
+    }
+}
+
+__nihil_bi_copy(d = [0], a = [0]) {
+    __i = 0;
+    a[0] + 1 { d[__i] = a[__i]; __i = __i + 1; }
+}
+
+__nihil_bi_trim(a = [0]) {
+    * a[0] > 0 && a[a[0]] == 0 { a[0] = a[0] - 1; }
+}
+
+__nihil_bi_overflow() {
+    !>> "nihil: number too large to convert\n";
+    :: 2;
+}
+
+// a = a * m + c   (m, c < 2^30)
+__nihil_bi_mul_sum(a = [0], m = 0, c = 0) {
+    __carry = c;
+    __i = 1;
+    a[0] {
+        __x = a[__i] * m + __carry;
+        a[__i] = __x & __NIHIL_BI_MASK;
+        __carry = __x >> 30;
+        __i = __i + 1;
+    }
+    __carry > 0 {
+        a[0] >= __NIHIL_BI_CAP { __nihil_bi_overflow(); }
+        a[0] = a[0] + 1;
+        a[a[0]] = __carry;
+    }
+    __nihil_bi_trim(a);
+}
+
+// a = a * 10^k
+__nihil_bi_pot10(a = [0], k = 0) {
+    * k >= 9 { __nihil_bi_mul_sum(a, 1000000000, 0); k = k - 9; }
+    __m = 1;
+    k { __m = __m * 10; }
+    __m > 1 { __nihil_bi_mul_sum(a, __m, 0); }
+}
+
+// a = a << n
+__nihil_bi_shl(a = [0], n = 0) {
+    a[0] == 0 { :; }
+    __q = n / 30;
+    __r = n % 30;
+    a[0] + __q + 1 > __NIHIL_BI_CAP { __nihil_bi_overflow(); }
+    // moves the limbs q positions up
+    __q > 0 {
+        __i = a[0];
+        * __i >= 1 { a[__i + __q] = a[__i]; __i = __i - 1; }
+        __i = 1;
+        __q { a[__i] = 0; __i = __i + 1; }
+        a[0] = a[0] + __q;
+    }
+    __r > 0 {
+        __carry = 0;
+        __i = 1;
+        a[0] {
+            __x = (a[__i] << __r) | __carry;
+            a[__i] = __x & __NIHIL_BI_MASK;
+            __carry = __x >> 30;
+            __i = __i + 1;
+        }
+        __carry > 0 {
+            a[0] = a[0] + 1;
+            a[a[0]] = __carry;
+        }
+    }
+}
+
+// a = a >> 1
+__nihil_bi_shr1(a = [0]) {
+    __i = a[0];
+    __low = 0;
+    * __i >= 1 {
+        __x = a[__i];
+        a[__i] = (__x >> 1) | (__low << 29);
+        __low = __x & 1;
+        __i = __i - 1;
+    }
+    __nihil_bi_trim(a);
+}
+
+// -1, 0 or 1
+__nihil_bi_cmp(a = [0], b = [0]) {
+    a[0] != b[0] {
+        a[0] < b[0] { : -1; }
+        : 1;
+    }
+    __i = a[0];
+    * __i >= 1 {
+        a[__i] != b[__i] {
+            a[__i] < b[__i] { : -1; }
+            : 1;
+        }
+        __i = __i - 1;
+    }
+    : 0;
+}
+
+// a = a - b   (a ≥ b)
+__nihil_bi_sub(a = [0], b = [0]) {
+    __borrow = 0;
+    __i = 1;
+    a[0] {
+        __y = 0;
+        __i <= b[0] { __y = b[__i]; }
+        __x = a[__i] - __y - __borrow;
+        __borrow = 0;
+        __x < 0 { __x = __x + __NIHIL_BI_BASE; __borrow = 1; }
+        a[__i] = __x;
+        __i = __i + 1;
+    }
+    __nihil_bi_trim(a);
+}
+
+// d = a + b
+__nihil_bi_sum(d = [0], a = [0], b = [0]) {
+    __n = a[0];
+    b[0] > __n { __n = b[0]; }
+    __n + 1 > __NIHIL_BI_CAP { __nihil_bi_overflow(); }
+    __carry = 0;
+    __i = 1;
+    __n {
+        __x = __carry;
+        __i <= a[0] { __x = __x + a[__i]; }
+        __i <= b[0] { __x = __x + b[__i]; }
+        d[__i] = __x & __NIHIL_BI_MASK;
+        __carry = __x >> 30;
+        __i = __i + 1;
+    }
+    d[0] = __n;
+    __carry > 0 {
+        d[0] = __n + 1;
+        d[__n + 1] = __carry;
+    }
+}
+
+// number of bits
+__nihil_bi_bits(a = [0]) {
+    a[0] == 0 { : 0; }
+    __t = a[a[0]];
+    __n = 0;
+    * __t > 0 { __n = __n + 1; __t = __t >> 1; }
+    : (a[0] - 1) * 30 + __n;
+}
+
+// value of a big integer that fits in 60 bits
+__nihil_bi_value(a = [0]) {
+    __v = 0;
+    __i = a[0];
+    * __i >= 1 { __v = (__v << 30) | a[__i]; __i = __i - 1; }
+    : __v;
+}

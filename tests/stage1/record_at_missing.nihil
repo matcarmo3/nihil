@@ -1,0 +1,3 @@
+I = @[a: INT(2)];
+@>> "build/ra.dat", [I(1)];
+>> (I @[3] "build/ra.dat").a;

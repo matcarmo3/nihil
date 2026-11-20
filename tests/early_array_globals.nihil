@@ -1,0 +1,6 @@
+// a method reads an ARRAY/STRING global before its assignment: it starts empty
+show() { >> #list; >> #name; }
+show();
+list = [1, 2, 3];
+name = "abcd";
+>> " "; show();

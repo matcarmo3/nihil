@@ -1,0 +1,29 @@
+// A small product register kept in a table file.
+// The data model says the fields, their types and their widths in the file.
+PRODUCT = @[code: INT(6); name: STRING(24); price: FLOAT(10); active: BOOL];
+FILE = "ide/workspace/products.dat";
+
+rows = PRODUCT @? FILE;                 // @?: no file yet is an empty table
+
+>> "Products ("; >> #rows; >> "):\n";
+i = 0;
+#rows {
+    r = rows[i];
+    >> "  #"; >> r.code; >> "  "; >> r.name; >> "  $"; >> r.price;
+    !r.active { >> "  (inactive)"; }
+    >> "\n";
+    i = i + 1;
+}
+
+>> "\nNew product name (Enter to quit): ";
+name = "";
+<< name;
+#name > 0 {
+    >> "Price: ";
+    price = 0.0;
+    << price;
+    p = PRODUCT(#rows + 1, name, price, true);
+    @+>> FILE, p;                       // appends one fixed-width line
+    >> "Saved as #"; >> p.code; >> ". The line in the file:\n";
+    >> $p;
+}

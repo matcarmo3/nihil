@@ -1,0 +1,5 @@
+// ':' at the top level leaves the program; in a method it only returns
+f() { >> "f"; :; >> "never"; }
+f();
+>> "-top";
+: 3;

@@ -1,0 +1,1 @@
+nihil: 'tests/data/text.txt', line 1: the line has 8 bytes, but a P record has 4

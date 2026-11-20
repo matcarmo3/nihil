@@ -1,0 +1,2 @@
+3 { g = g + 1; }
+@ "included/creates_g.nihil";

@@ -1,0 +1,9 @@
+// the counter survives syscalls (which destroy rcx/r11) and lots of output
+sum = 0;
+i = 0;
+70000 {
+    >> "x";
+    sum = sum + i;
+    i = i + 1;
+}
+>> "\n"; >> sum; >> "\n";

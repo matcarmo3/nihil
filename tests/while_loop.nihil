@@ -1,0 +1,21 @@
+b = 0;
+* b < 10 { b = b + 1; }
+>> b; >> "\n";
+* false { >> "never"; }
+// primes up to 50
+n = 2;
+* n <= 50 {
+    prime = true;
+    d = 2;
+    * d * d <= n && prime {
+        n % d == 0 { prime = false; }
+        d = d + 1;
+    }
+    prime { >> n; >> " "; }
+    n = n + 1;
+}
+>> "\n";
+// a big sum: 1 + … + 10 000 000
+s = 0; i = 1;
+* i <= 10000000 { s = s + i; i = i + 1; }
+>> s; >> "\n";

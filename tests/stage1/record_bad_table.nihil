@@ -1,0 +1,2 @@
+P = @[a: INT(3); b: BOOL];
+rows = P @ "tests/data/text.txt";

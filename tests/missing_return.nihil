@@ -1,0 +1,4 @@
+// a method with a value that reaches the end without ':' → runtime error
+f(x = 0) { x > 0 { : 1; } }
+>> f(5);
+>> f(0);

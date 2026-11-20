@@ -1,0 +1,22 @@
+// A notebook that survives between runs: every note is appended to a file.
+//   Run it, type a note (or just Enter to quit), run it again: they are still there.
+FILE = "ide/workspace/notes.txt";
+
+old? = @?FILE;                      // _ the first time: the file does not exist yet
+old == _ {
+    >> "No notes yet.\n";
+} || {
+    >> "Your notes:\n";
+    >> old || "";
+}
+
+>> "\nNew note (Enter to quit): ";
+note = "";
+<< note;
+#note > 0 {
+    @+>> FILE, "- " + note + "\n";  // appended and synced to disk
+    >> "Saved.\n";
+}
+
+// "@>>" replaces the whole file in one go, for example to clear it:
+//   @>> FILE, "";

@@ -1,0 +1,64 @@
+// data models: NAME = @[field: TYPE(width); …]; records, fields and table files
+PRODUCT = @[code: INT(6); name: STRING(12); price: FLOAT(8); active: BOOL];
+
+p = PRODUCT(7, "Coffee", 12.5, true);
+>> p.code; >> " "; >> p.name; >> " "; >> p.price; >> " "; >> p.active; >> "\n";
+p.price = 13.75;                            // fields can change
+p.name = p.name + " beans";
+>> p.name; >> " "; >> p.price; >> "\n";
+>> $p;                                      // the record's line in the file
+
+e = PRODUCT();                              // omitted fields: 0, "", 0.0, false
+>> e.code; >> "|"; >> e.name; >> "|"; >> e.price; >> "|"; >> e.active; >> "\n";
+partial = PRODUCT(3, "Tea");
+>> partial.name; >> " "; >> partial.price; >> "\n";
+
+q = p;                                      // a reference, like an ARRAY
+q.code = 8;
+>> p.code; >> "\n";
+
+// arrays of records
+list = [p, PRODUCT(9, "Milk", 4.25, false)];
+>> #list; >> " "; >> list[1].name; >> "\n";
+list[1].price = 4.5;
+>> list[1].price; >> "\n";
+copies = [PRODUCT(1, "x") ; 3];             // three independent records
+copies[0].code = 100;
+>> copies[0].code; >> " "; >> copies[1].code; >> " "; >> #copies; >> "\n";
+
+// methods take and return records
+total(rows = [PRODUCT()]) {
+    sum = 0.0;
+    i = 0;
+    #rows { sum = sum + rows[i].price; i = i + 1; }
+    : sum;
+}
+discount(r = PRODUCT(), pct = 0.0) {
+    : PRODUCT(r.code, r.name, r.price * (1.0 - pct), r.active);
+}
+>> total(list); >> "\n";
+>> discount(p, 0.5).price; >> "\n";
+>> discount().name == ""; >> "\n";             // the default is an empty record
+
+// a global record read inside a method before it is assigned starts empty
+show_last() { >> "last: "; >> last.code; >> "\n"; }
+show_last();
+last = PRODUCT(42);
+show_last();
+
+// tables in files
+path = "build/records_test.dat";
+@>> path, list;                             // replaces the file with the table
+@+>> path, PRODUCT(-12, "  Spaced", -0.5, true);   // appends one record
+>> @path;
+rows = PRODUCT @ path;
+>> #rows; >> "\n";
+i = 0;
+#rows {
+    r = rows[i];
+    >> r.code; >> "|"; >> r.name; >> "|"; >> r.price; >> "|"; >> r.active; >> "\n";
+    i = i + 1;
+}
+none = PRODUCT @? "build/records_missing.dat";   // @?: no file is an empty table
+>> #none; >> "\n";
+>> $rows == @path; >> "\n";                 // the text round-trips exactly

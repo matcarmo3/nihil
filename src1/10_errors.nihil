@@ -1,0 +1,169 @@
+// =============================================================================
+// Compile errors — "nihilc: file:line:column: message"
+//
+// The message is built in `msg`, written to stderr (!>>), and the program exits
+// with code 1 (::), wherever the error happens.
+// =============================================================================
+
+put_byte(b = 0) {
+    msg_len < 1024 {
+        msg[msg_len] = b;
+        msg_len = msg_len + 1;
+    }
+}
+
+put_str(s = "") {
+    i = 0;
+    #s { put_byte(s[i]); i = i + 1; }
+}
+
+// source bytes (from the buffer the lexer is on: the expanded one, or the raw one)
+put_source(start = 0, n = 0) {
+    i = 0;
+    n { put_byte(lx_buf[start + i]); i = i + 1; }
+}
+
+put_num(v = 0) {
+    v == 0 { put_byte('0'); :; }
+    dig = [0 ; 24];
+    k = 0;
+    * v > 0 {
+        dig[k] = '0' + v % 10;
+        v = v / 10;
+        k = k + 1;
+    }
+    * k > 0 { k = k - 1; put_byte(dig[k]); }
+}
+
+put_type(t = 0) {
+    t == TYPE_ABSENT { put_str("_"); :; }
+    o = t & TYPE_OPT != 0;
+    t = t & ~TYPE_OPT;
+    t & TYPE_ARR != 0 { put_str("ARRAY of "); t = t & ~TYPE_ARR; }
+    t & TYPE_REC != 0 { put_source(s_ofs[m_sym[t >> 8]], s_len[m_sym[t >> 8]]); }
+    || t == TYPE_INT { put_str("INT"); }
+    || t == TYPE_BOOL { put_str("BOOL"); }
+    || t == TYPE_STR { put_str("STRING"); }
+    || t == TYPE_FLOAT { put_str("FLOAT"); }
+    || t == TYPE_NONE { put_str("nothing (call to a method with no value)"); }
+    || { put_str("?"); }
+    o { put_str("?"); }
+}
+
+put_name_method(k = 0) {
+    put_source(s_ofs[k], s_len[k]);
+}
+
+put_name(k = 0) {
+    i = 0;
+    name_len[k] { put_byte(names[name_start[k] + i]); i = i + 1; }
+}
+
+// segment of the expanded source that contains the offset
+find_segment(off = 0) {
+    k = n_seg - 1;
+    * k > 0 && seg_start[k] > off { k = k - 1; }
+    : k;
+}
+
+// line of the expanded source → "N" or "N in file"
+put_line(l = 0) {
+    k = n_seg - 1;
+    * k > 0 && seg_bline[k] > l { k = k - 1; }
+    put_num(seg_fline[k] + l - seg_bline[k]);
+    seg_name[k] != error_name {
+        put_str(" in ");
+        put_name(seg_name[k]);
+    }
+}
+
+error_start() {
+    msg_len = 0;
+    put_str("nihilc: ");
+    expanding {
+        error_name = name_current;             // reading a raw file: its own lines
+        put_name(name_current);
+        put_str(":");
+        put_num(tok_line);
+    } || {
+        sg = find_segment(tok_start);
+        error_name = seg_name[sg];
+        put_name(error_name);
+        put_str(":");
+        put_num(tok_line - seg_bline[sg] + seg_fline[sg]);
+    }
+    put_str(":");
+    // column in characters (UTF-8 continuation bytes do not count)
+    col = 0;
+    i = tok_lstart;
+    * i < tok_start {
+        lx_buf[i] & 0xC0 != 0x80 { col = col + 1; }
+        i = i + 1;
+    }
+    put_num(col + 1);
+    put_str(": ");
+}
+
+error_end() {
+    put_byte(10);
+    m = [0 ; msg_len];
+    i = 0;
+    msg_len { m[i] = msg[i]; i = i + 1; }
+    !>> $m;
+    :: 1;
+}
+
+error(m = "") {
+    error_start();
+    put_str(m);
+    error_end();
+}
+
+// error without a position (like stage 0's "fail")
+error_general(m = "") {
+    msg_len = 0;
+    put_str("nihilc: ");
+    put_str(m);
+    error_end();
+}
+
+error_code_large() {
+    error_general("generated program too large (limit 16 MiB)");
+}
+
+error_expected(d = "") {
+    error_start();
+    put_str("expected ");
+    put_str(d);
+    put_str(", found ");
+    tok_type == T_END { put_str("the end of the file"); error_end(); }
+    n = tok_len;
+    n > 40 { n = 40; }
+    put_str("'");
+    put_source(tok_start, n);
+    put_str("'");
+    error_end();
+}
+
+expect(t = 0, d = "") {
+    tok_type != t { error_expected(d); }
+    next_token();
+}
+
+restore_pos(start = 0, n = 0, line = 0, lstart = 0) {
+    tok_start = start;
+    tok_len = n;
+    tok_line = line;
+    tok_lstart = lstart;
+}
+
+error_op_types(start = 0, n = 0, line = 0, lstart = 0, t1 = 0, t2 = 0) {
+    restore_pos(start, n, line, lstart);
+    error_start();
+    put_str("operator '");
+    put_source(start, n);
+    put_str("' does not accept ");
+    put_type(t1);
+    t2 != 0 { put_str(" and "); put_type(t2); }
+    error_end();
+}

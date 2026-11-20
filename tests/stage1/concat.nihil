@@ -1,0 +1,8 @@
+s = "Nihil" + " " + "v8";
+>> s; >> " "; >> #s; >> "\n";
+greeting(name = "") { : "hello, " + name + "!"; }
+>> greeting("world"); >> "\n";
+t = "";
+i = 0;
+5 { t = t + $[ 'a' + i ]; i = i + 1; }
+>> t; >> " "; >> t == "abcde"; >> " "; >> "" + "" == ""; >> "\n";

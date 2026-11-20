@@ -1,0 +1,12 @@
+>> true; >> " "; >> false; >> " "; >> !true; >> " "; >> !!true; >> "\n";
+>> 1 < 2; >> " "; >> 2 <= 2; >> " "; >> 3 > 4; >> " "; >> 4 >= 5; >> " "; >> 1 == 1; >> " "; >> 1 != 1; >> "\n";
+>> true && false; >> " "; >> true || false; >> " "; >> false || false; >> " "; >> true && true; >> "\n";
+>> true == true; >> " "; >> true != false; >> "\n";
+zero = 0;
+// short-circuit: the right side would divide by zero
+>> false && 1 / zero == 0; >> " "; >> true || 1 / zero == 0; >> "\n";
+>> 1 < 2 && 2 < 3 || false; >> " "; >> false && true || true; >> "\n";
+>> -1 < 0; >> "\n";
+ok = 1 < 2;
+ok = !ok;
+>> ok; >> "\n";

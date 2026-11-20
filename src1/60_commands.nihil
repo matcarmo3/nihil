@@ -1,0 +1,1051 @@
+// =============================================================================
+// Commands — each method starts on the first token of the command and ends on
+// the token after it
+// =============================================================================
+
+init_expression(t = 0) {
+    : t == T_INT || t == T_TRUE || t == T_FALSE || t == T_STR || t == T_UNDERSCORE
+      || t == '(' || t == '[' || t == '-' || t == '!' || t == '~' || t == '#' || t == '$'
+      || t == T_FLOAT || t == '.';
+}
+
+command() {
+    t = tok_type;
+    t == T_SHR { cmd_print(); :; }
+    t == ':' { cmd_return(); :; }
+    t == '{' { block(); :; }
+    t == '*' { cmd_while(); :; }
+    t == T_IDENT { command_name(); :; }
+    t == T_BYTE_OUT { cmd_write_byte(); :; }
+    t == T_BYTE_IN { cmd_read_byte(); :; }
+    t == T_SHL { cmd_read_line(); :; }
+    t == T_OR { error("'||' only continues a conditional chain: cond { … } || cond { … } || { … }"); }
+    t == T_EXIT { cmd_exit(); :; }
+    t == T_PAUSE { cmd_pause(); :; }
+    t == T_WRITE_FILE || t == T_APPEND_FILE { cmd_write_file(t); :; }
+    t == T_ERROR_OUT { cmd_print_error(); :; }
+    t == '@' { error("the inclusion @ \"file\"; can only appear at the top level, alone on its line"); }
+    init_expression(t) { cmd_expr_block(); :; }
+    error_expected("a command");
+}
+
+command_name() {
+    e = peek_type();               // name = …  |  name(…)  |  name op … {
+    km = lookup(tok_start, tok_len);
+    is_model(km) && e != '(' && e != '@' && e != T_AT_OPT {
+        s_ofs[km] == tok_start { skip_model(); :; }    // NAME = @[ … ]; (read in the prescan)
+        error_start();
+        put_str("'");
+        put_source(tok_start, tok_len);
+        put_str("' is a data model and cannot receive a value");
+        error_end();
+    }
+    (e == '.' || e == '[') && field_assign_ahead() { cmd_field_assign(); :; }
+    e == '=' || e == '?' { cmd_assignment(); :; }
+    e == '[' {
+        bracket_then_equals() { cmd_assignment(); :; }
+        cmd_expr_block();
+        :;
+    }
+    e == '(' {
+        // it is the declaration if the method's symbol points to this token
+        k = lookup(tok_start, tok_len);
+        k >= 0 && s_flags[k] & FLAG_METHOD != 0 && s_ofs[k] == tok_start {
+            cmd_method(k);
+            :;
+        }
+    }
+    cmd_expr_block();
+}
+
+// name[…] = …  (true)  or  name[…] op … {  (false). Consumes nothing.
+bracket_then_equals() {
+    save_lexer();
+    next_token();                // name → "["
+    depth = 0;
+    r = false;
+    searching = true;
+    * searching {
+        t = tok_type;
+        t == T_END {
+            searching = false;
+        } || {
+            t == '[' { depth = depth + 1; }
+            t == ']' {
+                depth = depth - 1;
+                depth == 0 {
+                    next_token();
+                    r = tok_type == '=';
+                    searching = false;
+                }
+            }
+            searching { next_token(); }
+        }
+    }
+    back_lexer();
+    drop_lexer();
+    : r;
+}
+
+// block ::= "{" command* "}"  — locals created here disappear at the "}"
+block() {
+    line = tok_line;
+    next_token();
+    ns = n_sym;
+    sl = slots;
+    nr = n_regs;
+    nc = candidates;
+    level = level + 1;
+    * tok_type != '}' {
+        tok_type == T_END {
+            error_start();
+            put_str("missing '}' to close the block opened on line ");
+            put_line(line);
+            error_end();
+        }
+        command();
+    }
+    next_token();
+    n_sym = ns;
+    slots = sl;
+    n_regs = nr;
+    candidates = nc;
+    level = level - 1;
+}
+
+// expr { … }  |  expr method(…);  |  method(…);
+cmd_expr_block() {
+    pi = tok_start; pl = tok_len; pn = tok_line; pli = tok_lstart;
+    t = expression();
+    c = tok_type;
+    c == '{' {
+        t == TYPE_BOOL { conditional(); :; }
+        t == TYPE_INT || t == TYPE_UNKNOWN { counted_loop(true); :; }
+        type_bad(pi, pl, pn, pli, t);
+    }
+    c == ';' {
+        // only a call can be a command: nothing was emitted after it
+        call_end == size_code { next_token(); :; }
+        error_expected("'{' after the expression (an expression alone is not a command)");
+    }
+    c == T_IDENT {
+        peek_type() != '(' { error_expected("'{' after the expression (an expression alone is not a command)"); }
+        t == TYPE_BOOL { simple_if(); :; }
+        t == TYPE_INT || t == TYPE_UNKNOWN { counted_loop(false); :; }
+        type_bad(pi, pl, pn, pli, t);
+    }
+    error_expected("'{' after the expression (an expression alone is not a command)");
+}
+
+type_bad(pi = 0, pl = 0, pn = 0, pli = 0, t = 0) {
+    restore_pos(pi, pl, pn, pli);
+    error_start();
+    put_str("before '{' or a call there must be an INT (repeat N times) or a BOOL (condition), but the expression is ");
+    put_type(t);
+    error_end();
+}
+
+// name(…);  — body of "N name(…);" and "cond name(…);"
+cmd_call() {
+    k = lookup(tok_start, tok_len);
+    call_method(k);
+    expect(';', "';'");
+}
+
+// N { … }  or  N name(…);  — the count (in rax) stays in a hidden slot
+//   mov [rbp+c], rax
+// top: cmp qword [rbp+c], 0 ; jle end
+//   … corpo …
+//   dec qword [rbp+c] ; jmp top
+// end:
+counted_loop(with_block = true) {
+    r = take_register();
+    r >= 0 {
+        // counter in a register: mov r, rax ; top: test r, r ; jle end ; … ; dec r ; jmp top
+        emit_mov_reg_rax(r);
+        top = size_code;
+        eb(0x48 | (rex_b(r) * 5), 0x85, 0xC0 | ((r & 7) << 3) | (r & 7));   // test r, r
+        eb(0x0F, 0x8E);                     // jle rel32
+        leave = size_code;
+        emit_d(0);
+        with_block { block(); } || { cmd_call(); }
+        eb(0x48 | rex_b(r), 0xFF, 0xC8 | (r & 7));                          // dec r
+        emit_jmp_to(top);
+        patch_here(leave);
+        n_regs = n_regs - 1;
+        candidates = candidates - 1;
+        :;
+    }
+    d = new_slot();
+    emit_store_local(d);
+    top = size_code;
+    eb(0x48, 0x83, 0xBD);                   // cmp qword [rbp+disp32], imm8
+    emit_d(d);
+    eb(0x00, 0x0F, 0x8E);                   // 0 ; jle rel32
+    leave = size_code;
+    emit_d(0);
+    with_block { block(); } || { cmd_call(); }
+    eb(0x48, 0xFF, 0x8D);                   // dec qword [rbp+disp32]
+    emit_d(d);
+    emit_jmp_to(top);
+    patch_here(leave);
+    slots = slots - 1;
+    optimize && method_current >= 0 { candidates = candidates - 1; }
+}
+
+// cond name(…);   test ; jz end ; call ; end:
+simple_if() {
+    leave = emit_jump_if_false();
+    cmd_call();
+    patch_here(leave);
+}
+
+// cond { … } || cond { … } || { … }   — the condition is already in rax
+conditional() {
+    base = n_pending;
+    again = true;
+    * again {
+        nxt = emit_jump_if_false();      // test rax, rax ; jz next (or jcc)
+        block();
+        tok_type != T_OR {
+            patch_here(nxt);
+            again = false;
+        } || {
+            emit(0xE9);                    // jmp end
+            pending[n_pending] = size_code;
+            n_pending = n_pending + 1;
+            emit_d(0);
+            patch_here(nxt);             // the next branch starts here
+            next_token();                // consome "||"
+            tok_type == '{' {
+                block();
+                again = false;
+            } || {
+                pi = tok_start; pl = tok_len; pn = tok_line; pli = tok_lstart;
+                u = expression();
+                !is_bool(u) {
+                    restore_pos(pi, pl, pn, pli);
+                    error_start();
+                    put_str("the condition after '||' must be BOOL, but the expression is ");
+                    put_type(u);
+                    error_end();
+                }
+                tok_type != '{' { error_expected("'{' after the condition"); }
+            }
+        }
+    }
+    * n_pending > base {
+        n_pending = n_pending - 1;
+        patch_here(pending[n_pending]);
+    }
+    tok_type == T_OR { error("nothing can come after the final branch '|| { … }'"); }
+}
+
+// * cond { … }    top: cond ; test ; jz end ; … ; jmp top ; end:
+cmd_while() {
+    next_token();
+    top = size_code;
+    pi = tok_start; pl = tok_len; pn = tok_line; pli = tok_lstart;
+    t = expression();
+    !is_bool(t) {
+        restore_pos(pi, pl, pn, pli);
+        error_start();
+        put_str("'*' needs a BOOL condition (to repeat N times use 'N { … }'), but the expression is ");
+        put_type(t);
+        error_end();
+    }
+    tok_type != '{' { error_expected("'{' after the condition of '*'"); }
+    leave = emit_jump_if_false();
+    block();
+    emit_jmp_to(top);
+    patch_here(leave);
+}
+
+// -----------------------------------------------------------------------------
+// name(p1 = default, …) { … }   — method declaration (k = symbol)
+cmd_method(k = 0) {
+    emit(0xE9);                            // jmp over the body
+    jump = size_code;
+    emit_d(0);
+    s_end[k] = size_code;
+    limit_regs = 0;
+    optimize { limit_regs = s_regs[k]; }    // how many registers the previous pass asked for
+    eb(0x55, 0x48, 0x89, 0xE5);             // push rbp ; mov rbp, rsp
+    i = 0;
+    limit_regs {
+        r = REGS[i];
+        r >= 8 { eb(0x41, 0x50 | (r & 7)); } || { emit(0x50 | r); }   // push r
+        i = i + 1;
+    }
+    eb(0x48, 0x81, 0xEC);                   // sub rsp, N
+    frame = size_code;
+    emit_d(0);
+    sv_slots = slots;
+    sv_max = max_slots;
+    sv_n = n_sym;
+    slots = 0;
+    max_slots = 0;
+    n_regs = 0;
+    candidates = 0;
+    demand = 0;
+    base_frame = 8 * limit_regs;
+
+    next_token();                        // name → "("
+    next_token();
+    np = s_nparam[k];
+    i = 0;
+    * tok_type != ')' {
+        q = lookup(tok_start, tok_len);
+        q >= 0 && s_flags[q] & FLAG_GLOBAL == 0 {
+            error_start();
+            put_str("parameter '");
+            put_source(tok_start, tok_len);
+            s_flags[q] & FLAG_PARAM != 0 {
+                put_str("' appears twice");
+            } || {
+                put_str("' has the same name as a method");
+            }
+            error_end();
+        }
+        // offset: 16 + what the following parameters take on the stack
+        off = 16;
+        j = i + 1;
+        * j < np { off = off + size_param(s_extra[k] + j); j = j + 1; }
+        pk = create_param(tok_start, tok_len, p_type[s_extra[k] + i], off);
+        is_opt(p_type[s_extra[k] + i]) { s_flags[pk] = FLAG_PARAM | FLAG_OPT; }
+        next_token();                    // name → "="
+        next_token();
+        depth = 0;                         // skips the default (it may be NAME() or [ … ])
+        * depth > 0 || tok_type != ',' && tok_type != ')' {
+            tok_type == '(' || tok_type == '[' { depth = depth + 1; }
+            tok_type == ')' || tok_type == ']' { depth = depth - 1; }
+            next_token();
+        }
+        tok_type == ',' { next_token(); }
+        i = i + 1;
+    }
+    next_token();                        // ")" → "{"
+    method_current = k;
+    saw_value = false;
+    saw_empty = false;
+    saw_absent = false;
+    block();
+    // a ": _;" and a ": value;" of type T: the method returns T?
+    r = s_type[k];
+    saw_absent && r != 0 && r != TYPE_NONE && !is_opt(r) {
+        s_type[k] = r | TYPE_OPT;
+        discovered = true;
+        altered = true;
+    }
+
+    !saw_value {
+        emit_return();                    // leave ; ret
+        s_type[k] == 0 {
+            s_type[k] = TYPE_NONE;
+            discovered = true;
+        }
+    } || {
+        // a method with a value that reached the end without ":" — runtime error
+        const_init();
+        const_put_str("method '");
+        const_put_source(s_ofs[k], s_len[k]);
+        const_put_str("' ended without returning a value (missing ': value;')");
+        m = const_close();
+        eb(0x48, 0x8D, 0x35);               // lea rsi, [rip + mensagem]
+        register_fixup(size_code, m, false);
+        emit_d(0);
+        emit_call_rt(RT_ERROR);
+    }
+    put_d(frame, (max_slots * 8 + 15) & -16);
+    n_sym = sv_n;
+    max_slots = sv_max;
+    slots = sv_slots;
+    method_current = -1;
+    optimize && demand != s_regs[k] {
+        s_regs[k] = demand;                // the next pass saves other registers
+        altered = true;
+    }
+    limit_regs = 0;
+    base_frame = 0;
+    patch_here(jump);
+}
+
+// -----------------------------------------------------------------------------
+cmd_print() {
+    next_token();
+    t = expression();
+    t == TYPE_NONE { error("'>>' got a call to a method with no value"); }
+    t == TYPE_ABSENT { t = TYPE_STR | TYPE_OPT; }     // imprime "_"
+    t & TYPE_ARR != 0 { error("'>>' does not print a whole ARRAY; loop over its elements"); }
+    t & TYPE_REC != 0 { error("'>>' does not print a record directly: print its fields, or $r for its line"); }
+    base_opt(t) == TYPE_FLOAT {
+        // FLOAT: the prelude formats it (bits, present, error)
+        emit(0x50);                        // push rax
+        is_opt(t) { emit(0x52); } || { eb(0xB8, 1, 0, 0, 0); emit(0x50); }
+        eb(0x31, 0xC0);                     // error = false
+        emit(0x50);
+        call_prelude("__nihil_print_float", 24);
+        expect(';', "';'");
+        :;
+    }
+    is_opt(t) {
+        b = base_opt(t);
+        b == TYPE_BOOL {
+            emit_call_rt(RT_PRINT_BOOL_OPT);
+        } || b == TYPE_STR {
+            emit_call_rt(RT_PRINT_STR_OPT);
+        } || {
+            emit_call_rt(RT_PRINT_INT_OPT);
+        }
+        expect(';', "';'");
+        :;
+    }
+    t == TYPE_BOOL {
+        emit_call_rt(RT_PRINT_BOOL);
+    } || t == TYPE_STR {
+        emit_call_rt(RT_PRINT_STR);
+    } || {
+        emit_call_rt(RT_PRINT_INT);      // INT (or provisional)
+    }
+    expect(';', "';'");
+}
+
+// !>> expr ;   — like ">>", but to stderr
+cmd_print_error() {
+    next_token();
+    t = expression();
+    t == TYPE_NONE { error("'>>' got a call to a method with no value"); }
+    t == TYPE_ABSENT { t = TYPE_STR | TYPE_OPT; }     // imprime "_"
+    t & TYPE_ARR != 0 { error("'!>>' does not print a whole ARRAY; loop over its elements"); }
+    t & TYPE_REC != 0 { error("'!>>' does not print a record directly: print its fields, or $r for its line"); }
+    base_opt(t) == TYPE_FLOAT {
+        // FLOAT: the prelude formats it (bits, present, error)
+        emit(0x50);                        // push rax
+        is_opt(t) { emit(0x52); } || { eb(0xB8, 1, 0, 0, 0); emit(0x50); }
+        eb(0xB8, 1, 0, 0, 0);               // error = true
+        emit(0x50);
+        call_prelude("__nihil_print_float", 24);
+        expect(';', "';'");
+        :;
+    }
+    is_opt(t) {
+        b = base_opt(t);
+        b == TYPE_BOOL {
+            emit_call_rt(RT_ERROR_BOOL_OPT);
+        } || b == TYPE_STR {
+            emit_call_rt(RT_ERROR_STR_OPT);
+        } || {
+            emit_call_rt(RT_ERROR_INT_OPT);
+        }
+        expect(';', "';'");
+        :;
+    }
+    t == TYPE_BOOL {
+        emit_call_rt(RT_ERROR_BOOL);
+    } || t == TYPE_STR {
+        emit_call_rt(RT_ERROR_STR);
+    } || {
+        emit_call_rt(RT_ERROR_INT);
+    }
+    expect(';', "';'");
+}
+
+// :: ;  |  :: expr ;   — ends the program from anywhere
+// ... expr ;   — flushes the output and waits expr milliseconds
+cmd_pause() {
+    next_token();
+    pi = tok_start; pl = tok_len; pn = tok_line; pli = tok_lstart;
+    t = expression();
+    t != TYPE_INT && t != TYPE_UNKNOWN {
+        restore_pos(pi, pl, pn, pli);
+        error_start();
+        put_str("'...' waits a number of milliseconds and needs an INT, but the expression is ");
+        put_type(t);
+        error_end();
+    }
+    emit_call_rt(RT_SLEEP);
+    expect(';', "';'");
+}
+
+// @>> path, text ;    — creates or replaces the file, atomically
+// @+>> path, text ;   — appends the text to the file (creating it)
+cmd_write_file(kind = 0) {
+    op = "@>>";
+    kind == T_APPEND_FILE { op = "@+>>"; }
+    next_token();
+    pi = tok_start; pl = tok_len; pn = tok_line; pli = tok_lstart;
+    t = expression();
+    write_file_arg(t, op, "the path", pi, pl, pn, pli);
+    expect(',', "',' between the path and the text");
+    emit(0x50);                            // push rax (the path)
+    pi = tok_start; pl = tok_len; pn = tok_line; pli = tok_lstart;
+    t = expression();
+    is_rec(t) || is_rec_array(t) {
+        emit_rec_text(t);                  // a record or a table: its fixed-width text
+        t = TYPE_STR;
+    }
+    write_file_arg(t, op, "the text", pi, pl, pn, pli);
+    eb(0x48, 0x89, 0xC1);                   // mov rcx, rax (the text)
+    emit(0x58);                            // pop rax (the path)
+    kind == T_APPEND_FILE { emit_call_rt(RT_APPEND_FILE); } || { emit_call_rt(RT_WRITE_FILE); }
+    expect(';', "';'");
+}
+
+write_file_arg(t = 0, op = "", what = "", pi = 0, pl = 0, pn = 0, pli = 0) {
+    t == TYPE_STR || t == TYPE_UNKNOWN { :; }
+    restore_pos(pi, pl, pn, pli);
+    error_start();
+    put_str("'"); put_str(op); put_str("' needs "); put_str(what);
+    put_str(" as a STRING");
+    what == "the text" { put_str(", a record or an ARRAY of records"); }
+    put_str(", but the expression is ");
+    put_type(t);
+    t == TYPE_STR | TYPE_OPT { put_str(" (give a fallback: x || \"\")"); }
+    t == TYPE_ARR | TYPE_INT { put_str(" (turn the bytes into text with $)"); }
+    error_end();
+}
+
+cmd_exit() {
+    next_token();
+    tok_type == ';' {
+        eb(0x31, 0xFF);                     // xor edi, edi
+    } || {
+        pi = tok_start; pl = tok_len; pn = tok_line; pli = tok_lstart;
+        t = expression();
+        t != TYPE_INT && t != TYPE_UNKNOWN {
+            restore_pos(pi, pl, pn, pli);
+            error_start();
+            put_str("the exit code of '::' must be INT, but the expression is ");
+            put_type(t);
+            error_end();
+        }
+        eb(0x48, 0x89, 0xC7);               // mov rdi, rax
+    }
+    emit_call_rt(RT_EXIT);
+    expect(';', "';'");
+}
+
+cmd_write_byte() {
+    next_token();
+    pi = tok_start; pl = tok_len; pn = tok_line; pli = tok_lstart;
+    t = expression();
+    t != TYPE_INT && t != TYPE_UNKNOWN {
+        restore_pos(pi, pl, pn, pli);
+        error_start();
+        put_str("'>>>' writes one byte and needs an INT, but the expression is ");
+        put_type(t);
+        error_end();
+    }
+    emit_call_rt(RT_WRITE_BYTE);
+    expect(';', "';'");
+}
+
+// << name ;   — reads a line and converts it to the type of name (INT, BOOL,
+// STRING or FLOAT). At the end of input: _ if name is optional; otherwise 0, false,
+// "" or 0.0.
+cmd_read_line() {
+    next_token();
+    tok_type != T_IDENT { error_expected("the name of a variable after '<<'"); }
+    pi = tok_start; pl = tok_len; pn = tok_line; pli = tok_lstart;
+    k = lookup(pi, pl);
+    k < 0 {
+        error_start();
+        put_str("'<< ");
+        put_source(pi, pl);
+        put_str("' needs a variable that already exists: its type says how to read the line");
+        error_end();
+    }
+    s_flags[k] & FLAG_METHOD != 0 { error("cannot assign to a method"); }
+    tt = s_type[k];
+    s_flags[k] & FLAG_GLOBAL != 0 && method_current < 0 && s_flags[k] & FLAG_CREATED == 0 {
+        error_start();
+        put_str("variable '");
+        put_source(pi, pl);
+        put_str("' does not exist here yet (it is created on line ");
+        put_line(s_extra[k]);
+        put_str(")");
+        error_end();
+    }
+    next_token();
+    b = base_opt(tt);
+    b == TYPE_INT { call_prelude("__nihil_read_int", 0); }
+    || b == TYPE_BOOL { call_prelude("__nihil_read_bool", 0); }
+    || b == TYPE_STR { call_prelude("__nihil_read_str", 0); }
+    || b == TYPE_FLOAT { call_prelude("__nihil_read_float", 0); }
+    || tt == 0 || tt == TYPE_UNKNOWN { call_prelude("__nihil_read_int", 0); }
+    || {
+        restore_pos(pi, pl, pn, pli);
+        error_start();
+        put_str("'<<' reads INT, BOOL, STRING or FLOAT, but '");
+        put_source(pi, pl);
+        put_str("' is ");
+        put_type(tt);
+        error_end();
+    }
+    !is_opt(tt) && s_flags[k] & FLAG_OPT == 0 {
+        // end of input into an ordinary variable: the type's "zero" value
+        eb(0x48, 0x85, 0xD2);               // test rdx, rdx
+        b == TYPE_STR {
+            eb(0x75, 7);                    // jnz +7
+            eb(0x48, 0x8D, 0x05);           // lea rax, [rip + ""]
+            register_fixup(size_code, const_empty, false);
+            emit_d(0);
+        } || {
+            eb(0x75, 2);                    // jnz +2
+            eb(0x31, 0xC0);                 // xor eax, eax (0, false, 0.0)
+        }
+    }
+    emit_store_var(k);
+    expect(';', "';'");
+}
+
+cmd_read_byte() {
+    next_token();
+    tok_type != T_IDENT { error_expected("the name of an INT variable after '<<<'"); }
+    pi = tok_start; pl = tok_len; pn = tok_line; pli = tok_lstart;
+    next_token();
+    emit_call_rt(RT_READ_BYTE);
+    assign(pi, pl, pn, pli, TYPE_INT);
+}
+
+// :;  |  : expr ;     at the top level: ends the program; in a method: returns
+cmd_return() {
+    method_current >= 0 { method_return(); :; }
+    next_token();
+    tok_type == ';' {
+        eb(0x31, 0xFF);                     // xor edi, edi
+    } || {
+        pi = tok_start; pl = tok_len; pn = tok_line; pli = tok_lstart;
+        t = expression();
+        t != TYPE_INT && t != TYPE_UNKNOWN {
+            restore_pos(pi, pl, pn, pli);
+            error_start();
+            put_str("the exit code of ':' must be INT, but the expression is ");
+            put_type(t);
+            error_end();
+        }
+        eb(0x48, 0x89, 0xC7);               // mov rdi, rax
+    }
+    emit_call_rt(RT_EXIT);
+    expect(';', "';'");
+}
+
+method_return() {
+    k = method_current;
+    next_token();
+    tok_type == ';' {
+        saw_empty = true;
+        saw_value { error("do not mix ':;' (no value) and ': value;' in the same method"); }
+        r = s_type[k];
+        r != 0 && r != TYPE_NONE {
+            error_start();
+            put_str("':;' has no value, but this method returns ");
+            put_type(r);
+            error_end();
+        }
+        emit_return();
+    } || {
+        pi = tok_start; pl = tok_len; pn = tok_line; pli = tok_lstart;
+        t = expression();
+        t == TYPE_NONE {
+            restore_pos(pi, pl, pn, pli);
+            error("':' got a call to a method with no value");
+        }
+        saw_value = true;
+        saw_empty { error("do not mix ':;' (no value) and ': value;' in the same method"); }
+        t == TYPE_ABSENT {
+            saw_absent = true;             // ": _;" makes the type optional
+            r = s_type[k];
+            r != 0 && !is_opt(r) {
+                s_type[k] = r | TYPE_OPT;
+                discovered = true;
+                altered = true;
+            }
+        } || t != TYPE_UNKNOWN {
+            r = s_type[k];
+            r == 0 {
+                s_type[k] = t;              // first known type: locks it
+                saw_absent && !is_opt(t) { s_type[k] = t | TYPE_OPT; }
+                discovered = true;
+            } || is_opt(r) && base_opt(r) == t {
+                // T in a method that returns T?: converted below
+            } || is_opt(t) && base_opt(t) == r {
+                s_type[k] = t;              // T? in a method that returned T
+                discovered = true;
+                altered = true;
+            } || r != t {
+                restore_pos(pi, pl, pn, pli);
+                error_start();
+                put_str("'");
+                put_name_method(k);
+                put_str("' returns ");
+                put_type(r);
+                put_str(", but this ':' returns ");
+                put_type(t);
+                error_end();
+            }
+        }
+        convert(t, s_type[k]);             // T → T? when the method returns an optional
+        emit_return();
+    }
+    expect(';', "';'");
+}
+
+// -----------------------------------------------------------------------------
+// name = expr ;   |   name[i] = expr ;
+cmd_assignment() {
+    pi = tok_start; pl = tok_len; pn = tok_line; pli = tok_lstart;
+    next_token();
+    tok_type == '?' {
+        next_token();
+        expect('=', "'='");
+        t = expression();
+        declare_optional(pi, pl, pn, pli, t);
+        :;
+    }
+    tok_type == '[' { assignment_indexed(pi, pl, pn, pli); :; }
+    expect('=', "'='");
+    start_assignment = size_code;
+    t = expression();
+    assign(pi, pl, pn, pli, t);
+    start_assignment = -1;
+}
+
+// stores rax into the name (with the value of type t already computed) and consumes the ";"
+assign(pi = 0, pl = 0, pn = 0, pli = 0, t = 0) {
+    t == TYPE_NONE { error("the assignment got a call to a method with no value"); }
+    k = lookup(pi, pl);
+    k < 0 {
+        is_opt(t) || t == TYPE_ABSENT { not_optional(pi, pl, pn, pli, t); }
+        // new name: a local (at the top level the prescan already registered the globals)
+        level != 0 {
+            k = create_local(pi, pl, t);
+            emit_store_var(k);
+            expect(';', "';'");
+            :;
+        }
+        k = create_global(pi, pl, t);
+    }
+    f = s_flags[k];
+    f & FLAG_METHOD != 0 {
+        restore_pos(pi, pl, pn, pli);
+        error("cannot assign to a method");
+    }
+    f & FLAG_OPT != 0 {
+        assign_optional(k, pi, pl, pn, pli, t);
+        :;
+    }
+    is_opt(t) || t == TYPE_ABSENT { not_optional(pi, pl, pn, pli, t); }
+    verify = true;
+    f & FLAG_GLOBAL == 0 {
+        s_type[k] == TYPE_UNKNOWN {
+            t != TYPE_UNKNOWN { s_type[k] = t; }     // a provisional local gets its real type
+            verify = false;
+        }
+    } || method_current >= 0 {
+        s_type[k] == 0 {
+            global_unknown(k);
+            verify = false;
+        }
+    } || f & FLAG_CREATED == 0 {
+        // global, top-level code: the first assignment in the text creates the global
+        level != 0 { global_early(k, pi, pl, pn, pli); }
+        s_flags[k] = f | FLAG_CREATED;
+        s_type[k] == 0 {
+            t != TYPE_UNKNOWN {
+                s_type[k] = t;
+                discovered = true;
+            }
+            verify = false;
+        }
+    }
+    verify && t == TYPE_INT && s_type[k] == TYPE_INT && increment(k) {
+        expect(';', "';'");
+        :;
+    }
+    verify && t != TYPE_UNKNOWN && s_type[k] != 0 && s_type[k] != t {
+        restore_pos(pi, pl, pn, pli);
+        error_start();
+        put_str("'");
+        put_source(pi, pl);
+        put_str("' is ");
+        put_type(s_type[k]);
+        put_str(" and cannot receive ");
+        put_type(t);
+        error_end();
+    }
+    emit_store_var(k);
+    expect(';', "';'");
+}
+
+// x = x + k / x = x - k already emitted as load ; mov rcx, k ; add/sub → becomes
+// inc, dec, add or sub directly on the variable. true if it was rewritten.
+increment(k = 0) {
+    a = start_assignment;
+    !optimize || a < 0 || last_target > a || n_fix > 0 && fix_pos[n_fix - 1] >= a { : false; }
+    // the load of x, as emit_load_var emits it
+    end_load = size_code;
+    emit_load_var(k);
+    nc = size_code - end_load;
+    equal = true;
+    i = 0;
+    nc { code[a + i] != code[end_load + i] { equal = false; } i = i + 1; }
+    size_code = end_load;
+    !equal { : false; }
+    p = a + nc;
+    v = 0;
+    size_code - p == 8 && code[p] == 0xB9 {
+        v = code[p + 1] | (code[p + 2] << 8) | (code[p + 3] << 16) | (code[p + 4] << 24);
+        v >= 0x80000000 { : false; }        // add r/m64, imm32 sign-extends
+        p = p + 5;
+    } || size_code - p == 10 && code[p] == 0x48 && code[p + 1] == 0xC7 && code[p + 2] == 0xC1 {
+        v = code[p + 3] | (code[p + 4] << 8) | (code[p + 5] << 16) | (code[p + 6] << 24);
+        v >= 0x80000000 { v = v - 0x100000000; }
+        p = p + 7;
+    } || {
+        : false;
+    }
+    code[p] != 0x48 || code[p + 2] != 0xC8 || code[p + 1] != 0x01 && code[p + 1] != 0x29 { : false; }
+    sub = code[p + 1] == 0x29;
+    sub { v = -v; }
+    v >= 0x80000000 || v < -0x80000000 { : false; }
+    size_code = a;
+    f = s_flags[k];
+    f & FLAG_REG != 0 {
+        r = s_end[k];
+        v == 1 || v == -1 {
+            eb(0x48 | rex_b(r), 0xFF);
+            v == 1 { emit(0xC0 | (r & 7)); } || { emit(0xC8 | (r & 7)); }       // inc / dec r
+        } || {
+            eb(0x48 | rex_b(r), 0x81, 0xC0 | (r & 7));                         // add r, imm32
+            emit_d(v);
+        }
+    } || f & FLAG_GLOBAL != 0 {
+        v == 1 || v == -1 {
+            eb(0x48, 0xFF);
+            v == 1 { emit(0x04); } || { emit(0x0C); }                         // inc / dec [disp32]
+            emit(0x25);
+            emit_d(s_end[k]);
+        } || {
+            eb(0x48, 0x81, 0x04, 0x25);                                         // add qword [disp32], imm32
+            emit_d(s_end[k]);
+            emit_d(v);
+        }
+    } || {
+        v == 1 || v == -1 {
+            eb(0x48, 0xFF);
+            v == 1 { emit(0x85); } || { emit(0x8D); }                         // inc / dec [rbp + d]
+            emit_d(s_end[k]);
+        } || {
+            eb(0x48, 0x81, 0x85);                                               // add qword [rbp + d], imm32
+            emit_d(s_end[k]);
+            emit_d(v);
+        }
+    }
+    : true;
+}
+
+global_early(k = 0, pi = 0, pl = 0, pn = 0, pli = 0) {
+    restore_pos(pi, pl, pn, pli);
+    error_start();
+    put_str("'");
+    put_source(pi, pl);
+    put_str("' is global and is only created on line ");
+    put_line(s_extra[k]);
+    put_str("; give it a value at the top level before this block");
+    error_end();
+}
+
+type_wrong(pi = 0, pl = 0, pn = 0, pli = 0, tt = 0, t = 0) {
+    restore_pos(pi, pl, pn, pli);
+    error_start();
+    put_str("'");
+    put_source(pi, pl);
+    put_str("' is ");
+    put_type(tt);
+    put_str(" and cannot receive ");
+    put_type(t);
+    error_end();
+}
+
+not_optional(pi = 0, pl = 0, pn = 0, pli = 0, t = 0) {
+    restore_pos(pi, pl, pn, pli);
+    error_start();
+    put_str("'");
+    put_source(pi, pl);
+    put_str("' is not optional and cannot receive ");
+    put_type(t);
+    put_str("; to hold an optional, create it with '");
+    put_source(pi, pl);
+    put_str("? = …'");
+    error_end();
+}
+
+// name? = expr ;   — creates an optional variable
+declare_optional(pi = 0, pl = 0, pn = 0, pli = 0, t = 0) {
+    t == TYPE_NONE { error("the assignment got a call to a method with no value"); }
+    t == TYPE_ABSENT {
+        restore_pos(pi, pl, pn, pli);
+        error_start();
+        put_str("'");
+        put_source(pi, pl);
+        put_str("? = _' does not say the type: create it with a value ('");
+        put_source(pi, pl);
+        put_str("? = 0') and then do '");
+        put_source(pi, pl);
+        put_str(" = _'");
+        error_end();
+    }
+    tt = t;
+    t != TYPE_UNKNOWN && !is_opt(t) { tt = t | TYPE_OPT; }
+    k = lookup(pi, pl);
+    k < 0 {
+        level != 0 {
+            k = create_local_opt(pi, pl, tt);
+            convert(t, tt);
+            emit_store_var(k);
+            expect(';', "';'");
+            :;
+        }
+        k = create_global(pi, pl, tt);        // (the prescan already registers the top-level ones)
+        n_globals = n_globals + 1;
+        s_flags[k] = FLAG_GLOBAL | FLAG_OPT;
+    }
+    f = s_flags[k];
+    f & FLAG_METHOD != 0 {
+        restore_pos(pi, pl, pn, pli);
+        error("cannot assign to a method");
+    }
+    f & FLAG_GLOBAL == 0 || f & FLAG_OPT == 0 || method_current >= 0 || f & FLAG_CREATED != 0 {
+        restore_pos(pi, pl, pn, pli);
+        error_start();
+        put_str("'");
+        put_source(pi, pl);
+        put_str("' already exists; the '?' only goes where the variable is created");
+        error_end();
+    }
+    level != 0 { global_early(k, pi, pl, pn, pli); }
+    s_flags[k] = f | FLAG_CREATED;
+    s_type[k] == 0 {
+        tt != TYPE_UNKNOWN {
+            s_type[k] = tt;
+            discovered = true;
+        }
+    } || tt != TYPE_UNKNOWN && s_type[k] != tt {
+        type_wrong(pi, pl, pn, pli, s_type[k], t);
+    }
+    target = tt;
+    s_type[k] != 0 { target = s_type[k]; }
+    convert(t, target);
+    emit_store_var(k);
+    expect(';', "';'");
+}
+
+// name = expr ;   with an optional name: accepts T, T? and _
+assign_optional(k = 0, pi = 0, pl = 0, pn = 0, pli = 0, t = 0) {
+    f = s_flags[k];
+    tt = s_type[k];
+    f & FLAG_GLOBAL != 0 {
+        method_current >= 0 {
+            tt == 0 {
+                global_unknown(k);
+                tt = TYPE_UNKNOWN;
+            }
+        } || f & FLAG_CREATED == 0 {
+            restore_pos(pi, pl, pn, pli);
+            error_start();
+            put_str("'");
+            put_source(pi, pl);
+            put_str("' does not exist here yet (it is created with '?' on line ");
+            put_line(s_extra[k]);
+            put_str(")");
+            error_end();
+        }
+    }
+    tt == 0 { tt = TYPE_UNKNOWN; }
+    tt == TYPE_UNKNOWN && f & FLAG_GLOBAL == 0 && t != TYPE_UNKNOWN && t != TYPE_ABSENT {
+        tt = t;                             // a provisional local gets its real type
+        !is_opt(tt) { tt = tt | TYPE_OPT; }
+        s_type[k] = tt;
+    }
+    !convert(t, tt) { type_wrong(pi, pl, pn, pli, tt, t); }
+    emit_store_var(k);
+    expect(';', "';'");
+}
+
+assignment_indexed(pi = 0, pl = 0, pn = 0, pli = 0) {
+    k = lookup(pi, pl);
+    k < 0 {
+        restore_pos(pi, pl, pn, pli);
+        error_start();
+        put_str("variable '");
+        put_source(pi, pl);
+        put_str("' does not exist");
+        error_end();
+    }
+    s_flags[k] & FLAG_METHOD != 0 {
+        restore_pos(pi, pl, pn, pli);
+        error("cannot assign to a method");
+    }
+    tt = s_type[k];
+    s_flags[k] & FLAG_GLOBAL != 0 {
+        method_current >= 0 {
+            tt == 0 {
+                global_unknown(k);
+                tt = TYPE_UNKNOWN;
+            }
+        } || s_flags[k] & FLAG_CREATED == 0 {
+            restore_pos(pi, pl, pn, pli);
+            error_start();
+            put_str("variable '");
+            put_source(pi, pl);
+            put_str("' does not exist here yet (it is created on line ");
+            put_line(s_extra[k]);
+            put_str(")");
+            error_end();
+        }
+    }
+    tt == 0 { tt = TYPE_UNKNOWN; }
+    tt != TYPE_UNKNOWN {
+        tt == TYPE_STR {
+            restore_pos(pi, pl, pn, pli);
+            error("STRING is immutable: a character cannot be changed");
+        }
+        tt & TYPE_ARR == 0 || is_opt(tt) {
+            restore_pos(pi, pl, pn, pli);
+            error_start();
+            put_str("only an ARRAY can take 'name[i] = value', but '");
+            put_source(pi, pl);
+            put_str("' is ");
+            put_type(tt);
+            error_end();
+        }
+    }
+    next_token();                        // "[" → index
+    u = expression();
+    u != TYPE_INT && u != TYPE_UNKNOWN {
+        error_start();
+        put_str("the index must be INT, but it is ");
+        put_type(u);
+        error_end();
+    }
+    emit(0x50);                            // push rax  (index)
+    expect(']', "']'");
+    expect('=', "'='");
+    v = expression();
+    v != TYPE_UNKNOWN && tt != TYPE_UNKNOWN && tt & ~TYPE_ARR != v {
+        error_start();
+        put_str("'");
+        put_source(pi, pl);
+        put_str("' is ");
+        put_type(tt);
+        put_str(" and cannot receive ");
+        put_type(v);
+        error_end();
+    }
+    eb(0x48, 0x89, 0xC2, 0x59);             // mov rdx, rax ; pop rcx
+    emit_load_var(k);
+    emit_check_limit();
+    eb(0x48, 0x89, 0x14, 0xC8);             // mov [rax + rcx*8], rdx
+    expect(';', "';'");
+}

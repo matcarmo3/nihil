@@ -1,0 +1,3 @@
+// utility functions
+double(x = 0) { : x * 2; }
+name_util = "util";

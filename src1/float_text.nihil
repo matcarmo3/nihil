@@ -1,0 +1,307 @@
+// =============================================================================
+// FLOAT (IEEE-754 double) ⇄ text, exact, with big integers.
+//
+// A FLOAT is handled here through its 64 bits, kept in an INT: that way the
+// code uses only INT and serves both nihilc1 (literals) and the programs'
+// prelude (printing and reading).
+// =============================================================================
+
+__nihil_ft_num = __nihil_bi_new();
+__nihil_ft_den = __nihil_bi_new();
+__nihil_ft_n2 = __nihil_bi_new();
+__nihil_ft_d2 = __nihil_bi_new();
+__nihil_ft_r = __nihil_bi_new();
+__nihil_ft_s = __nihil_bi_new();
+__nihil_ft_mp = __nihil_bi_new();
+__nihil_ft_mm = __nihil_bi_new();
+__nihil_ft_tmp = __nihil_bi_new();
+__nihil_ft_digits = [0 ; 800];               // decimal digits (0 … 9)
+__nihil_ft_n_digits = 0;
+__nihil_ft_k = 0;                             // value = 0.d1d2… × 10^k
+__nihil_ft_overflowed = false;                  // the last conversion went past the largest FLOAT
+
+// "floor" division (Nihil's / truncates toward zero)
+__nihil_ft_floordiv(a = 0, b = 1) {
+    __q = a / b;
+    a % b != 0 && (a < 0) != (b < 0) { __q = __q - 1; }
+    : __q;
+}
+
+// -----------------------------------------------------------------------------
+// decimal → bits: digits d[0 .. n) (most significant first) × 10^e10.
+// Rounds to nearest (ties: even). On overflow, returns infinity and
+// liga __nihil_ft_estourou.
+__nihil_ft_decimal_to_bits(d = [0], n = 0, e10 = 0) {
+    __nihil_ft_overflowed = false;
+    __i = 0;
+    * __i < n && d[__i] == 0 { __i = __i + 1; }     // zeros à esquerda
+    __i == n { : 0; }
+    // limites grosseiros: evita inteiros grandes enormes
+    n - __i + e10 > 330 {
+        __nihil_ft_overflowed = true;
+        : 0x7FF0000000000000;
+    }
+    n - __i + e10 < -345 { : 0; }
+    __nihil_bi_define(__nihil_ft_num, 0);
+    * __i < n {
+        __nihil_bi_mul_sum(__nihil_ft_num, 10, d[__i]);
+        __i = __i + 1;
+    }
+    __nihil_bi_define(__nihil_ft_den, 1);
+    e10 >= 0 { __nihil_bi_pot10(__nihil_ft_num, e10); } || { __nihil_bi_pot10(__nihil_ft_den, -e10); }
+    // e2: value ≈ q × 2^e2 with 2^52 ≤ q < 2^53
+    __e2 = __nihil_bi_bits(__nihil_ft_num) - __nihil_bi_bits(__nihil_ft_den) - 53;
+    __q = 0;
+    __searching = true;
+    * __searching {
+        __e2 < -1074 { __e2 = -1074; }
+        __nihil_bi_copy(__nihil_ft_n2, __nihil_ft_num);
+        __nihil_bi_copy(__nihil_ft_d2, __nihil_ft_den);
+        __e2 >= 0 { __nihil_bi_shl(__nihil_ft_d2, __e2); } || { __nihil_bi_shl(__nihil_ft_n2, -__e2); }
+        // q = n2 / d2 (shift and subtract); the remainder stays in n2
+        __nihil_bi_copy(__nihil_ft_tmp, __nihil_ft_d2);
+        __nihil_bi_shl(__nihil_ft_tmp, 56);
+        __q = 0;
+        __j = 57;
+        __j {
+            __q = __q << 1;
+            __nihil_bi_cmp(__nihil_ft_n2, __nihil_ft_tmp) >= 0 {
+                __nihil_bi_sub(__nihil_ft_n2, __nihil_ft_tmp);
+                __q = __q | 1;
+            }
+            __nihil_bi_shr1(__nihil_ft_tmp);
+        }
+        __q >= 1 << 53 {
+            __e2 = __e2 + 1;
+        } || __q < 1 << 52 && __e2 > -1074 {
+            __e2 = __e2 - 1;
+        } || {
+            __searching = false;
+        }
+    }
+    // rounds: compares 2·remainder with the divisor
+    __nihil_bi_shl(__nihil_ft_n2, 1);
+    __c = __nihil_bi_cmp(__nihil_ft_n2, __nihil_ft_d2);
+    __c > 0 || __c == 0 && __q & 1 == 1 { __q = __q + 1; }
+    __q == 1 << 53 {
+        __q = 1 << 52;
+        __e2 = __e2 + 1;
+    }
+    __q < 1 << 52 { : __q; }                     // subnormal (or zero)
+    __ex = __e2 + 52 + 1023;
+    __ex >= 2047 {
+        __nihil_ft_overflowed = true;
+        : 0x7FF0000000000000;
+    }
+    : (__ex << 52) | (__q - (1 << 52));
+}
+
+// text → bits. Accepts [+-]digits[.digits][(e|E)[+-]digits]. Returns the bits;
+// __nihil_ft_valid tells whether the whole text was a number.
+__nihil_ft_valid = false;
+__nihil_ft_text_to_bits(s = "") {
+    __nihil_ft_valid = false;
+    __i = 0;
+    __neg = false;
+    __i < #s && (s[__i] == '-' || s[__i] == '+') {
+        __neg = s[__i] == '-';
+        __i = __i + 1;
+    }
+    __n = 0;
+    __e10 = 0;
+    __has_digit = false;
+    * __i < #s && s[__i] >= '0' && s[__i] <= '9' {
+        __n < 768 { __nihil_ft_digits[__n] = s[__i] - '0'; __n = __n + 1; } || { __e10 = __e10 + 1; }
+        __has_digit = true;
+        __i = __i + 1;
+    }
+    __i < #s && s[__i] == '.' {
+        __i = __i + 1;
+        * __i < #s && s[__i] >= '0' && s[__i] <= '9' {
+            __n < 768 { __nihil_ft_digits[__n] = s[__i] - '0'; __n = __n + 1; __e10 = __e10 - 1; }
+            __has_digit = true;
+            __i = __i + 1;
+        }
+    }
+    !__has_digit { : 0; }
+    __i < #s && (s[__i] == 'e' || s[__i] == 'E') {
+        __i = __i + 1;
+        __eneg = false;
+        __i < #s && (s[__i] == '-' || s[__i] == '+') {
+            __eneg = s[__i] == '-';
+            __i = __i + 1;
+        }
+        __i >= #s || s[__i] < '0' || s[__i] > '9' { : 0; }
+        __ev = 0;
+        * __i < #s && s[__i] >= '0' && s[__i] <= '9' {
+            __ev < 100000 { __ev = __ev * 10 + s[__i] - '0'; }
+            __i = __i + 1;
+        }
+        __eneg { __ev = -__ev; }
+        __e10 = __e10 + __ev;
+    }
+    __i != #s { : 0; }
+    __nihil_ft_valid = true;
+    __b = __nihil_ft_decimal_to_bits(__nihil_ft_digits, __n, __e10);
+    __neg { __b = __b | (1 << 63); }
+    : __b;
+}
+
+// -----------------------------------------------------------------------------
+// bits → the shortest digits that read back as the same number (Burger & Dybvig,
+// "free-format"). For finite values > 0. Result: __nihil_ft_digits,
+// __nihil_ft_n_digits, __nihil_ft_k (value = 0.d1d2… × 10^k).
+__nihil_ft_digits_shortest(b = 0) {
+    __ex = (b >> 52) & 0x7FF;
+    __f = b & 0xFFFFFFFFFFFFF;
+    __e = 0;
+    __ex == 0 {
+        __e = -1074;                          // subnormal
+    } || {
+        __f = __f | (1 << 52);
+        __e = __ex - 1075;
+    }
+    __even = __f & 1 == 0;
+    // the lower boundary is closer when f is a power of 2 (except at the smallest exponent)
+    __asymmetric = __f == 1 << 52 && __ex > 1;
+    __e >= 0 {
+        __asymmetric {
+            __nihil_bi_define(__nihil_ft_r, __f); __nihil_bi_shl(__nihil_ft_r, __e + 2);
+            __nihil_bi_define(__nihil_ft_s, 4);
+            __nihil_bi_define(__nihil_ft_mp, 1); __nihil_bi_shl(__nihil_ft_mp, __e + 1);
+            __nihil_bi_define(__nihil_ft_mm, 1); __nihil_bi_shl(__nihil_ft_mm, __e);
+        } || {
+            __nihil_bi_define(__nihil_ft_r, __f); __nihil_bi_shl(__nihil_ft_r, __e + 1);
+            __nihil_bi_define(__nihil_ft_s, 2);
+            __nihil_bi_define(__nihil_ft_mp, 1); __nihil_bi_shl(__nihil_ft_mp, __e);
+            __nihil_bi_define(__nihil_ft_mm, 1); __nihil_bi_shl(__nihil_ft_mm, __e);
+        }
+    } || {
+        __asymmetric {
+            __nihil_bi_define(__nihil_ft_r, __f); __nihil_bi_shl(__nihil_ft_r, 2);
+            __nihil_bi_define(__nihil_ft_s, 1); __nihil_bi_shl(__nihil_ft_s, 2 - __e);
+            __nihil_bi_define(__nihil_ft_mp, 2);
+            __nihil_bi_define(__nihil_ft_mm, 1);
+        } || {
+            __nihil_bi_define(__nihil_ft_r, __f); __nihil_bi_shl(__nihil_ft_r, 1);
+            __nihil_bi_define(__nihil_ft_s, 1); __nihil_bi_shl(__nihil_ft_s, 1 - __e);
+            __nihil_bi_define(__nihil_ft_mp, 1);
+            __nihil_bi_define(__nihil_ft_mm, 1);
+        }
+    }
+    // estimate of k from below (log10 2 ≈ 0.30103), then corrected upward
+    __lg = __e;
+    __t = __f;
+    * __t > 1 { __lg = __lg + 1; __t = __t >> 1; }   // lg = exponent of the highest bit
+    __k = 0;
+    __lg >= 0 { __k = __nihil_ft_floordiv(__lg * 30102, 100000); } || { __k = __nihil_ft_floordiv(__lg * 30103, 100000); }
+    __k >= 0 {
+        __nihil_bi_pot10(__nihil_ft_s, __k);
+    } || {
+        __nihil_bi_pot10(__nihil_ft_r, -__k);
+        __nihil_bi_pot10(__nihil_ft_mp, -__k);
+        __nihil_bi_pot10(__nihil_ft_mm, -__k);
+    }
+    __fixing = true;
+    * __fixing {
+        __nihil_bi_sum(__nihil_ft_tmp, __nihil_ft_r, __nihil_ft_mp);
+        __c = __nihil_bi_cmp(__nihil_ft_tmp, __nihil_ft_s);
+        __c > 0 || __c == 0 && __even {
+            __nihil_bi_mul_sum(__nihil_ft_s, 10, 0);
+            __k = __k + 1;
+        } || {
+            __fixing = false;
+        }
+    }
+    // generates the digits
+    __n = 0;
+    __generating = true;
+    * __generating {
+        __nihil_bi_mul_sum(__nihil_ft_r, 10, 0);
+        __nihil_bi_mul_sum(__nihil_ft_mp, 10, 0);
+        __nihil_bi_mul_sum(__nihil_ft_mm, 10, 0);
+        __dg = 0;
+        * __nihil_bi_cmp(__nihil_ft_r, __nihil_ft_s) >= 0 {
+            __nihil_bi_sub(__nihil_ft_r, __nihil_ft_s);
+            __dg = __dg + 1;
+        }
+        __c1 = __nihil_bi_cmp(__nihil_ft_r, __nihil_ft_mm);
+        __low = __c1 < 0 || __c1 == 0 && __even;
+        __nihil_bi_sum(__nihil_ft_tmp, __nihil_ft_r, __nihil_ft_mp);
+        __c2 = __nihil_bi_cmp(__nihil_ft_tmp, __nihil_ft_s);
+        __high = __c2 > 0 || __c2 == 0 && __even;
+        !__low && !__high {
+            __nihil_ft_digits[__n] = __dg;
+        } || __low && !__high {
+            __nihil_ft_digits[__n] = __dg;
+            __generating = false;
+        } || !__low && __high {
+            __nihil_ft_digits[__n] = __dg + 1;
+            __generating = false;
+        } || {
+            __nihil_bi_copy(__nihil_ft_tmp, __nihil_ft_r);
+            __nihil_bi_shl(__nihil_ft_tmp, 1);
+            __nihil_bi_cmp(__nihil_ft_tmp, __nihil_ft_s) < 0 { __nihil_ft_digits[__n] = __dg; } || { __nihil_ft_digits[__n] = __dg + 1; }
+            __generating = false;
+        }
+        __n = __n + 1;
+    }
+    __nihil_ft_n_digits = __n;
+    __nihil_ft_k = __k;
+}
+
+// bits → text: "0.1", "3.0", "-2.5e-10", "1.0e+21", "inf", "-inf", "nan"
+__nihil_ft_text(b = 0) {
+    __buf = [0 ; 840];
+    __n = 0;
+    b < 0 { __buf[__n] = '-'; __n = __n + 1; }
+    __ex = (b >> 52) & 0x7FF;
+    __f = b & 0xFFFFFFFFFFFFF;
+    __ex == 0x7FF {
+        __f != 0 { : "nan"; }
+        b < 0 { : "-inf"; }
+        : "inf";
+    }
+    __ex == 0 && __f == 0 {
+        b < 0 { : "-0.0"; }
+        : "0.0";
+    }
+    __nihil_ft_digits_shortest(b & 0x7FFFFFFFFFFFFFFF);
+    __nd = __nihil_ft_n_digits;
+    __k = __nihil_ft_k;
+    __i = 0;
+    __k >= -5 && __k <= 21 {
+        // plain notation
+        __k <= 0 {
+            __buf[__n] = '0'; __buf[__n + 1] = '.'; __n = __n + 2;
+            -__k { __buf[__n] = '0'; __n = __n + 1; }
+            __nd { __buf[__n] = '0' + __nihil_ft_digits[__i]; __n = __n + 1; __i = __i + 1; }
+        } || __k >= __nd {
+            __nd { __buf[__n] = '0' + __nihil_ft_digits[__i]; __n = __n + 1; __i = __i + 1; }
+            __k - __nd { __buf[__n] = '0'; __n = __n + 1; }
+            __buf[__n] = '.'; __buf[__n + 1] = '0'; __n = __n + 2;
+        } || {
+            __k { __buf[__n] = '0' + __nihil_ft_digits[__i]; __n = __n + 1; __i = __i + 1; }
+            __buf[__n] = '.'; __n = __n + 1;
+            __nd - __k { __buf[__n] = '0' + __nihil_ft_digits[__i]; __n = __n + 1; __i = __i + 1; }
+        }
+    } || {
+        // scientific notation: d.ddd e±x
+        __buf[__n] = '0' + __nihil_ft_digits[0]; __buf[__n + 1] = '.'; __n = __n + 2;
+        __nd == 1 { __buf[__n] = '0'; __n = __n + 1; }
+        __i = 1;
+        __nd - 1 { __buf[__n] = '0' + __nihil_ft_digits[__i]; __n = __n + 1; __i = __i + 1; }
+        __buf[__n] = 'e'; __n = __n + 1;
+        __x = __k - 1;
+        __x < 0 { __buf[__n] = '-'; __x = -__x; } || { __buf[__n] = '+'; }
+        __n = __n + 1;
+        __dx = [0 ; 6];
+        __m = 0;
+        * __x > 0 || __m == 0 { __dx[__m] = '0' + __x % 10; __x = __x / 10; __m = __m + 1; }
+        * __m > 0 { __m = __m - 1; __buf[__n] = __dx[__m]; __n = __n + 1; }
+    }
+    __output = [0 ; __n];
+    __i = 0;
+    __n { __output[__i] = __buf[__i]; __i = __i + 1; }
+    : $__output;
+}

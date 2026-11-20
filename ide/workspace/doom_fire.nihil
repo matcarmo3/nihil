@@ -1,0 +1,108 @@
+// =============================================================================
+// The PSX Doom fire, in one file, sized for the IDE terminal.
+//   Ctrl+Enter runs it; "Stop" (or Ctrl+C in the terminal) ends it early.
+//
+// The fire is a grid of "heat" values from 0 to 36. The bottom row stays at 36.
+// Every frame, each pixel moves up one row, cools a little and drifts sideways
+// at random. A palette turns heat into color: black, red, orange, yellow, white.
+// Each character is "▀": the foreground color is the upper pixel and the
+// background the lower one, so every terminal line shows two rows of fire.
+// =============================================================================
+
+// ---- settings: try changing these ----
+WIDTH = 80;             // terminal columns
+HEIGHT = 32;            // rows of fire (even); the terminal needs HEIGHT / 2 lines
+FRAME_MS = 33;          // wait per frame: 33 ms ≈ 30 frames per second
+BURN_FRAMES = 900;      // frames with the fire lit (about 30 s)
+FADE_FRAMES = 60;       // frames after it goes out
+MAX_COOLING = 3;        // heat lost per row: 0 … MAX_COOLING (bigger = lower flames)
+MAX_DRIFT = 3;          // sideways drift: 0 … 3 → -1 … +2 (0 = straight up)
+
+// ---- the grid and the palette ----
+fire = [0 ; WIDTH * HEIGHT];
+MAX_HEAT = 36;
+PALETTE = [
+    0x07, 0x07, 0x07,  0x1F, 0x07, 0x07,  0x2F, 0x0F, 0x07,  0x47, 0x0F, 0x07,
+    0x57, 0x17, 0x07,  0x67, 0x1F, 0x07,  0x77, 0x1F, 0x07,  0x8F, 0x27, 0x07,
+    0x9F, 0x2F, 0x07,  0xAF, 0x3F, 0x07,  0xBF, 0x47, 0x07,  0xC7, 0x47, 0x07,
+    0xDF, 0x4F, 0x07,  0xDF, 0x57, 0x07,  0xDF, 0x57, 0x07,  0xD7, 0x5F, 0x07,
+    0xD7, 0x5F, 0x07,  0xD7, 0x67, 0x0F,  0xCF, 0x6F, 0x0F,  0xCF, 0x77, 0x0F,
+    0xCF, 0x7F, 0x0F,  0xCF, 0x87, 0x17,  0xC7, 0x87, 0x17,  0xC7, 0x8F, 0x17,
+    0xC7, 0x97, 0x1F,  0xBF, 0x9F, 0x1F,  0xBF, 0x9F, 0x1F,  0xBF, 0xA7, 0x27,
+    0xBF, 0xA7, 0x27,  0xBF, 0xAF, 0x2F,  0xB7, 0xAF, 0x2F,  0xB7, 0xB7, 0x2F,
+    0xB7, 0xB7, 0x37,  0xCF, 0xCF, 0x6F,  0xDF, 0xDF, 0x9F,  0xEF, 0xEF, 0xC7,
+    0xFF, 0xFF, 0xFF
+];
+
+// ---- pseudo-random numbers: a 64-bit linear congruential generator ----
+seed = 20261120;
+random() {
+    seed = seed * 6364136223846793005 + 1442695040888963407;
+    : (seed >> 33) & 0x7FFFFFFF;
+}
+
+// lights (heat = MAX_HEAT) or puts out (heat = 0) the bottom row
+source(heat = 0) {
+    i = 0;
+    WIDTH { fire[(HEIGHT - 1) * WIDTH + i] = heat; i = i + 1; }
+}
+
+// one frame of the simulation
+step() {
+    x = 0;
+    * x < WIDTH {
+        y = 1;
+        * y < HEIGHT {
+            src = y * WIDTH + x;
+            heat = fire[src];
+            heat == 0 {
+                fire[src - WIDTH] = 0;
+            } || {
+                r = random();
+                drift = r % (MAX_DRIFT + 1);
+                cooled = heat - (r >> 8) % (MAX_COOLING + 1);
+                cooled < 0 { cooled = 0; }
+                dst = src - drift + 1 - WIDTH;      // one row up, drifting
+                dst >= 0 && dst < WIDTH * HEIGHT { fire[dst] = cooled; }
+            }
+            y = y + 1;
+        }
+        x = x + 1;
+    }
+}
+
+// a 24-bit color escape: 38 = foreground, 48 = background
+color(code = 38, heat = 0) {
+    >> "\x1b["; >> code; >> ";2;";
+    >> PALETTE[heat * 3]; >> ";"; >> PALETTE[heat * 3 + 1]; >> ";"; >> PALETTE[heat * 3 + 2];
+    >> "m";
+}
+
+// draws the grid; a color is sent only when it changes
+draw() {
+    >> "\x1b[H";                            // cursor to the top left
+    row = 0;
+    * row < HEIGHT {
+        last_top = -1;
+        last_bottom = -1;
+        x = 0;
+        * x < WIDTH {
+            top = fire[row * WIDTH + x];
+            bottom = fire[(row + 1) * WIDTH + x];
+            top != last_top { color(38, top); last_top = top; }
+            bottom != last_bottom { color(48, bottom); last_bottom = bottom; }
+            >> "▀";
+            x = x + 1;
+        }
+        >> "\x1b[0m\n";
+        row = row + 2;
+    }
+}
+
+// ---- main ----
+>> "\x1b[2J\x1b[?25l";                      // clear the screen, hide the cursor
+source(MAX_HEAT);
+BURN_FRAMES { step(); draw(); ... FRAME_MS; }
+source(0);
+FADE_FRAMES { step(); draw(); ... FRAME_MS; }
+>> "\x1b[0m\x1b[?25h";                      // restore colors and the cursor

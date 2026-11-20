@@ -1,0 +1,22 @@
+x = 7;
+x > 5 { >> "bigger"; } >> "\n";
+x > 10 { >> "never"; }
+x > 10 { >> "large"; } || { >> "small"; } >> "\n";
+x > 10 {
+    >> "large";
+} || x > 5 {
+    >> "medium";
+} || {
+    >> "small";
+}
+>> "\n";
+// only the first true branch runs
+x > 1 { >> "1"; } || x > 2 { >> "2"; } || { >> "3"; } >> "\n";
+x < 0 { >> "a"; } || x < 0 { >> "b"; } || x < 0 { >> "c"; } >> "[no else]\n";
+// compound conditions and nesting
+x > 0 && x % 2 == 1 {
+    x == 7 { >> "seven odd"; } || { >> "other"; }
+} >> "\n";
+v = true;
+v { >> "v"; } >> "\n";
+!v { >> "never"; } || { >> "else"; } >> "\n";

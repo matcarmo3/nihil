@@ -1,0 +1,3 @@
+>> "before";
+s = @"tests/missing.txt";
+>> "after";

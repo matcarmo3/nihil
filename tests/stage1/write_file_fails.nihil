@@ -1,0 +1,3 @@
+>> "before";
+@>> "tests/no_such_dir/x.txt", "data";
+>> "after";

@@ -1,0 +1,7 @@
+// 3 million INTs (24 MiB): forces more than one heap block
+n = 3000000;
+v = [1 ; n];
+w = [2 ; n];
+i = 0; s = 0;
+* i < n { s = s + v[i] + w[i]; i = i + 1; }
+>> s;

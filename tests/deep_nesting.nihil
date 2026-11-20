@@ -1,0 +1,4 @@
+n = 0;
+2 { 2 { 2 { 2 { 2 { 2 { 2 { 2 { 2 { 2 { n = n + 1; } } } } } } } } } }
+>> n;
+true { true { true { true { true { true { >> " deep"; } } } } } }

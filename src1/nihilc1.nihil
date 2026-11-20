@@ -1,0 +1,23 @@
+// =============================================================================
+// nihilc1 — the compiler for the Nihil language, written in Nihil (stage 1)
+//
+// Compile it with stage 0:   build/nihilc src1/nihilc1.nihil build/nihilc1
+// or with itself:            ./nihilc1.sh src1/nihilc1.nihil build/nihilc2
+// =============================================================================
+
+@ "../build/runtime.nihil";     // generated from src/runtime.asm (make build/runtime.nihil)
+@ "../build/prelude_text.nihil";   // the prelude, as text (generated: make build/prelude_text.nihil)
+@ "00_data.nihil";
+@ "bigint.nihil";
+@ "float_text.nihil";
+@ "10_errors.nihil";
+@ "20_lexer.nihil";
+@ "30_symbols.nihil";
+@ "40_emit.nihil";
+@ "45_optionals.nihil";
+@ "47_records.nihil";
+@ "50_expressions.nihil";
+@ "60_commands.nihil";
+@ "70_prescan.nihil";
+@ "75_include.nihil";
+@ "80_main.nihil";

@@ -1,0 +1,5 @@
+// '::' ends the program from inside nested methods
+f() { g(); >> "never"; }
+g() { >> "g"; 3 { :: 40 + 2; } >> "never"; }
+f();
+>> "never";

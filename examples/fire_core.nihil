@@ -1,0 +1,67 @@
+// =============================================================================
+// The PSX Doom fire effect: the simulation, shared by doom_fire.nihil (terminal)
+// and doom_fire_ppm.nihil (a still image).
+//
+// The fire is a grid of "heat" values from 0 to 36. The bottom row stays at 36.
+// Every frame, each pixel moves up one row, cools a little and drifts sideways
+// by up to one pixel at random. The palette maps heat to color.
+// =============================================================================
+
+FIRE_W = 80;                    // pixels (= terminal columns)
+FIRE_H = 48;                    // pixels (= 2 × terminal lines)
+fire = [0 ; FIRE_W * FIRE_H];
+
+// heat → RGB: black, dark red, red, orange, yellow, white
+PALETTE = [
+    0x07, 0x07, 0x07,  0x1F, 0x07, 0x07,  0x2F, 0x0F, 0x07,  0x47, 0x0F, 0x07,
+    0x57, 0x17, 0x07,  0x67, 0x1F, 0x07,  0x77, 0x1F, 0x07,  0x8F, 0x27, 0x07,
+    0x9F, 0x2F, 0x07,  0xAF, 0x3F, 0x07,  0xBF, 0x47, 0x07,  0xC7, 0x47, 0x07,
+    0xDF, 0x4F, 0x07,  0xDF, 0x57, 0x07,  0xDF, 0x57, 0x07,  0xD7, 0x5F, 0x07,
+    0xD7, 0x5F, 0x07,  0xD7, 0x67, 0x0F,  0xCF, 0x6F, 0x0F,  0xCF, 0x77, 0x0F,
+    0xCF, 0x7F, 0x0F,  0xCF, 0x87, 0x17,  0xC7, 0x87, 0x17,  0xC7, 0x8F, 0x17,
+    0xC7, 0x97, 0x1F,  0xBF, 0x9F, 0x1F,  0xBF, 0x9F, 0x1F,  0xBF, 0xA7, 0x27,
+    0xBF, 0xA7, 0x27,  0xBF, 0xAF, 0x2F,  0xB7, 0xAF, 0x2F,  0xB7, 0xB7, 0x2F,
+    0xB7, 0xB7, 0x37,  0xCF, 0xCF, 0x6F,  0xDF, 0xDF, 0x9F,  0xEF, 0xEF, 0xC7,
+    0xFF, 0xFF, 0xFF
+];
+MAX_HEAT = 36;
+
+// pseudo-random numbers: a 64-bit linear congruential generator (wraps around)
+fire_seed = 20261120;
+fire_random() {
+    fire_seed = fire_seed * 6364136223846793005 + 1442695040888963407;
+    : (fire_seed >> 33) & 0x7FFFFFFF;
+}
+
+// lights (heat 36) or puts out (heat 0) the bottom row
+fire_source(heat = 0) {
+    i = 0;
+    FIRE_W { fire[(FIRE_H - 1) * FIRE_W + i] = heat; i = i + 1; }
+}
+
+// one frame of the simulation
+fire_step() {
+    x = 0;
+    * x < FIRE_W {
+        y = 1;
+        * y < FIRE_H {
+            src = y * FIRE_W + x;
+            heat = fire[src];
+            heat == 0 {
+                fire[src - FIRE_W] = 0;
+            } || {
+                r = fire_random();
+                drift = r & 3;
+                // the original loses 0 or 1 per row (0.5 on average) on a
+                // 168-row screen; with 48 rows it loses 0, 1 or 2 (1 on average)
+                // so the flames reach about three quarters of the height
+                cooled = heat - (r >> 2) % 3;
+                cooled < 0 { cooled = 0; }
+                dst = src - drift + 1 - FIRE_W; // up one row, drifting −1 … +2
+                dst >= 0 && dst < FIRE_W * FIRE_H { fire[dst] = cooled; }
+            }
+            y = y + 1;
+        }
+        x = x + 1;
+    }
+}

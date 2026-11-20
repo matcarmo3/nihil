@@ -1,0 +1,1 @@
+invalid_escape.nihil:1:6: invalid escape sequence (use \n \t \r \0 \\ \' \x22 or \xHH)

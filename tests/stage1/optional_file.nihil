@@ -1,0 +1,5 @@
+s? = @?"tests/data/text.txt";
+>> #(s || ""); >> "\n";
+t? = @?"tests/missing.txt";
+t == _ { >> "did not open"; } >> "\n";
+>> @?"tests/missing.txt" || "default"; >> "\n";

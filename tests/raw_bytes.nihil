@@ -1,0 +1,7 @@
+// >>> writes any byte, including 0 and 255
+>>> 'o'; >>> 'k'; >>> 0; >>> 255; >>> 256 + 'x';
+// <<< at the end of input gives -1 (the test runs with an empty stdin)
+<<< c;
+>>> '['; >> c; >>> ']';
+<<< c;
+>> c;

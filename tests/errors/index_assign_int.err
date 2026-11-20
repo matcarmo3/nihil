@@ -1,0 +1,1 @@
+only an ARRAY can take 'name[i] = value', but 'x' is INT

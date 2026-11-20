@@ -1,0 +1,576 @@
+// =============================================================================
+// Data models and records (SPEC §20)
+//   NAME = @[field: TYPE(width); …];      a model (top level only)
+//   NAME(a, b, …)                          a new record (omitted fields: 0, "", false, 0.0)
+//   r.field   r.field = v;                 fields
+//   NAME @ path   NAME @? path             reads a table file: ARRAY of NAME
+//   $r   $rows   @>> path, r   @+>> …      the fixed-width text of records
+// A record is a block of 8-byte slots like an ARRAY ([length][slots]); its value
+// points to the first slot. Its type is TYPE_REC | (model << 8). The text
+// conversions live in the prelude, which gets the model as constants.
+// =============================================================================
+
+model_type(m = 0) {
+    : TYPE_REC | (m << 8);
+}
+
+is_rec(t = 0) {
+    : t & (TYPE_REC | TYPE_ARR | TYPE_OPT) == TYPE_REC;
+}
+
+is_rec_array(t = 0) {
+    : t & (TYPE_REC | TYPE_ARR | TYPE_OPT) == TYPE_REC | TYPE_ARR;
+}
+
+is_model(k = 0) {
+    : k >= 0 && s_flags[k] & FLAG_MODEL != 0;
+}
+
+// source[start .. start+n) is the text s
+name_is(start = 0, n = 0, s = "") {
+    n != #s { : false; }
+    i = 0;
+    * i < n {
+        source[start + i] != s[i] { : false; }
+        i = i + 1;
+    }
+    : true;
+}
+
+same_source(a = 0, b = 0, n = 0) {
+    i = 0;
+    * i < n {
+        source[a + i] != source[b + i] { : false; }
+        i = i + 1;
+    }
+    : true;
+}
+
+const_put_q(v = 0) {
+    i = 0;
+    8 { const_put_byte((v >> (i * 8)) & 255); i = i + 1; }
+}
+
+// ---- prescan: every NAME = @[ … ]; at the top level becomes a model ----------
+prescan_models() {
+    sc = size_const;                     // the strings this scan decodes do not stay
+    init_lexer();
+    next_token();
+    braces = 0;
+    parens = 0;
+    * tok_type != T_END {
+        t = tok_type;
+        t == T_IDENT && parens == 0 && peek_type() == '=' && model_ahead() {
+            braces != 0 { error("a data model NAME = @[…]; is declared at the top level, outside any block"); }
+            parse_model();
+            t = tok_type;
+        }
+        t == '{' { braces = braces + 1; }
+        t == '}' { braces = braces - 1; }
+        t == '(' || t == '[' { parens = parens + 1; }
+        t == ')' || t == ']' { parens = parens - 1; }
+        next_token();
+    }
+    size_const = sc;
+    m = 0;
+    n_models { model_constants(m); m = m + 1; }
+}
+
+// tok = name: is it followed by "= @ ["?
+model_ahead() {
+    save_lexer();
+    next_token();
+    next_token();
+    r = tok_type == '@' && peek_type() == '[';
+    back_lexer();
+    drop_lexer();
+    : r;
+}
+
+// tok = name of NAME = @[ … ]; → registers the model; the lexer stops on the ";"
+parse_model() {
+    n_models >= MAX_MODEL { error("too many data models (limit 1024)"); }
+    k = lookup(tok_start, tok_len);
+    k >= 0 {
+        error_start();
+        put_str("'");
+        put_source(tok_start, tok_len);
+        put_str("' is already a data model");
+        error_end();
+    }
+    m = n_models;
+    k = new_symbol(tok_start, tok_len, 0);
+    s_flags[k] = FLAG_MODEL;
+    s_extra[k] = m;
+    m_sym[m] = k;
+    m_first[m] = n_fields;
+    m_n[m] = 0;
+    n_models = n_models + 1;
+    next_token();                        // name → "="
+    next_token();                        // → "@"
+    next_token();                        // → "["
+    next_token();
+    * tok_type != ']' {
+        tok_type != T_IDENT { error_expected("a field: name: TYPE(width)"); }
+        fs = tok_start; fl = tok_len; fn = tok_line; fli = tok_lstart;
+        j = m_first[m];
+        * j < n_fields {
+            f_len[j] == fl && same_source(f_start[j], fs, fl) {
+                error_start();
+                put_str("the field '");
+                put_source(fs, fl);
+                put_str("' appears twice in this model");
+                error_end();
+            }
+            j = j + 1;
+        }
+        next_token();
+        expect(':', "':' after the field name (name: TYPE)");
+        tok_type != T_IDENT { error_expected("a field type: INT(width), STRING(width), FLOAT(width) or BOOL"); }
+        ty = 0;
+        name_is(tok_start, tok_len, "INT") { ty = TYPE_INT; }
+        || name_is(tok_start, tok_len, "STRING") { ty = TYPE_STR; }
+        || name_is(tok_start, tok_len, "FLOAT") { ty = TYPE_FLOAT; }
+        || name_is(tok_start, tok_len, "BOOL") { ty = TYPE_BOOL; }
+        || { error_expected("a field type: INT(width), STRING(width), FLOAT(width) or BOOL"); }
+        next_token();
+        w = 1;
+        ty != TYPE_BOOL {
+            tok_type != '(' {
+                error_start();
+                put_str("the field '");
+                put_source(fs, fl);
+                put_str("' needs its width in the file, like ");
+                put_type(ty);
+                put_str("(10)");
+                error_end();
+            }
+            next_token();
+            tok_type != T_INT { error_expected("the width: a whole number"); }
+            w = tok_value;
+            max = 65535;
+            ty == TYPE_INT { max = 20; }
+            ty == TYPE_FLOAT { max = 40; }
+            w < 1 || w > max {
+                error_start();
+                put_str("the width of a ");
+                put_type(ty);
+                put_str(" field goes from 1 to ");
+                put_num(max);
+                ty == TYPE_INT { put_str(" (a 64-bit INT has up to 20 characters with the sign)"); }
+                error_end();
+            }
+            next_token();
+            expect(')', "')' after the width");
+        } || tok_type == '(' {
+            error("a BOOL field takes no width: it is always one character, T or F");
+        }
+        n_fields >= MAX_FIELD { error("too many fields in the data models"); }
+        f_start[n_fields] = fs;
+        f_len[n_fields] = fl;
+        f_type[n_fields] = ty;
+        f_width[n_fields] = w;
+        n_fields = n_fields + 1;
+        m_n[m] = m_n[m] + 1;
+        tok_type == ';' {
+            next_token();
+        } || tok_type != ']' {
+            error_expected("';' between the fields, or ']'");
+        }
+    }
+    m_n[m] == 0 { error("a data model needs at least one field"); }
+    next_token();                        // "]" → ";"
+    tok_type != ';' { error_expected("';' after the data model"); }
+}
+
+// the constants the prelude reads: schema, field names and the model's name
+model_constants(m = 0) {
+    k = m_sym[m];
+    const_init();
+    const_put_q(m_n[m]);
+    j = 0;
+    m_n[m] {
+        const_put_q(f_type[m_first[m] + j]);
+        const_put_q(f_width[m_first[m] + j]);
+        j = j + 1;
+    }
+    put_qword_cst(const_head, 1 + 2 * m_n[m]);
+    m_schema[m] = const_head + 8;
+    const_init();
+    j = 0;
+    m_n[m] {
+        j > 0 { const_put_byte(' '); }
+        const_put_source(f_start[m_first[m] + j], f_len[m_first[m] + j]);
+        j = j + 1;
+    }
+    m_names[m] = const_close();
+    const_init();
+    const_put_source(s_ofs[k], s_len[k]);
+    m_title[m] = const_close();
+}
+
+// in the code pass: tok = name of the declaration → skips it
+skip_model() {
+    * tok_type != ']' { next_token(); }
+    next_token();
+    expect(';', "';'");
+}
+
+// ---- fields ------------------------------------------------------------------
+find_field(m = 0, start = 0, n = 0) {
+    j = 0;
+    * j < m_n[m] {
+        e = m_first[m] + j;
+        f_len[e] == n && same_source(f_start[e], start, n) { : j; }
+        j = j + 1;
+    }
+    : -1;
+}
+
+// tok = a field name of a record of type t → index in f_*
+field_index(t = 0) {
+    m = t >> 8;
+    j = find_field(m, tok_start, tok_len);
+    j < 0 {
+        error_start();
+        put_type(t);
+        put_str(" has no field '");
+        put_source(tok_start, tok_len);
+        put_str("' (its fields: ");
+        i = 0;
+        m_n[m] {
+            i > 0 { put_str(", "); }
+            put_source(f_start[m_first[m] + i], f_len[m_first[m] + i]);
+            i = i + 1;
+        }
+        put_str(")");
+        error_end();
+    }
+    : m_first[m] + j;
+}
+
+not_a_record(t = 0) {
+    error_start();
+    put_str("only records have fields, but the expression is ");
+    put_type(t);
+    t & TYPE_ARR != 0 && t & TYPE_REC != 0 { put_str(" (pick one first: rows[i].field)"); }
+    error_end();
+}
+
+// tok = "." after a value of type t (in rax) → loads the field; returns its type
+field_access(t = 0) {
+    next_token();
+    tok_type != T_IDENT { error_expected("a field name after '.'"); }
+    t == TYPE_UNKNOWN {
+        next_token();
+        eb(0x48, 0x8B, 0x00);               // mov rax, [rax] (the type is not known yet)
+        : TYPE_UNKNOWN;
+    }
+    !is_rec(t) { not_a_record(t); }
+    e = field_index(t);
+    next_token();
+    eb(0x48, 0x8B, 0x80);                   // mov rax, [rax + disp32]
+    emit_d((e - m_first[t >> 8]) * 8);
+    : f_type[e];
+}
+
+// tok = "." : is it ". name =" (the field being assigned)?
+field_then_equals() {
+    save_lexer();
+    next_token();
+    next_token();
+    r = tok_type == '=';
+    back_lexer();
+    drop_lexer();
+    : r;
+}
+
+// tok = name: does the command have the form name ( [ … ] | .field )* .field = … ?
+field_assign_ahead() {
+    save_lexer();
+    next_token();
+    last = 0;
+    going = true;
+    * going {
+        tok_type == '[' {
+            depth = 0;
+            searching = true;
+            * searching {
+                tok_type == T_END {
+                    searching = false;
+                    going = false;
+                } || {
+                    tok_type == '[' { depth = depth + 1; }
+                    tok_type == ']' {
+                        depth = depth - 1;
+                        depth == 0 { searching = false; }
+                    }
+                    next_token();
+                }
+            }
+            last = '[';
+        } || tok_type == '.' {
+            next_token();
+            tok_type == T_IDENT {
+                next_token();
+                last = '.';
+            } || {
+                going = false;
+                last = 0;
+            }
+        } || {
+            going = false;
+        }
+    }
+    r = last == '.' && tok_type == '=';
+    back_lexer();
+    drop_lexer();
+    : r;
+}
+
+// r.field = expr ;   rows[i].field = expr ;
+cmd_field_assign() {
+    t = postfix_rest(primary(), true);
+    next_token();                        // "." → field
+    fi = tok_start; fl = tok_len; fn = tok_line; fli = tok_lstart;
+    ft = TYPE_UNKNOWN;
+    disp = 0;
+    t != TYPE_UNKNOWN {
+        !is_rec(t) { not_a_record(t); }
+        e = field_index(t);
+        ft = f_type[e];
+        disp = (e - m_first[t >> 8]) * 8;
+    }
+    next_token();                        // field → "="
+    next_token();
+    emit(0x50);                            // push rax (the record)
+    pi = tok_start; pl = tok_len; pn = tok_line; pli = tok_lstart;
+    v = expression();
+    v != TYPE_UNKNOWN && ft != TYPE_UNKNOWN && v != ft {
+        restore_pos(pi, pl, pn, pli);
+        error_start();
+        put_str("the field '");
+        put_source(fi, fl);
+        put_str("' is ");
+        put_type(ft);
+        put_str(" and cannot receive ");
+        put_type(v);
+        ft == TYPE_FLOAT && v == TYPE_INT { put_str(" (write 12.0, or .n to convert)"); }
+        error_end();
+    }
+    eb(0x59, 0x48, 0x89, 0x81);             // pop rcx ; mov [rcx + disp32], rax
+    emit_d(disp);
+    expect(';', "';'");
+}
+
+// ---- new records ---------------------------------------------------------------
+// rax = a new record of model m: zeros, and "" in the STRING fields
+emit_alloc_record(m = 0) {
+    emit(0xB9);                            // mov ecx, n
+    emit_d(m_n[m]);
+    emit_call_rt(RT_ALLOC);
+    j = 0;
+    m_n[m] {
+        f_type[m_first[m] + j] == TYPE_STR {
+            eb(0x48, 0x8D, 0x0D);           // lea rcx, [rip + ""]
+            register_fixup(size_code, const_empty, false);
+            emit_d(0);
+            eb(0x48, 0x89, 0x88);           // mov [rax + disp32], rcx
+            emit_d(j * 8);
+        }
+        j = j + 1;
+    }
+}
+
+// tok = model name, followed by "(" → NAME(a, b, …)
+new_record(k = 0) {
+    m = s_extra[k];
+    n = m_n[m];
+    next_token();
+    next_token();
+    i = 0;
+    * tok_type != ')' {
+        i >= n {
+            error_start();
+            put_type(model_type(m));
+            put_str(" has ");
+            put_num(n);
+            put_str(" field(s), but the call passes more");
+            error_end();
+        }
+        ai = tok_start; al = tok_len; an = tok_line; ali = tok_lstart;
+        u = expression();
+        e = m_first[m] + i;
+        u != f_type[e] && u != TYPE_UNKNOWN {
+            restore_pos(ai, al, an, ali);
+            error_start();
+            put_str("the field '");
+            put_source(f_start[e], f_len[e]);
+            put_str("' of ");
+            put_type(model_type(m));
+            put_str(" is ");
+            put_type(f_type[e]);
+            put_str(", but argument ");
+            put_num(i + 1);
+            put_str(" is ");
+            put_type(u);
+            f_type[e] == TYPE_FLOAT && u == TYPE_INT { put_str(" (write 12.0, or .n to convert)"); }
+            error_end();
+        }
+        emit(0x50);                        // push rax
+        i = i + 1;
+        tok_type == ',' {
+            next_token();
+            tok_type == ')' { error_expected("an expression"); }
+        } || tok_type != ')' {
+            error_expected("',' or ')'");
+        }
+    }
+    next_token();                        // ")"
+    emit_alloc_record(m);
+    r = i;
+    * r > 0 {
+        r = r - 1;
+        eb(0x59, 0x48, 0x89, 0x88);         // pop rcx ; mov [rax + disp32], rcx
+        emit_d(r * 8);
+    }
+    : model_type(m);
+}
+
+// ---- files and text ----------------------------------------------------------
+push_const(c = 0) {
+    eb(0x48, 0x8D, 0x05);                   // lea rax, [rip + constant] ; push rax
+    register_fixup(size_code, c, false);
+    emit_d(0);
+    emit(0x50);
+}
+
+push_model(m = 0) {
+    push_const(m_schema[m]);
+    push_const(m_names[m]);
+    push_const(m_title[m]);
+}
+
+// rax = a record or an ARRAY of records (type t) → rax = its fixed-width text
+emit_rec_text(t = 0) {
+    m = (t & ~TYPE_ARR) >> 8;
+    emit(0x50);
+    push_model(m);
+    is_rec(t) {
+        call_prelude("__nihil_rec_text", 32);
+    } || {
+        call_prelude("__nihil_table_text", 32);
+    }
+}
+
+// the width of a line of model m in a file (the fields and the "\n")
+line_width(m = 0) {
+    w = 1;
+    j = 0;
+    m_n[m] { w = w + f_width[m_first[m] + j]; j = j + 1; }
+    : w;
+}
+
+// the path after NAME @ … : a STRING expression (unary)
+model_path(m = 0, form = "") {
+    pi = tok_start; pl = tok_len; pn = tok_line; pli = tok_lstart;
+    u = unary();
+    u != TYPE_STR && u != TYPE_UNKNOWN {
+        restore_pos(pi, pl, pn, pli);
+        error_start();
+        put_str("'");
+        put_type(model_type(m));
+        put_str(" ");
+        put_str(form);
+        put_str("' needs the path of the file as a STRING, but the expression is ");
+        put_type(u);
+        error_end();
+    }
+}
+
+// tok = model name, followed by "@" or "@?":
+//   NAME @ path      → ARRAY of NAME (the whole table)
+//   NAME @[i] path   → NAME (only record i)      NAME @?[i] path → NAME?
+//   NAME @# path     → INT (how many records)
+table_read(k = 0) {
+    m = s_extra[k];
+    next_token();                        // name → "@"
+    opt = tok_type == T_AT_OPT;
+    next_token();
+    tok_type == '[' { : record_at(m, opt); }
+    tok_type == '#' && !opt { : record_count(m); }
+    model_path(m, "@");
+    emit(0x50);                            // push rax (the path)
+    opt {
+        emit_call_rt(RT_READ_FILE_OPT);   // 0 if it does not open: an empty table
+        eb(0x48, 0x85, 0xC0, 0x75, 7);      // test rax, rax ; jnz +7
+        eb(0x48, 0x8D, 0x05);               // lea rax, [rip + ""]
+        register_fixup(size_code, const_empty, false);
+        emit_d(0);
+    } || {
+        emit_call_rt(RT_READ_FILE);
+    }
+    emit(0x50);                            // push rax (the text)
+    push_model(m);
+    call_prelude("__nihil_table_read", 40);
+    : model_type(m) | TYPE_ARR;
+}
+
+// tok = "[" of NAME @[i] path / NAME @?[i] path: reads only record i (pread)
+record_at(m = 0, opt = false) {
+    next_token();
+    pi = tok_start; pl = tok_len; pn = tok_line; pli = tok_lstart;
+    u = expression();
+    u != TYPE_INT && u != TYPE_UNKNOWN {
+        restore_pos(pi, pl, pn, pli);
+        error_start();
+        put_str("the record number in '@[i]' must be INT, but it is ");
+        put_type(u);
+        error_end();
+    }
+    expect(']', "']'");
+    emit(0x50);                            // push rax (i)
+    model_path(m, "@[i]");
+    emit(0x50);                            // push rax (path)
+    w = line_width(m);
+    eb(0x48, 0x8B, 0x4C, 0x24, 0x08);       // mov rcx, [rsp + 8] (i)
+    eb(0x48, 0x69, 0xC9);                   // imul rcx, rcx, width
+    emit_d(w);
+    emit(0xBA);                            // mov edx, width
+    emit_d(w);
+    emit_call_rt(RT_READ_AT);             // rax = the line (0: no file), rdx = size
+    eb(0x50, 0x52);                         // push rax ; push rdx
+    push_model(m);
+    opt { eb(0xB8, 1, 0, 0, 0); } || { eb(0x31, 0xC0); }
+    emit(0x50);                            // push the "optional" flag
+    call_prelude("__nihil_rec_at", 64);
+    opt {
+        eb(0x31, 0xD2, 0x48, 0x85, 0xC0, 0x0F, 0x95, 0xC2);   // xor edx,edx ; test rax,rax ; setne dl
+        : model_type(m) | TYPE_OPT;
+    }
+    : model_type(m);
+}
+
+// tok = "#" of NAME @# path: how many records (from the size; 0 if no file)
+record_count(m = 0) {
+    next_token();
+    model_path(m, "@#");
+    emit(0x50);                            // push rax (path)
+    eb(0x31, 0xC9, 0x31, 0xD2);             // xor ecx, ecx ; xor edx, edx (read nothing)
+    emit_call_rt(RT_READ_AT);
+    emit(0x52);                            // push rdx (size)
+    push_const(m_schema[m]);
+    push_const(m_title[m]);
+    call_prelude("__nihil_rec_count", 32);
+    : TYPE_INT;
+}
+
+// ---- casts for the prelude (no code): __nihil_addr(x) → INT,
+// __nihil_str_at(INT) → STRING, __nihil_arr_at(INT) → ARRAY of INT
+intrinsic(r = 0) {
+    next_token();                        // name → "("
+    next_token();
+    expression();
+    expect(')', "')'");
+    : r;
+}

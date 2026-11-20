@@ -1,0 +1,384 @@
+// =============================================================================
+// Prelude — routines written in Nihil that nihilc1 puts at the start of every
+// program that uses FLOAT or `<<` (together with bigint.nihil and float_text.nihil).
+// Programs that use neither do not get the prelude.
+// Names starting with __nihil_ are reserved.
+// =============================================================================
+
+// >> and !>> of FLOAT: b = bits of the double; present = false prints "_"
+__nihil_print_float(b = 0, present = true, error = false) {
+    !present {
+        error { !>> "_"; } || { >> "_"; }
+        :;
+    }
+    __t = __nihil_ft_text(b);
+    error { !>> __t; } || { >> __t; }
+}
+
+// a line of input, without the "\n" (or a "\r" before it); _ at the end of input
+__nihil_read_line() {
+    __c = 0;
+    <<< __c;
+    __c == -1 { : _; }
+    __cap = 256;
+    __buf = [0 ; __cap];
+    __n = 0;
+    * __c != 10 && __c != -1 {
+        __n == __cap {
+            __bigger = [0 ; __cap * 2];
+            __i = 0;
+            __cap { __bigger[__i] = __buf[__i]; __i = __i + 1; }
+            __buf = __bigger;
+            __cap = __cap * 2;
+        }
+        __buf[__n] = __c;
+        __n = __n + 1;
+        <<< __c;
+    }
+    __n > 0 && __buf[__n - 1] == 13 { __n = __n - 1; }
+    __r = [0 ; __n];
+    __i = 0;
+    __n { __r[__i] = __buf[__i]; __i = __i + 1; }
+    : $__r;
+}
+
+__nihil_input_invalid(type = "", s = "") {
+    !>> "nihil: the input is not a valid ";
+    !>> type;
+    !>> ": '";
+    !>> s;
+    !>> "'\n";
+    :: 2;
+}
+
+__nihil_read_str() {
+    : __nihil_read_line();
+}
+
+__nihil_read_int() {
+    __l? = __nihil_read_line();
+    __l == _ { : _; }
+    __s = __l || "";
+    __i = 0;
+    __neg = false;
+    __i < #__s && (__s[__i] == '-' || __s[__i] == '+') {
+        __neg = __s[__i] == '-';
+        __i = __i + 1;
+    }
+    __i == #__s { __nihil_input_invalid("INT", __s); }
+    __v = 0;
+    * __i < #__s {
+        __d = __s[__i] - '0';
+        __d < 0 || __d > 9 { __nihil_input_invalid("INT", __s); }
+        // up to 9223372036854775807 (or 9223372036854775808 with a minus sign)
+        __v > 922337203685477580 || __v == 922337203685477580 && __d > 7 && !(__neg && __d == 8) {
+            __nihil_input_invalid("INT", __s);
+        }
+        __v = __v * 10 + __d;
+        __i = __i + 1;
+    }
+    __neg { __v = -__v; }
+    : __v;
+}
+
+__nihil_read_bool() {
+    __l? = __nihil_read_line();
+    __l == _ { : _; }
+    __s = __l || "";
+    __s == "true" { : true; }
+    __s == "false" { : false; }
+    __nihil_input_invalid("BOOL", __s);
+    : false;
+}
+
+// returns the bits of the FLOAT read (the compiler treats them as FLOAT?)
+__nihil_read_float() {
+    __l? = __nihil_read_line();
+    __l == _ { : _; }
+    __s = __l || "";
+    __b = __nihil_ft_text_to_bits(__s);
+    !__nihil_ft_valid { __nihil_input_invalid("FLOAT", __s); }
+    : __b;
+}
+
+// ---- records (SPEC §20): fixed-width text, one record per line ----------------
+// The compiler passes a record (or an ARRAY of records) as its address in an INT,
+// with the model: schema = [n, type1, width1, …] (1 INT, 2 BOOL, 3 STRING,
+// 7 FLOAT), the field names separated by spaces, and the model's name.
+// __nihil_addr, __nihil_str_at and __nihil_arr_at are casts the compiler
+// resolves without code: a record's slots are INTs, or STRING addresses.
+
+__nihil_rec_width(schema = [0]) {
+    __w = 0;
+    __i = 0;
+    schema[0] { __w = __w + schema[2 + __i * 2]; __i = __i + 1; }
+    : __w;
+}
+
+// the n-th word of s (words separated by one space)
+__nihil_word(s = "", n = 0) {
+    __i = 0;
+    __k = 0;
+    * __k < n {
+        s[__i] == ' ' { __k = __k + 1; }
+        __i = __i + 1;
+    }
+    __j = __i;
+    * __j < #s && s[__j] != ' ' { __j = __j + 1; }
+    __b = [0 ; __j - __i];
+    __m = 0;
+    __j - __i { __b[__m] = s[__i + __m]; __m = __m + 1; }
+    : $__b;
+}
+
+__nihil_int_text(v = 0) {
+    v == 0 { : "0"; }
+    v == -9223372036854775807 - 1 { : "-9223372036854775808"; }
+    __x = v;
+    __neg = __x < 0;
+    __neg { __x = -__x; }
+    __d = [0 ; 20];
+    __k = 0;
+    * __x > 0 {
+        __d[19 - __k] = '0' + __x % 10;
+        __x = __x / 10;
+        __k = __k + 1;
+    }
+    __neg {
+        __k = __k + 1;
+        __d[20 - __k] = '-';
+    }
+    __r = [0 ; __k];
+    __i = 0;
+    __k { __r[__i] = __d[20 - __k + __i]; __i = __i + 1; }
+    : $__r;
+}
+
+__nihil_type_name(t = 0) {
+    t == 1 { : "INT"; }
+    t == 2 { : "BOOL"; }
+    t == 3 { : "STRING"; }
+    : "FLOAT";
+}
+
+// a value that does not fit its field, when writing
+__nihil_rec_bad(names = "", i = 0, model = "", what = "") {
+    !>> "nihil: field '" + __nihil_word(names, i) + "' of " + model + " " + what + "\n";
+    :: 2;
+}
+
+// a line of a table file that does not match the model, when reading
+__nihil_table_bad(path = "", line = 0, what = "") {
+    !>> "nihil: '" + path + "', line " + __nihil_int_text(line) + ": " + what + "\n";
+    :: 2;
+}
+
+// writes the fields of record r into out, from position at: numbers aligned
+// to the right, STRING to the left, BOOL as T or F; spaces fill the rest
+__nihil_rec_put(r = 0, schema = [0], names = "", model = "", out = [0], at = 0) {
+    __slots = __nihil_arr_at(r);
+    __pos = at;
+    __i = 0;
+    * __i < schema[0] {
+        __ty = schema[1 + __i * 2];
+        __wd = schema[2 + __i * 2];
+        __v = __slots[__i];
+        __s = "";
+        __left = false;
+        __ty == 1 {
+            __s = __nihil_int_text(__v);
+        } || __ty == 2 {
+            __s = "F";
+            __v != 0 { __s = "T"; }
+        } || __ty == 3 {
+            __s = __nihil_str_at(__v);
+            __left = true;
+            __c = 0;
+            #__s {
+                __s[__c] == 10 { __nihil_rec_bad(names, __i, model, "cannot hold a line break"); }
+                __c = __c + 1;
+            }
+        } || {
+            __s = __nihil_ft_text(__v);
+        }
+        #__s > __wd {
+            __kind = __nihil_type_name(__ty) + "(" + __nihil_int_text(__wd) + ")";
+            __ty == 3 {
+                __nihil_rec_bad(names, __i, model, "does not fit in " + __kind + ": the text has " + __nihil_int_text(#__s) + " bytes");
+            }
+            __nihil_rec_bad(names, __i, model, "does not fit in " + __kind + ": " + __s);
+        }
+        __j = 0;
+        __wd { out[__pos + __j] = ' '; __j = __j + 1; }
+        __start = __pos + __wd - #__s;
+        __left { __start = __pos; }
+        __j = 0;
+        #__s { out[__start + __j] = __s[__j]; __j = __j + 1; }
+        __pos = __pos + __wd;
+        __i = __i + 1;
+    }
+}
+
+// $r, @>> path, r : the record's line (with the "\n")
+__nihil_rec_text(r = 0, schema = [0], names = "", model = "") {
+    __w = __nihil_rec_width(schema);
+    __out = [0 ; __w + 1];
+    __nihil_rec_put(r, schema, names, model, __out, 0);
+    __out[__w] = 10;
+    : $__out;
+}
+
+// $rows, @>> path, rows : one line per record
+__nihil_table_text(rows = [0], schema = [0], names = "", model = "") {
+    __w = __nihil_rec_width(schema) + 1;
+    __out = [0 ; #rows * __w];
+    __i = 0;
+    #rows {
+        __nihil_rec_put(rows[__i], schema, names, model, __out, __i * __w);
+        __out[__i * __w + __w - 1] = 10;
+        __i = __i + 1;
+    }
+    : $__out;
+}
+
+// [r ; n] : n independent copies of record r
+__nihil_rec_rep(r = 0, n = 0, schema = [0]) {
+    __rows = [0 ; n];
+    __src = __nihil_arr_at(r);
+    __i = 0;
+    n {
+        __b = [0 ; schema[0]];
+        __j = 0;
+        schema[0] { __b[__j] = __src[__j]; __j = __j + 1; }
+        __rows[__i] = __nihil_addr(__b);
+        __i = __i + 1;
+    }
+    : __nihil_addr(__rows);
+}
+
+// INT field: spaces around, an optional sign, digits; empty is 0
+__nihil_field_int(s = "", path = "", line = 0, names = "", i = 0) {
+    #s == 0 { : 0; }
+    __i = 0;
+    __neg = false;
+    s[0] == '-' || s[0] == '+' {
+        __neg = s[0] == '-';
+        __i = 1;
+    }
+    __ok = __i < #s;
+    __v = 0;
+    * __ok && __i < #s {
+        __d = s[__i] - '0';
+        __d < 0 || __d > 9 {
+            __ok = false;
+        } || __v > 922337203685477580 || __v == 922337203685477580 && __d > 7 && !(__neg && __d == 8) {
+            __ok = false;
+        } || {
+            __v = __v * 10 + __d;
+        }
+        __i = __i + 1;
+    }
+    !__ok { __nihil_table_bad(path, line, "field '" + __nihil_word(names, i) + "' is not a valid INT: '" + s + "'"); }
+    __neg { __v = -__v; }
+    : __v;
+}
+
+// the record that starts at position at of the text (a line already checked)
+__nihil_rec_parse(text = "", at = 0, schema = [0], names = "", path = "", line = 0) {
+    __n = schema[0];
+    __slots = [0 ; __n];
+    __pos = at;
+    __i = 0;
+    * __i < __n {
+        __ty = schema[1 + __i * 2];
+        __wd = schema[2 + __i * 2];
+        __a = __pos;
+        __b = __pos + __wd;
+        __ty != 3 { * __a < __b && text[__a] == ' ' { __a = __a + 1; } }    // STRING keeps leading spaces
+        * __b > __a && text[__b - 1] == ' ' { __b = __b - 1; }
+        __f = [0 ; __b - __a];
+        __k = 0;
+        __b - __a { __f[__k] = text[__a + __k]; __k = __k + 1; }
+        __s = $__f;
+        __ty == 1 {
+            __slots[__i] = __nihil_field_int(__s, path, line, names, __i);
+        } || __ty == 2 {
+            __s == "T" {
+                __slots[__i] = 1;
+            } || __s != "F" && __s != "" {
+                __nihil_table_bad(path, line, "field '" + __nihil_word(names, __i) + "' is not a BOOL (T or F): '" + __s + "'");
+            }
+        } || __ty == 3 {
+            __slots[__i] = __nihil_addr(__s);
+        } || #__s > 0 {
+            __bits = __nihil_ft_text_to_bits(__s);
+            !__nihil_ft_valid { __nihil_table_bad(path, line, "field '" + __nihil_word(names, __i) + "' is not a valid FLOAT: '" + __s + "'"); }
+            __slots[__i] = __bits;
+        }
+        __pos = __pos + __wd;
+        __i = __i + 1;
+    }
+    : __nihil_addr(__slots);
+}
+
+// NAME @ path : every line has exactly the model's width (the last one may
+// lack its "\n"); returns the ARRAY of records
+__nihil_table_read(path = "", text = "", schema = [0], names = "", model = "") {
+    __w = __nihil_rec_width(schema);
+    __len = #text;
+    __n = 0;
+    __pos = 0;
+    * __pos < __len {
+        __e = __pos;
+        * __e < __len && text[__e] != 10 { __e = __e + 1; }
+        __e - __pos != __w {
+            __nihil_table_bad(path, __n + 1, "the line has " + __nihil_int_text(__e - __pos) + " bytes, but a " + model + " record has " + __nihil_int_text(__w));
+        }
+        __n = __n + 1;
+        __pos = __e + 1;
+    }
+    __rows = [0 ; __n];
+    __i = 0;
+    __n {
+        __rows[__i] = __nihil_rec_parse(text, __i * (__w + 1), schema, names, path, __i + 1);
+        __i = __i + 1;
+    }
+    : __nihil_addr(__rows);
+}
+
+// NAME @# path : records in a file of `size` bytes (size < 0: no file → 0)
+__nihil_rec_count(path = "", size = 0, schema = [0], model = "") {
+    size < 0 { : 0; }
+    __w = __nihil_rec_width(schema) + 1;
+    __r = size % __w;
+    __r != 0 && __r != __w - 1 {
+        __nihil_table_bad(path, size / __w + 1, "the file ends in the middle of a " + model + " record (" + __nihil_int_text(size) + " bytes is not a whole number of " + __nihil_int_text(__w) + "-byte lines)");
+    }
+    __n = size / __w;
+    __r != 0 { __n = __n + 1; }
+    : __n;
+}
+
+// NAME @[i] path : the line read at record i (chunk: STRING address, 0 = no
+// file) → the record's address, or 0 (= _) for @?[i] when there is none
+__nihil_rec_at(i = 0, path = "", chunk = 0, size = 0, schema = [0], names = "", model = "", opt = false) {
+    chunk == 0 {
+        opt { : 0; }
+        !>> "nihil: could not read '" + path + "'\n";
+        :: 2;
+    }
+    __n = __nihil_rec_count(path, size, schema, model);
+    i < 0 || i >= __n {
+        opt { : 0; }
+        __last = "";
+        __n > 0 { __last = ": 0 to " + __nihil_int_text(__n - 1); }
+        !>> "nihil: '" + path + "' has no record " + __nihil_int_text(i) + " (it has " + __nihil_int_text(__n) + __last + ")\n";
+        :: 2;
+    }
+    __text = __nihil_str_at(chunk);
+    __w = __nihil_rec_width(schema);
+    #__text < __w || #__text > __w && __text[__w] != 10 {
+        __nihil_table_bad(path, i + 1, "the line does not have the width of a " + model + " record");
+    }
+    : __nihil_rec_parse(__text, 0, schema, names, path, i + 1);
+}

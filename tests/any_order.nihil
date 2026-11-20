@@ -1,0 +1,8 @@
+// a call before the declaration, and a method using a global created later
+>> double(21); >> "\n";
+show();
+double(x = 0) { : x * 2; }
+show() { >> "["; >> title; >> "]"; >> counter; >> "\n"; }
+title = "ok";
+counter = 7;
+show();

@@ -1,0 +1,17 @@
+// Looks up one product by its code, reading only that line of the file.
+// Create some products first with products.nihil (same model, same file).
+PRODUCT = @[code: INT(6); name: STRING(24); price: FLOAT(10); active: BOOL];
+FILE = "ide/workspace/products.dat";
+
+n = PRODUCT @# FILE;                    // from the file's size: nothing is read
+>> "The file has "; >> n; >> " product(s).\n";
+>> "Product code: ";
+code = 0;
+<< code;
+p? = PRODUCT @?[code - 1] FILE;         // code 1 is record 0; _ if there is none
+p == _ {
+    >> "There is no product "; >> code; >> ".\n";
+} || {
+    r = p || PRODUCT();
+    >> "#"; >> r.code; >> "  "; >> r.name; >> "  $"; >> r.price; >> "\n";
+}

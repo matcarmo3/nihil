@@ -1,0 +1,33 @@
+// =============================================================================
+// Optionals (SPEC §5): T? keeps value + presence. At run time the
+// value is in rax and the presence in rdx (1 = there is a value, 0 = _); in memory,
+// in two consecutive words.
+// =============================================================================
+
+is_opt(t = 0) {
+    : t & TYPE_OPT != 0;
+}
+
+base_opt(t = 0) {
+    : t & ~TYPE_OPT;
+}
+
+// converts the value (rax/rdx) from type `from_` to type `to`, emitting whatever
+// is needed. false if there is no conversion.
+convert(from_ = 0, to = 0) {
+    from_ == to || from_ == TYPE_UNKNOWN || to == TYPE_UNKNOWN { : true; }
+    is_opt(to) {
+        from_ == TYPE_ABSENT { : true; }              // _ already leaves rax = rdx = 0
+        from_ == base_opt(to) {
+            eb(0xBA, 1, 0, 0, 0);                   // mov edx, 1
+            : true;
+        }
+    }
+    : false;
+}
+
+// bytes a parameter takes on the stack
+size_param(e = 0) {
+    is_opt(p_type[e]) { : 16; }
+    : 8;
+}

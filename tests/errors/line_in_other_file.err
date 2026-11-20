@@ -1,0 +1,1 @@
+variable 'g' does not exist here yet (it is created on line 2 in tests/errors/included/creates_g.nihil)

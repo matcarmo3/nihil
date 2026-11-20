@@ -1,0 +1,18 @@
+print_upto(n = 0) {
+    i = 0;
+    * true {
+        i == n { :; }
+        >> i;
+        i = i + 1;
+    }
+}
+print_upto(5); >> "\n";
+first_divisor(n = 0) {
+    d = 2;
+    * d < n {
+        n % d == 0 { : d; }
+        d = d + 1;
+    }
+    : n;
+}
+>> first_divisor(91); >> " "; >> first_divisor(13); >> "\n";

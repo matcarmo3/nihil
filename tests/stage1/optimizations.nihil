@@ -1,0 +1,54 @@
+// edge cases of the M9 optimizations (the result must be the same with -O0)
+// increments: inc/dec and add/sub imm32 directly on the variable
+gg = 10;
+gg = gg + 1; gg = gg - 1; gg = gg + 5; gg = gg - 7; gg = gg + 2147483647; gg = gg - 2147483647;
+>> gg; >> "\n";
+hh = 0;
+hh = hh + 2147483648;       // does not fit in imm32: the normal path
+hh = hh - (-3);
+>> hh; >> "\n";
+// more locals than registers, with recursion (the saved registers come back)
+f(n = 0) {
+    a = n; b = n + 1; c = n + 2; d = n + 3; e = n + 4; x = n + 5; y = n + 6;
+    n > 0 { r = f(n - 1); a = a + r; }
+    : a + b + c + d + e + x + y;
+}
+>> f(3); >> "\n";
+// loop counters in registers, nested
+count() {
+    t = 0;
+    3 { 4 { 5 { t = t + 1; } } }
+    i = 0;
+    i < 1 { 2 { t = t + 100; } }
+    : t;
+}
+>> count(); >> "\n";
+// comparisons fused with the branch, also inside && and ||
+compare(a = 0, b = 0) {
+    r = 0;
+    a < b { r = r + 1; }
+    a <= b { r = r + 10; }
+    a > b { r = r + 100; }
+    a >= b { r = r + 1000; }
+    a == b { r = r + 10000; }
+    a != b { r = r + 100000; }
+    a < b && b < 10 { r = r + 1000000; }
+    a > b || a == 0 { r = r + 10000000; }
+    : r;
+}
+>> compare(1, 2); >> " "; >> compare(2, 2); >> " "; >> compare(3, 2); >> " "; >> compare(0, -5); >> "\n";
+// fallback with cmov
+vg? = 5;
+>> vg || 0; >> " ";
+vg = _;
+>> vg || 0; >> " "; >> vg || -7; >> " ";
+bg? = true;
+bg = _;
+>> bg || false; >> " ";
+wg = 9;
+>> vg || wg; >> "\n";
+// globals: an ordinary loop
+ig = 0;
+sg = 0;
+* ig < 1000 { sg = sg + ig; ig = ig + 1; }
+>> sg; >> "\n";

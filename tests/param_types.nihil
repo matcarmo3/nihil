@@ -1,0 +1,17 @@
+greet(name = "world", times = 1, shout = false) {
+    times {
+        >> "hello, "; >> name;
+        shout { >> "!"; } || { >> "."; }
+    }
+    >> "\n";
+}
+greet();
+greet("Nihil");
+greet("Nihil", 2);
+greet("Nihil", 1, true);
+negative(x = -5, h = 0xFF, c = 'a') { >> x; >> " "; >> h; >> " "; >> c; >> "\n"; }
+negative();
+size(s = "") { : #s; }
+>> size("abc") + size(); >> "\n";
+six(a = 1, b = 2, c = 3, d = 4, e = 5, f = 6) { : a * 100000 + b * 10000 + c * 1000 + d * 100 + e * 10 + f; }
+>> six(); >> " "; >> six(9, 8); >> "\n";

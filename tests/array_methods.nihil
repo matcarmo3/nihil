@@ -1,0 +1,21 @@
+sum(v = [0]) {
+    total = 0; i = 0;
+    #v { total = total + v[i]; i = i + 1; }
+    : total;
+}
+fill(v = [0], x = 0) {
+    i = 0;
+    #v { v[i] = x; i = i + 1; }
+}
+create(n = 0) { : [7 ; n]; }
+>> sum([1, 2, 3, 4]); >> " "; >> sum(); >> "\n";
+a = [0 ; 3];
+fill(a, 5);              // changes the caller's array
+>> sum(a); >> "\n";
+b = create(4);
+>> #b; >> " "; >> sum(b); >> "\n";
+// the default is a NEW array on every call
+accumulate(v = [100]) { v[0] = v[0] + 1; : v[0]; }
+>> accumulate(); >> " "; >> accumulate(); >> "\n";
+names(l = [""]) { : #l; }
+>> names(); >> " "; >> names(["a", "b"]); >> "\n";

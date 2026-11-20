@@ -1,0 +1,130 @@
+// =============================================================================
+// Symbol table — a stack: the most recent wins (inner scopes)
+// =============================================================================
+
+// lookup: name in source[start .. start+n) → symbol index, or -1
+lookup(start = 0, n = 0) {
+    k = n_sym;
+    * k > 0 {
+        k = k - 1;
+        s_len[k] == n {
+            o = s_ofs[k];
+            i = 0;
+            equal = true;
+            * equal && i < n {
+                source[o + i] != source[start + i] { equal = false; }
+                i = i + 1;
+            }
+            equal { : k; }
+        }
+    }
+    : -1;
+}
+
+// symbol whose name is the STRING s (for the prelude's methods) → index, or -1
+lookup_text(s = "") {
+    k = n_sym;
+    * k > 0 {
+        k = k - 1;
+        s_len[k] == #s {
+            o = s_ofs[k];
+            i = 0;
+            equal = true;
+            * equal && i < #s {
+                source[o + i] != s[i] { equal = false; }
+                i = i + 1;
+            }
+            equal { : k; }
+        }
+    }
+    : -1;
+}
+
+// calls a prelude method (the arguments are already pushed)
+call_prelude(name = "", bytes_args = 0) {
+    k = lookup_text(name);
+    k < 0 || s_flags[k] & FLAG_METHOD == 0 {
+        error_general("internal error: the prelude was not included");
+    }
+    emit(0xE8);
+    register_fixup(size_code, k, true);
+    emit_d(0);
+    bytes_args > 0 {
+        eb(0x48, 0x81, 0xC4);               // add rsp, bytes_args
+        emit_d(bytes_args);
+    }
+}
+
+new_symbol(start = 0, n = 0, t = 0) {
+    n_sym >= MAX_SYM { error("too many symbols"); }
+    n > 0xFFFF { error("name too long"); }
+    k = n_sym;
+    s_ofs[k] = start;
+    s_len[k] = n;
+    s_type[k] = t;
+    s_flags[k] = 0;
+    s_nparam[k] = 0;
+    s_end[k] = 0;
+    s_extra[k] = 0;
+    n_sym = n_sym + 1;
+    : k;
+}
+
+create_global(start = 0, n = 0, t = 0) {
+    k = new_symbol(start, n, t);
+    s_flags[k] = FLAG_GLOBAL;
+    s_end[k] = GLOBALS + n_globals * 8;
+    n_globals = n_globals + 1;
+    : k;
+}
+
+// local: takes a new frame slot (rbp - 8 × slot)
+// local: in a register (optimized, inside a method) or in a frame slot
+create_local(start = 0, n = 0, t = 0) {
+    r = take_register();
+    r >= 0 {
+        k = new_symbol(start, n, t);
+        s_end[k] = r;
+        s_flags[k] = FLAG_REG;
+        : k;
+    }
+    d = new_slot();
+    k = new_symbol(start, n, t);
+    s_end[k] = d;
+    : k;
+}
+
+// counts a register candidate and returns a free one, or -1
+take_register() {
+    !optimize || method_current < 0 { : -1; }
+    candidates = candidates + 1;
+    candidates > demand && demand < 5 { demand = candidates; }
+    n_regs >= limit_regs { : -1; }
+    r = REGS[n_regs];
+    n_regs = n_regs + 1;
+    : r;
+}
+
+create_param(start = 0, n = 0, t = 0, d = 0) {
+    k = new_symbol(start, n, t);
+    s_end[k] = d;
+    s_flags[k] = FLAG_PARAM;
+    : k;
+}
+
+// optional local: 2 slots (value at d, presence at d + 8)
+create_local_opt(start = 0, n = 0, t = 0) {
+    new_slot();
+    d = new_slot();
+    k = new_symbol(start, n, t);
+    s_end[k] = d;
+    s_flags[k] = FLAG_OPT;
+    : k;
+}
+
+new_slot() {
+    slots = slots + 1;
+    slots > max_slots { max_slots = slots; }
+    slots > 0x0FFFFFFF { error("too many local variables"); }
+    : -(slots * 8) - base_frame;
+}

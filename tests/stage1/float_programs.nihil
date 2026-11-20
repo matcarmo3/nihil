@@ -1,0 +1,30 @@
+// methods, arrays and optionals with FLOAT
+mean(v = [0.0]) {
+    s = 0.0;
+    i = 0;
+    #v { s = s + v[i]; i = i + 1; }
+    : s / .(#v);
+}
+grades = [7.5, 8.0, 9.25, 6.0];
+>> mean(grades); >> " "; >> mean(); >> "\n";
+sqrt_newton(x = 0.0) {
+    // Newton's method
+    r = x / 2.0;
+    20 { r = (r + x / r) / 2.0; }
+    : r;
+}
+>> sqrt_newton(2.0); >> " "; >> sqrt_newton(144.0); >> "\n";
+divide(a = 0.0, b = 0.0) {
+    b == 0.0 { : _; }
+    : a / b;
+}
+>> divide(1.0, 4.0); >> " "; >> divide(1.0, 0.0); >> " "; >> divide(3.0, 0.0) || -1.0; >> "\n";
+f? = 2.5;
+!>> f; !>> "\n";
+temperature(c = 20.0) { : c * 9.0 / 5.0 + 32.0; }
+>> temperature(); >> " "; >> temperature(-40.0); >> "\n";
+// sum of many terms: 1/n²
+s = 0.0;
+k = 1;
+* k <= 100000 { s = s + 1.0 / (.k * .k); k = k + 1; }
+>> s; >> "\n";

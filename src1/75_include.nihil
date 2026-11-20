@@ -1,0 +1,263 @@
+// =============================================================================
+// Loading the program and inclusions (SPEC §16) — mirrors load_program/expand
+//
+// Each file is read whole (with @) into the raw arena and copied into the
+// expanded source. A line `@ "file";` at the top level is replaced by the
+// contents of the file (once per path). The segments remember which
+// file and line each stretch came from, for the error messages.
+// =============================================================================
+
+error_large(k = 0) {
+    msg_len = 0;
+    put_str("nihilc: source file too large (limit 16 MiB): ");
+    put_name(k);
+    error_end();
+}
+
+// stores the bytes names[start .. start+n) as a path → index
+store_name(start = 0, n = 0) {
+    start + n >= SIZE_NAMES - 1 || n_names >= MAX_NAMES { error("too many included files"); }
+    name_start[n_names] = start;
+    name_len[n_names] = n;
+    size_names = start + n + 1;
+    n_names = n_names + 1;
+    : n_names - 1;
+}
+
+// reads file k to the end of the raw arena → start; raw_got = size
+read_raw(k = 0) {
+    path = [0 ; name_len[k]];
+    i = 0;
+    name_len[k] { path[i] = names[name_start[k] + i]; i = i + 1; }
+    contents = "";
+    k == index_prelude { contents = PRELUDE_TEXT; } || { contents = @$path; }
+    n = #contents;
+    size_raw + n >= SIZE_RAW - 1 { error_large(k); }
+    start = size_raw;
+    i = 0;
+    n { raw[start + i] = contents[i]; i = i + 1; }
+    raw[start + n] = 0;
+    size_raw = start + n + 1;
+    raw_got = n;
+    : start;
+}
+
+// copies raw[from_ .. upto) to the end of the expanded source
+copy_source(from_ = 0, upto = 0) {
+    n = upto - from_;
+    n <= 0 { :; }
+    n_source + n >= SIZE_SOURCE - 1 { error_large(0); }
+    i = 0;
+    n {
+        c = raw[from_ + i];
+        source[n_source] = c;
+        n_source = n_source + 1;
+        c == 10 { lines_buf = lines_buf + 1; }
+        i = i + 1;
+    }
+}
+
+source_ends_line() {
+    n_source > 0 && source[n_source - 1] != 10 {
+        n_source >= SIZE_SOURCE - 1 { error_large(0); }
+        source[n_source] = 10;
+        n_source = n_source + 1;
+        lines_buf = lines_buf + 1;
+    }
+}
+
+new_segment(k = 0, fline = 0) {
+    n_seg >= MAX_SEG { error("too many inclusions"); }
+    seg_start[n_seg] = n_source;
+    seg_name[n_seg] = k;
+    seg_bline[n_seg] = lines_buf + 1;
+    seg_fline[n_seg] = fline;
+    n_seg = n_seg + 1;
+}
+
+// length of a decoded constant (the qword before its bytes)
+size_cst(o = 0) {
+    v = 0;
+    i = 7;
+    8 { v = (v << 8) | cst[o - 8 + i]; i = i - 1; }
+    : v;
+}
+
+// path of file k + included path (constant pathc) → index of the path;
+// resolve_new = false if it had already been included
+resolve_path(k = 0, pathc = 0) {
+    n = size_cst(pathc);
+    n + 4096 + size_names >= SIZE_NAMES { error("too many included files"); }
+    start = size_names;
+    w = start;
+    cst[pathc] != '/' {
+        // directory of the including file: up to the last "/", inclusive
+        a = name_start[k];
+        last = -1;
+        i = 0;
+        name_len[k] {
+            names[a + i] == '/' { last = i; }
+            i = i + 1;
+        }
+        i = 0;
+        last + 1 {
+            names[w] = names[a + i];
+            w = w + 1;
+            i = i + 1;
+        }
+    }
+    i = 0;
+    n { names[w] = cst[pathc + i]; w = w + 1; i = i + 1; }
+    size = w - start;
+    // already included?
+    j = 0;
+    * j < n_names {
+        name_len[j] == size {
+            equal = true;
+            i = 0;
+            * equal && i < size {
+                names[name_start[j] + i] != names[start + i] { equal = false; }
+                i = i + 1;
+            }
+            equal {
+                resolve_new = false;
+                : j;
+            }
+        }
+        j = j + 1;
+    }
+    resolve_new = true;
+    : store_name(start, size);
+}
+
+expand(k = 0, depth = 0) {
+    sv_name = name_current;
+    name_current = k;
+    start = read_raw(k);
+    lx_pos = start;
+    lx_lstart = start;
+    lx_end = start + raw_got;
+    lx_line = 1;
+    copy_from = start;
+    new_segment(k, 1);
+    next_token();
+    braces = 0;
+    prev = T_END;
+    * tok_type != T_END {
+        t = tok_type;
+        // FLOAT (a literal or ".") or "<<" at the start of a command: needs the prelude
+        t == T_FLOAT || t == '.' || t == T_SHL && (prev == T_END || prev == ';' || prev == '{' || prev == '}') {
+            uses_prelude = true;
+        }
+        t == '@' && peek_type() == '[' { uses_prelude = true; }    // a data model: records use the prelude
+        t == '@' && braces == 0 && (prev == T_END || prev == ';' || prev == '}') {
+            pi = tok_start; pl = tok_len; pn = tok_line; pli = tok_lstart;
+            i = tok_lstart;                   // before the "@" on the line: only spaces
+            * i < tok_start {
+                c = raw[i];
+                c != ' ' && c != 9 { not_alone(pi, pl, pn, pli); }
+                i = i + 1;
+            }
+            next_token();
+            tok_type != T_STR { error_expected("a quoted file name after '@'"); }
+            pathc = tok_value;
+            next_token();
+            tok_type != ';' { expect(';', "';'"); }
+            // after the ";": only spaces (or // …) up to the end of the line
+            q = lx_pos;
+            found = false;
+            * !found {
+                c = raw[q];
+                c == ' ' || c == 9 || c == 13 {
+                    q = q + 1;
+                } || c == 10 {
+                    q = q + 1;
+                    found = true;
+                } || c == 0 {
+                    q < lx_end { not_alone(pi, pl, pn, pli); }
+                    found = true;
+                } || c == '/' && raw[q + 1] == '/' {
+                    * raw[q] != 10 && raw[q] != 0 { q = q + 1; }
+                    raw[q] == 10 { q = q + 1; }
+                    found = true;
+                } || {
+                    not_alone(pi, pl, pn, pli);
+                }
+            }
+            copy_source(copy_from, pli);     // what comes before the directive's line
+            copy_from = q;
+            new = resolve_path(k, pathc);
+            resolve_new {
+                depth >= 64 {
+                    restore_pos(pi, pl, pn, pli);
+                    error("inclusions nested too deeply (limit 64)");
+                }
+                sv_end = lx_end;
+                expand(new, depth + 1);
+                lx_end = sv_end;
+            }
+            new_segment(k, pn + 1);       // this file continues from the next line
+            lx_line = pn + 1;
+            lx_pos = copy_from;
+            lx_lstart = copy_from;
+            braces = 0;
+            prev = ';';
+            next_token();
+        } || {
+            t == '{' { braces = braces + 1; }
+            t == '}' { braces = braces - 1; }
+            prev = t;
+            next_token();
+        }
+    }
+    copy_source(copy_from, lx_end);
+    source_ends_line();
+    name_current = sv_name;
+}
+
+not_alone(pi = 0, pl = 0, pn = 0, pli = 0) {
+    restore_pos(pi, pl, pn, pli);
+    error("the inclusion @ \"file\"; must be alone on its line");
+}
+
+// standard input: the path of the program, on one line
+load_program() {
+    c = 0;
+    <<< c;
+    * c != 10 && c != -1 {
+        size_names < 4096 {
+            names[size_names] = c;
+            size_names = size_names + 1;
+        }
+        <<< c;
+    }
+    // "-O0 " before the path: no optimizations (the same bytes as stage 0)
+    size_names >= 4 && names[0] == '-' && names[1] == 'O' && names[2] == '0' && names[3] == ' ' {
+        optimize = false;
+        i = 0;
+        size_names - 4 { names[i] = names[i + 4]; i = i + 1; }
+        size_names = size_names - 4;
+    }
+    main = store_name(0, size_names);
+    expanding = true;
+    lx_buf = raw;
+    expand(main, 0);
+    uses_prelude {
+        // again, now with the prelude before the program
+        n_source = 0;
+        lines_buf = 0;
+        n_seg = 0;
+        size_raw = 0;
+        n_names = 1;
+        size_names = name_len[main] + 1;
+        name_p = "<prelude>";
+        i = 0;
+        #name_p { names[size_names + i] = name_p[i]; i = i + 1; }
+        index_prelude = store_name(size_names, #name_p);
+        expand(index_prelude, 0);
+        expand(main, 0);
+    }
+    expanding = false;
+    lx_buf = source;
+    size_const = 0;                          // strings decoded during expansion do not count
+}

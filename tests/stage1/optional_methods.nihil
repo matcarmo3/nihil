@@ -1,0 +1,37 @@
+// ": _;" next to ": i;" makes the method return INT?
+find(v = [0], x = 0) {
+    i = 0;
+    * i < #v {
+        v[i] == x { : i; }
+        i = i + 1;
+    }
+    : _;
+}
+nums = [5, 8, 13];
+>> find(nums, 8); >> " "; >> find(nums, 7); >> " "; >> find(nums, 7) || -1; >> "\n";
+r? = find(nums, 13);
+r != _ { >> "found at "; >> r || 0; } >> "\n";
+// optional parameter: the default is present; _ can be passed
+show(n? = 0) {
+    n == _ { >> "nothing"; } || { >> n || 0; }
+    >> " ";
+}
+show(); show(3); show(_);
+q? = 4; show(q); q = _; show(q);
+>> "\n";
+// optional method declared after its use
+>> first_even([1, 3, 6, 7]) || 0; >> " "; >> first_even([1, 3]) || 0; >> "\n";
+first_even(v = [0]) {
+    i = 0;
+    * i < #v {
+        v[i] % 2 == 0 { : v[i]; }
+        i = i + 1;
+    }
+    : _;
+}
+// recursion with an optional accumulator
+count(n = 0, acc? = 0) {
+    n == 0 { : acc; }
+    : count(n - 1, (acc || 0) + 1);
+}
+>> count(5); >> "\n";

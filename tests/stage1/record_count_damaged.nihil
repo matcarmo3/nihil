@@ -1,0 +1,3 @@
+I = @[a: INT(2)];
+@>> "build/rb.dat", " 1\n 2\n3";
+>> I @# "build/rb.dat";

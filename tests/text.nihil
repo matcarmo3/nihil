@@ -1,0 +1,13 @@
+b = [79, 108, 0xC3, 0xA1, 33];
+s = $b;
+>> s; >> " "; >> #s; >> "\n";
+>> $[78, 105, 104, 105, 108]; >> "\n";
+>> #$[0 ; 0]; >> "\n";
+// building text byte by byte
+buf = [0 ; 5];
+i = 0;
+5 { buf[i] = 'a' + i; i = i + 1; }
+>> $buf; >> "\n";
+>> $buf == "abcde"; >> "\n";
+// 256 + 'x' becomes 'x' (only the low byte)
+>> $[256 + 'x']; >> "\n";

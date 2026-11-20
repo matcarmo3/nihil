@@ -1,0 +1,17 @@
+fact(n = 0) {
+    n <= 1 { : 1; }
+    : n * fact(n - 1);
+}
+fib(n = 0) {
+    n < 2 { : n; }
+    : fib(n - 1) + fib(n - 2);
+}
+>> fact(20); >> "\n";
+>> fib(25); >> "\n";
+// the locals of each call are independent
+sum_upto(n = 0) {
+    n == 0 { : 0; }
+    rest = sum_upto(n - 1);
+    : rest + n;
+}
+>> sum_upto(1000); >> "\n";

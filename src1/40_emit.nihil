@@ -1,0 +1,340 @@
+// =============================================================================
+// Emission of machine code and of the ELF64 executable
+// =============================================================================
+
+emit(b = 0) {
+    size_code >= SIZE_CODE { error_code_large(); }
+    code[size_code] = b & 255;
+    size_code = size_code + 1;
+}
+
+// up to 9 fixed bytes; -1 = absent
+eb(a = -1, b = -1, c = -1, d = -1, e = -1, f = -1, g = -1, h = -1, x = -1) {
+    a >= 0 { emit(a); }
+    b >= 0 { emit(b); }
+    c >= 0 { emit(c); }
+    d >= 0 { emit(d); }
+    e >= 0 { emit(e); }
+    f >= 0 { emit(f); }
+    g >= 0 { emit(g); }
+    h >= 0 { emit(h); }
+    x >= 0 { emit(x); }
+}
+
+emit_w(v = 0) {
+    emit(v);
+    emit(v >> 8);
+}
+
+emit_d(v = 0) {
+    emit(v);
+    emit(v >> 8);
+    emit(v >> 16);
+    emit(v >> 24);
+}
+
+emit_q(v = 0) {
+    i = 0;
+    8 { emit(v >> (i * 8)); i = i + 1; }
+}
+
+put_d(pos = 0, v = 0) {
+    code[pos] = v & 255;
+    code[pos + 1] = (v >> 8) & 255;
+    code[pos + 2] = (v >> 16) & 255;
+    code[pos + 3] = (v >> 24) & 255;
+}
+
+put_q(pos = 0, v = 0) {
+    i = 0;
+    8 { code[pos + i] = (v >> (i * 8)) & 255; i = i + 1; }
+}
+
+// code that puts v in rax, in the shortest form
+emit_immediate(v = 0) {
+    v >= 0 && v < 4294967296 {
+        emit(0xB8);                        // mov eax, imm32
+        emit_d(v);
+    } || v >= -2147483648 && v < 2147483648 {
+        eb(0x48, 0xC7, 0xC0);               // mov rax, simm32
+        emit_d(v);
+    } || {
+        eb(0x48, 0xB8);                     // mov rax, imm64
+        emit_q(v);
+    }
+}
+
+emit_store_local(d = 0) {
+    eb(0x48, 0x89, 0x85);                   // mov [rbp + disp32], rax
+    emit_d(d);
+}
+
+emit_store_global(a = 0) {
+    eb(0x48, 0x89, 0x04, 0x25);             // mov [disp32], rax
+    emit_d(a);
+}
+
+emit_load_var(k = 0) {
+    s_flags[k] & FLAG_REG != 0 {
+        emit_mov_rax_reg(s_end[k]);
+        :;
+    }
+    s_flags[k] & FLAG_GLOBAL != 0 {
+        eb(0x48, 0x8B, 0x04, 0x25);         // mov rax, [disp32]
+        emit_d(s_end[k]);
+        s_flags[k] & FLAG_OPT != 0 {
+            eb(0x48, 0x8B, 0x14, 0x25);     // mov rdx, [disp32 + 8]
+            emit_d(s_end[k] + 8);
+        }
+    } || {
+        eb(0x48, 0x8B, 0x85);               // mov rax, [rbp + disp32]
+        emit_d(s_end[k]);
+        s_flags[k] & FLAG_OPT != 0 {
+            eb(0x48, 0x8B, 0x95);           // mov rdx, [rbp + disp32 + 8]
+            emit_d(s_end[k] + 8);
+        }
+    }
+}
+
+emit_store_var(k = 0) {
+    s_flags[k] & FLAG_REG != 0 {
+        emit_mov_reg_rax(s_end[k]);
+        :;
+    }
+    s_flags[k] & FLAG_GLOBAL != 0 {
+        emit_store_global(s_end[k]);
+        s_flags[k] & FLAG_OPT != 0 {
+            eb(0x48, 0x89, 0x14, 0x25);     // mov [disp32 + 8], rdx
+            emit_d(s_end[k] + 8);
+        }
+    } || {
+        emit_store_local(s_end[k]);
+        s_flags[k] & FLAG_OPT != 0 {
+            eb(0x48, 0x89, 0x95);           // mov [rbp + disp32 + 8], rdx
+            emit_d(s_end[k] + 8);
+        }
+    }
+}
+
+emit_jmp_to(dest = 0) {
+    emit(0xE9);
+    emit_d(dest - size_code - 4);
+}
+
+emit_call_rt(rt = 0) {
+    emit(0xE8);
+    emit_d(rt + SIZE_HEADER - size_code - 4);
+}
+
+// cmp rcx, [rax-8] ; jae erro_indice
+emit_check_limit() {
+    eb(0x48, 0x3B, 0x48, 0xF8, 0x0F, 0x83);
+    emit_d(RT_ERROR_INDEX + SIZE_HEADER - size_code - 4);
+}
+
+// the rel32 at pos now points to the current position
+patch_here(pos = 0) {
+    put_d(pos, size_code - (pos + 4));
+    last_target = size_code;               // a jump lands here: the code before it cannot change
+}
+
+// ---- registers: r = 3 (rbx) or 12 … 15 ----
+rex_b(r = 0) { r >= 8 { : 1; } : 0; }
+rex_r(r = 0) { r >= 8 { : 4; } : 0; }
+
+emit_mov_rax_reg(r = 0) {                  // mov rax, r
+    eb(0x48 | rex_r(r), 0x89, 0xC0 | ((r & 7) << 3));
+}
+
+emit_mov_reg_rax(r = 0) {                  // mov r, rax
+    eb(0x48 | rex_b(r), 0x89, 0xC0 | (r & 7));
+}
+
+// method epilogue: restores the saved registers and returns
+emit_return() {
+    limit_regs == 0 {
+        eb(0xC9, 0xC3);                     // leave ; ret
+        :;
+    }
+    eb(0x48, 0x8D, 0x65, (-8 * limit_regs) & 255);   // lea rsp, [rbp - 8·n]
+    i = limit_regs;
+    * i > 0 {
+        i = i - 1;
+        r = REGS[i];
+        r >= 8 { eb(0x41, 0x58 | (r & 7)); } || { emit(0x58 | r); }   // pop r
+    }
+    eb(0x5D, 0xC3);                         // pop rbp ; ret
+}
+
+// ---- optimizations on code already emitted ----
+
+// is code[a .. size_code) a single simple load into rax (a constant or a
+// variable)? Returns the length of the instruction, or 0. Nothing may have
+// been registered for fixup in that stretch.
+load_simple(a = 0) {
+    !optimize { : 0; }
+    n_fix > 0 && fix_pos[n_fix - 1] >= a { : 0; }
+    last_target >= a { : 0; }              // (a jump into it: the code is going to move back)
+    n = size_code - a;
+    n == 5 && code[a] == 0xB8 { : 5; }
+    n == 7 && code[a] == 0x48 && code[a + 1] == 0xC7 && code[a + 2] == 0xC0 { : 7; }
+    n == 10 && code[a] == 0x48 && code[a + 1] == 0xB8 { : 10; }
+    n == 8 && code[a] == 0x48 && code[a + 1] == 0x8B && code[a + 2] == 0x04 && code[a + 3] == 0x25 { : 8; }
+    n == 7 && code[a] == 0x48 && code[a + 1] == 0x8B && code[a + 2] == 0x85 { : 7; }
+    n == 3 && (code[a] == 0x48 || code[a] == 0x4C) && code[a + 1] == 0x89 && code[a + 2] & 0xC7 == 0xC0 { : 3; }
+    : 0;
+}
+
+// rewrites the simple load at code[a ..] to load rcx instead of rax.
+// None of the forms touches the flags.
+reload_in_rcx(a = 0) {
+    n = size_code - a;
+    n == 5 {
+        code[a] = 0xB9;                      // mov ecx, imm32
+    } || n == 7 && code[a + 1] == 0xC7 {
+        code[a + 2] = 0xC1;                  // mov rcx, simm32
+    } || n == 10 {
+        code[a + 1] = 0xB9;                  // mov rcx, imm64
+    } || n == 8 {
+        code[a + 2] = 0x0C;                  // mov rcx, [disp32]
+    } || n == 7 {
+        code[a + 2] = 0x8D;                  // mov rcx, [rbp + disp32]
+    } || {
+        code[a + 2] = code[a + 2] | 1;        // mov rcx, r
+    }
+}
+
+// moves code[from_ .. size_code) to start at to (to < from_)
+move_code_back(from_ = 0, to = 0) {
+    i = 0;
+    size_code - from_ {
+        code[to + i] = code[from_ + i];
+        i = i + 1;
+    }
+    size_code = size_code - (from_ - to);
+}
+
+// jump "if rax is false" after a condition → position of the rel32.
+// If the condition ended in an INT comparison (cmp ; setcc ; movzx),
+// it becomes a single jcc with the condition inverted.
+emit_jump_if_false() {
+    a = size_code - 9;
+    optimize && a >= 0 && last_target <= a && (n_fix == 0 || fix_pos[n_fix - 1] < a)
+        && code[a] == 0x48 && code[a + 1] == 0x39 && code[a + 2] == 0xC8
+        && code[a + 3] == 0x0F && code[a + 4] & 0xF0 == 0x90 && code[a + 5] == 0xC0
+        && code[a + 6] == 0x0F && code[a + 7] == 0xB6 && code[a + 8] == 0xC0 {
+        cc = code[a + 4] & 15;
+        size_code = a + 3;                 // only the cmp is left
+        eb(0x0F, 0x80 | (cc ^ 1));          // jcc invertido
+        pos = size_code;
+        emit_d(0);
+        : pos;
+    }
+    eb(0x48, 0x85, 0xC0, 0x0F, 0x84);       // test rax, rax ; jz
+    pos = size_code;
+    emit_d(0);
+    : pos;
+}
+
+// the rel32 at pos → constant at offset v (or method v, if m)
+register_fixup(pos = 0, v = 0, m = false) {
+    n_fix * 16 >= SIZE_FIX - 16 { error_code_large(); }
+    fix_pos[n_fix] = pos;
+    fix_val[n_fix] = v;
+    fix_method[n_fix] = m;
+    n_fix = n_fix + 1;
+}
+
+// ---- constants built by the compiler ----
+const_init() {
+    const_head = (size_const + 7) & -8;
+    size_const = const_head + 8;
+}
+
+const_put_byte(b = 0) {
+    cst[size_const] = b;
+    size_const = size_const + 1;
+}
+
+const_put_str(s = "") {
+    size_const + #s >= SIZE_CONST - 16 { error("too many constants (limit 16 MiB)"); }
+    i = 0;
+    #s { const_put_byte(s[i]); i = i + 1; }
+}
+
+const_put_source(start = 0, n = 0) {
+    size_const + n >= SIZE_CONST - 16 { error("too many constants (limit 16 MiB)"); }
+    i = 0;
+    n { const_put_byte(source[start + i]); i = i + 1; }
+}
+
+const_close() {
+    cst[size_const] = 0;
+    put_qword_cst(const_head, size_const - const_head - 8);
+    size_const = size_const + 1;
+    : const_head + 8;
+}
+
+// appends the constants after the code (aligned to 8) and resolves the fixups
+emit_constantes() {
+    * size_code & 7 != 0 { emit(0xCC); }
+    base = size_code;
+    size_code + size_const > SIZE_CODE { error_code_large(); }
+    i = 0;
+    size_const {
+        code[size_code] = cst[i];
+        size_code = size_code + 1;
+        i = i + 1;
+    }
+    i = 0;
+    n_fix {
+        pos = fix_pos[i];
+        target = base + fix_val[i];
+        fix_method[i] { target = s_end[fix_val[i]]; }
+        put_d(pos, target - (pos + 4));
+        i = i + 1;
+    }
+}
+
+emit_header() {
+    // ELF64 header
+    eb(0x7F, 'E', 'L', 'F', 2, 1, 1, 0);
+    8 { emit(0); }
+    emit_w(2);                             // ET_EXEC
+    emit_w(0x3E);                          // EM_X86_64
+    emit_d(1);
+    emit_q(BASE_CODE + SIZE_HEADER);   // entry
+    emit_q(64);                            // e_phoff
+    emit_q(0);
+    emit_d(0);
+    emit_w(64);
+    emit_w(56);
+    emit_w(2);
+    emit_w(64);
+    emit_w(0);
+    emit_w(0);
+    // PT_LOAD code (R+X)
+    emit_d(1);
+    emit_d(5);
+    emit_q(0);
+    emit_q(BASE_CODE);
+    emit_q(BASE_CODE);
+    emit_q(0);
+    emit_q(0);
+    emit_q(0x1000);
+    // PT_LOAD data (R+W, in memory only)
+    emit_d(1);
+    emit_d(6);
+    emit_q(0);
+    emit_q(BASE_DATA);
+    emit_q(BASE_DATA);
+    emit_q(0);
+    emit_q(0);
+    emit_q(0x1000);
+}
+
+close_elf() {
+    put_q(96, size_code);                  // p_filesz of the code
+    put_q(104, size_code);                 // p_memsz of the code
+    put_q(160, OFS_GLOBALS + n_globals * 8); // p_memsz of the data
+}

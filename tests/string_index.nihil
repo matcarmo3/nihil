@@ -1,0 +1,13 @@
+s = "Olá";
+i = 0;
+#s { >> s[i]; >> " "; i = i + 1; }
+>> "\n";
+>> "abc"[1]; >> "\n";
+// comparing contents
+a = "nihil"; b = "nihi";
+>> a == "nihil"; >> " "; >> a == b; >> " "; >> a != b; >> " "; >> "" == ""; >> "\n";
+upper(c = 0) { c >= 'a' && c <= 'z' { : c - 32; } : c; }
+t = "text";
+i = 0;
+#t { >>> upper(t[i]); i = i + 1; }
+>>> '\n';

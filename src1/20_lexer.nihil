@@ -1,0 +1,380 @@
+// =============================================================================
+// Lexer — the same behavior as next_token in stage 0
+// =============================================================================
+
+init_lexer() {
+    lx_pos = 0;
+    lx_lstart = 0;
+    lx_end = n_source;
+    lx_line = 1;
+}
+
+mark_in(p = 0) {
+    tok_start = p;
+    tok_line = lx_line;
+    tok_lstart = lx_lstart;
+}
+
+is_ident(c = 0) {
+    c == '_' { : true; }
+    c >= '0' && c <= '9' { : true; }
+    l = c | 32;
+    : l >= 'a' && l <= 'z';
+}
+
+value_hex(c = 0) {
+    c >= '0' && c <= '9' { : c - '0'; }
+    l = c | 32;
+    l >= 'a' && l <= 'f' { : l - 'a' + 10; }
+    : -1;
+}
+
+is_simple(c = 0) {
+    s = ";,(){}[]?:#~+-*/%^@$.";
+    i = 0;
+    #s {
+        s[i] == c { : true; }
+        i = i + 1;
+    }
+    : false;
+}
+
+put_qword_cst(pos = 0, v = 0) {
+    i = 0;
+    8 { cst[pos + i] = (v >> (i * 8)) & 255; i = i + 1; }
+}
+
+next_token() {
+    p = lx_pos;
+    skipping = true;
+    * skipping {
+        c = lx_buf[p];
+        c == 32 || c == 9 || c == 13 {
+            p = p + 1;
+        } || c == 10 {
+            p = p + 1;
+            lx_line = lx_line + 1;
+            lx_lstart = p;
+        } || c == '/' && lx_buf[p + 1] == '/' {
+            p = p + 2;
+            * lx_buf[p] != 10 && lx_buf[p] != 0 { p = p + 1; }
+        } || c == '/' && lx_buf[p + 1] == '*' {
+            mark_in(p);                // the error points to the "/*"
+            p = p + 2;
+            inside = true;
+            * inside {
+                d = lx_buf[p];
+                d == 0 && p >= lx_end { error("unterminated comment '/*'"); }
+                d == 10 {
+                    p = p + 1;
+                    lx_line = lx_line + 1;
+                    lx_lstart = p;
+                } || d == '*' && lx_buf[p + 1] == '/' {
+                    p = p + 2;
+                    inside = false;
+                } || {
+                    p = p + 1;
+                }
+            }
+        } || {
+            skipping = false;
+        }
+    }
+
+    mark_in(p);
+    tok_value = 0;
+    c = lx_buf[p];
+    c == 0 {
+        p >= lx_end {
+            tok_type = T_END;
+            tok_len = 0;
+            lx_pos = p;
+            :;
+        }
+        error("null byte in the source code");
+    }
+    l = c | 32;
+    l >= 'a' && l <= 'z' || c == '_' { read_ident(p); :; }
+    c >= '0' && c <= '9' { read_number(p); :; }
+    c == '"' { read_string(p); :; }
+    c == '\'' { read_char(p); :; }
+    read_operator(p);
+}
+
+read_ident(p = 0) {
+    q = p + 1;
+    * is_ident(lx_buf[q]) { q = q + 1; }
+    n = q - p;
+    tok_len = n;
+    lx_pos = q;
+    tok_type = T_IDENT;
+    n == 1 && lx_buf[p] == '_' { tok_type = T_UNDERSCORE; }
+    n == 4 && lx_buf[p] == 't' && lx_buf[p + 1] == 'r' && lx_buf[p + 2] == 'u' && lx_buf[p + 3] == 'e' {
+        tok_type = T_TRUE;
+    }
+    n == 5 && lx_buf[p] == 'f' && lx_buf[p + 1] == 'a' && lx_buf[p + 2] == 'l' && lx_buf[p + 3] == 's' && lx_buf[p + 4] == 'e' {
+        tok_type = T_FALSE;
+    }
+}
+
+read_number(p = 0) {
+    v = 0;
+    q = p;
+    lx_buf[p] == '0' && (lx_buf[p + 1] | 32) == 'x' {
+        q = p + 2;
+        nd = 0;
+        h = value_hex(lx_buf[q]);
+        * h >= 0 {
+            nd = nd + 1;
+            nd > 16 { error("integer too large (maximum 9223372036854775807, or 16 hex digits)"); }
+            v = (v << 4) | h;
+            q = q + 1;
+            h = value_hex(lx_buf[q]);
+        }
+        nd == 0 { error("malformed number"); }
+    } || {
+        // digits followed by "." and a digit: it is a FLOAT
+        f = q;
+        * lx_buf[f] >= '0' && lx_buf[f] <= '9' { f = f + 1; }
+        lx_buf[f] == '.' && lx_buf[f + 1] >= '0' && lx_buf[f + 1] <= '9' {
+            read_float(p);
+            :;
+        }
+        d = lx_buf[q] - '0';
+        * d >= 0 && d <= 9 {
+            v > 922337203685477580 || v == 922337203685477580 && d > 7 {
+                error("integer too large (maximum 9223372036854775807, or 16 hex digits)");
+            }
+            v = v * 10 + d;
+            q = q + 1;
+            d = lx_buf[q] - '0';
+        }
+    }
+    is_ident(lx_buf[q]) { error("malformed number"); }
+    tok_value = v;
+    tok_type = T_INT;
+    tok_len = q - p;
+    lx_pos = q;
+}
+
+// FLOAT: digits "." digits [ (e|E) [+-] digits ], converted exactly
+read_float(p = 0) {
+    n = 0;
+    e10 = 0;
+    q = p;
+    * lx_buf[q] >= '0' && lx_buf[q] <= '9' {
+        n < 768 { __nihil_ft_digits[n] = lx_buf[q] - '0'; n = n + 1; } || { e10 = e10 + 1; }
+        q = q + 1;
+    }
+    q = q + 1;                              // "."
+    * lx_buf[q] >= '0' && lx_buf[q] <= '9' {
+        n < 768 { __nihil_ft_digits[n] = lx_buf[q] - '0'; n = n + 1; e10 = e10 - 1; }
+        q = q + 1;
+    }
+    (lx_buf[q] | 32) == 'e' {
+        r = q + 1;
+        neg = false;
+        lx_buf[r] == '-' || lx_buf[r] == '+' {
+            neg = lx_buf[r] == '-';
+            r = r + 1;
+        }
+        lx_buf[r] >= '0' && lx_buf[r] <= '9' {
+            ev = 0;
+            * lx_buf[r] >= '0' && lx_buf[r] <= '9' {
+                ev < 100000 { ev = ev * 10 + lx_buf[r] - '0'; }
+                r = r + 1;
+            }
+            neg { ev = -ev; }
+            e10 = e10 + ev;
+            q = r;
+        }
+    }
+    is_ident(lx_buf[q]) { error("malformed number"); }
+    b = __nihil_ft_decimal_to_bits(__nihil_ft_digits, n, e10);
+    __nihil_ft_overflowed { error("FLOAT too large (the largest is 1.7976931348623157e+308)"); }
+    tok_value = b;
+    tok_type = T_FLOAT;
+    tok_len = q - p;
+    lx_pos = q;
+}
+
+// escape sequence: q = byte after the '\'. Returns the byte; esc_q = right after it.
+read_escape(q = 0) {
+    c = lx_buf[q];
+    q = q + 1;
+    esc_q = q;
+    c == 'n' { : 10; }
+    c == 't' { : 9; }
+    c == 'r' { : 13; }
+    c == '0' { : 0; }
+    c == '\\' || c == '\'' || c == '"' { : c; }
+    c == 'x' {
+        a = value_hex(lx_buf[q]);
+        a >= 0 {
+            b = value_hex(lx_buf[q + 1]);
+            b >= 0 {
+                esc_q = q + 2;
+                : a * 16 + b;
+            }
+        }
+    }
+    tok_start = lx_backslash;
+    error("invalid escape sequence (use \\n \\t \\r \\0 \\\\ \\' \\x22 or \\xHH)");
+    : 0;
+}
+
+// strings: decoded straight into the constant arena
+// layout: [length: 8 bytes][bytes...][0], aligned to 8; tok_value = offset of the bytes
+read_string(p = 0) {
+    h = (size_const + 7) & -8;
+    w = h + 8;
+    q = p + 1;
+    finished = false;
+    * !finished {
+        w >= SIZE_CONST - 16 { error("too many string literals (limit 16 MiB)"); }
+        c = lx_buf[q];
+        c == '"' {
+            finished = true;
+        } || c == 0 {
+            q >= lx_end { error("unterminated string (missing \")"); }
+            error("null byte in the source code");
+        } || c == 10 {
+            error("line break inside a string (use \\n)");
+        } || c == '\\' {
+            lx_backslash = q;
+            c = read_escape(q + 1);
+            q = esc_q;
+            cst[w] = c;
+            w = w + 1;
+        } || {
+            q = q + 1;
+            cst[w] = c;
+            w = w + 1;
+        }
+    }
+    q = q + 1;
+    put_qword_cst(h, w - h - 8);
+    cst[w] = 0;
+    size_const = w + 1;
+    tok_value = h + 8;
+    tok_type = T_STR;
+    tok_len = q - p;
+    lx_pos = q;
+}
+
+// characters: 'a' is an INT
+read_char(p = 0) {
+    q = p + 1;
+    c = lx_buf[q];
+    c == '\'' { error("empty character literal ('')"); }
+    c == 10 || c == 0 { error("malformed character literal (missing the closing ')"); }
+    c == '\\' {
+        lx_backslash = q;
+        c = read_escape(q + 1);
+        q = esc_q;
+    } || {
+        c >= 0x80 { error("a character literal must be a single ASCII byte"); }
+        q = q + 1;
+    }
+    lx_buf[q] != '\'' { error("malformed character literal (missing the closing ')"); }
+    q = q + 1;
+    tok_value = c;
+    tok_type = T_INT;
+    tok_len = q - p;
+    lx_pos = q;
+}
+
+read_operator(p = 0) {
+    c = lx_buf[p];
+    d = lx_buf[p + 1];
+    n = 1;
+    t = c;
+    c == '=' {
+        d == '=' { t = T_EQ; n = 2; }
+    } || c == '!' {
+        d == '>' {
+            lx_buf[p + 2] == '>' { t = T_ERROR_OUT; n = 3; }
+        } || d == '=' {
+            t = T_NE; n = 2;
+        }
+    } || c == ':' {
+        d == ':' { t = T_EXIT; n = 2; }
+    } || c == '@' {
+        d == '?' { t = T_AT_OPT; n = 2; }
+        d == '>' && lx_buf[p + 2] == '>' { t = T_WRITE_FILE; n = 3; }
+        d == '+' && lx_buf[p + 2] == '>' && lx_buf[p + 3] == '>' { t = T_APPEND_FILE; n = 4; }
+    } || c == '.' {
+        d >= '0' && d <= '9' { error("a FLOAT needs a digit before the point: use 0.5"); }
+        d == '.' && lx_buf[p + 2] == '.' { t = T_PAUSE; n = 3; }
+    } || c == '<' {
+        d == '=' {
+            t = T_LE; n = 2;
+        } || d == '<' {
+            t = T_SHL; n = 2;
+            lx_buf[p + 2] == '<' { t = T_BYTE_IN; n = 3; }
+        }
+    } || c == '>' {
+        d == '=' {
+            t = T_GE; n = 2;
+        } || d == '>' {
+            t = T_SHR; n = 2;
+            lx_buf[p + 2] == '>' { t = T_BYTE_OUT; n = 3; }
+        }
+    } || c == '&' {
+        d == '&' { t = T_AND; n = 2; }
+    } || c == '|' {
+        d == '|' { t = T_OR; n = 2; }
+    } || {
+        !is_simple(c) { error("invalid character"); }
+    }
+    tok_type = t;
+    tok_len = n;
+    lx_pos = p + n;
+}
+
+// ---- lexer copies (to look ahead and come back) ----
+save_lexer() {
+    b = n_copies_lexer * 12;
+    copies_lexer[b] = lx_pos;
+    copies_lexer[b + 1] = lx_line;
+    copies_lexer[b + 2] = lx_lstart;
+    copies_lexer[b + 3] = tok_type;
+    copies_lexer[b + 4] = tok_start;
+    copies_lexer[b + 5] = tok_len;
+    copies_lexer[b + 6] = tok_value;
+    copies_lexer[b + 7] = tok_line;
+    copies_lexer[b + 8] = tok_lstart;
+    copies_lexer[b + 9] = size_const;
+    copies_lexer[b + 10] = lx_backslash;
+    n_copies_lexer = n_copies_lexer + 1;
+}
+
+// goes back to the last copy (without dropping it)
+back_lexer() {
+    b = (n_copies_lexer - 1) * 12;
+    lx_pos = copies_lexer[b];
+    lx_line = copies_lexer[b + 1];
+    lx_lstart = copies_lexer[b + 2];
+    tok_type = copies_lexer[b + 3];
+    tok_start = copies_lexer[b + 4];
+    tok_len = copies_lexer[b + 5];
+    tok_value = copies_lexer[b + 6];
+    tok_line = copies_lexer[b + 7];
+    tok_lstart = copies_lexer[b + 8];
+    size_const = copies_lexer[b + 9];
+    lx_backslash = copies_lexer[b + 10];
+}
+
+drop_lexer() {
+    n_copies_lexer = n_copies_lexer - 1;
+}
+
+// type of the token AFTER the current one, consuming nothing
+peek_type() {
+    save_lexer();
+    next_token();
+    t = tok_type;
+    back_lexer();
+    drop_lexer();
+    : t;
+}

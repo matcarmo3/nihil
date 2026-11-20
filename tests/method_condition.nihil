@@ -1,0 +1,6 @@
+even(n = 0) { : n % 2 == 0; }
+how_many() { : 3; }
+even(4) { >> "4 is even"; } || { >> "4 is odd"; } >> "\n";
+even(7) { >> "never"; } || even(8) { >> "8 is even"; } >> "\n";
+{ how_many() { >> "*"; } } >> "\n";   // at the top level "how_many() {" would be a declaration
+* !even(how_many()) { >> "ok"; : 0; }

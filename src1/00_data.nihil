@@ -1,0 +1,252 @@
+// =============================================================================
+// nihilc1 — compiler for the Nihil language written in Nihil (stage 1)
+//
+// Mirrors the stage 0 compiler (src/nihilc.asm) and produces exactly the
+// same bytes. Input (stdin): the path of the source file, on one line.
+// Output (stdout): the ELF64 executable. Errors go to stderr, with exit code 1.
+// The nihilc1.sh wrapper gives it the same command line as nihilc.
+//
+// src1/nihilc1.nihil includes the other files in order; this one creates the globals.
+//
+// Careful when writing methods: a name assigned at the top level is global, and
+// inside a method an assignment to that name changes the global. That is why
+// globals have long names and locals short ones.
+// =============================================================================
+
+// ---- tokens (a one-character token uses its own ASCII code) ----
+T_END = 0;
+T_IDENT = 256;
+T_INT = 257;
+T_STR = 258;
+T_TRUE = 259;
+T_FALSE = 260;
+T_UNDERSCORE = 261;
+T_EQ = 262;
+T_NE = 263;
+T_LE = 264;
+T_GE = 265;
+T_SHL = 266;
+T_SHR = 267;
+T_BYTE_IN = 268;
+T_BYTE_OUT = 269;
+T_AND = 270;
+T_OR = 271;
+T_EXIT = 272;
+T_ERROR_OUT = 273;
+T_AT_OPT = 274;
+T_FLOAT = 275;
+T_PAUSE = 276;     // ...
+T_WRITE_FILE = 277;    // @>>
+T_APPEND_FILE = 278;   // @+>>
+
+// ---- tipos ----
+TYPE_INT = 1;
+TYPE_BOOL = 2;
+TYPE_STR = 3;
+TYPE_NONE = 4;
+TYPE_UNKNOWN = 5;
+TYPE_ARR = 16;
+TYPE_ABSENT = 6;   // type of the literal _
+TYPE_FLOAT = 7;     // double, kept as 64 bits in rax
+TYPE_OPT = 32;      // T? = TYPE_OPT | T
+TYPE_REC = 64;      // a record of model m: TYPE_REC | (m << 8)
+
+// ---- symbol flags ----
+FLAG_GLOBAL = 1;
+FLAG_METHOD = 2;
+FLAG_CREATED = 4;
+FLAG_PARAM = 8;
+FLAG_OPT = 16;      // optional: 2 words (value, presence)
+FLAG_REG = 32;      // local kept in a register (s_end = register number)
+FLAG_MODEL = 64;    // a data model NAME = @[…]; (s_extra = model number)
+
+// ---- binary operator modes ----
+MODE_INT = 1;
+MODE_EQUAL = 2;
+MODE_ORDER = 3;
+
+// ---- generated executable (src/layout.inc) ----
+BASE_CODE = 0x400000;
+SIZE_HEADER = 0xB0;
+BASE_DATA = 0x40000000;
+OFS_GLOBALS = 0x21000;
+GLOBALS = BASE_DATA + OFS_GLOBALS;
+RT_DIV = 5;
+RT_MOD = 10;
+RT_PRINT_INT = 15;
+RT_PRINT_BOOL = 20;
+RT_PRINT_STR = 25;
+RT_EXIT = 30;
+RT_ERROR = 35;
+RT_ALLOC = 40;
+RT_ARRAY_REP = 45;
+RT_ERROR_INDEX = 50;
+RT_WRITE_BYTE = 55;
+RT_READ_BYTE = 60;
+RT_STR_EQUAL = 65;
+RT_ERROR_INT = 70;
+RT_ERROR_BOOL = 75;
+RT_ERROR_STR = 80;
+RT_READ_FILE = 85;
+RT_TEXT = 90;
+RT_PRINT_INT_OPT = 95;
+RT_PRINT_BOOL_OPT = 100;
+RT_PRINT_STR_OPT = 105;
+RT_ERROR_INT_OPT = 110;
+RT_ERROR_BOOL_OPT = 115;
+RT_ERROR_STR_OPT = 120;
+RT_READ_FILE_OPT = 125;
+RT_CONCAT = 130;
+RT_SLEEP = 135;
+RT_WRITE_FILE = 140;
+RT_APPEND_FILE = 145;
+RT_READ_AT = 150;
+
+// ---- limits (the same as the stage 0 arenas) ----
+SIZE_SOURCE = 16 << 20;
+SIZE_CODE = 16 << 20;
+SIZE_CONST = 16 << 20;
+SIZE_FIX = 4 << 20;
+MAX_SYM = 131072;
+MAX_FIX = 262144;
+MAX_PARAM = 65536;
+SIZE_RAW = 16 << 20;
+SIZE_NAMES = 1 << 20;
+MAX_NAMES = 4096;
+MAX_SEG = 4096;
+
+// ---- arenas (bytes kept in INTs; [0 ; n] does not touch the memory) ----
+source = [0 ; SIZE_SOURCE + 16];
+n_source = 0;
+
+// ---- inclusions: raw files, paths and segments of the expanded source ----
+raw = [0 ; SIZE_RAW + 16];
+size_raw = 0;
+raw_got = 0;
+names = [0 ; SIZE_NAMES + 4096];
+size_names = 0;
+name_start = [0 ; MAX_NAMES];
+name_len = [0 ; MAX_NAMES];
+n_names = 0;
+resolve_new = false;
+seg_start = [0 ; MAX_SEG];
+seg_name = [0 ; MAX_SEG];
+seg_bline = [0 ; MAX_SEG];
+seg_fline = [0 ; MAX_SEG];
+n_seg = 0;
+lines_buf = 0;
+expanding = false;
+uses_prelude = false;   // the program uses FLOAT or <<: it gets the prelude
+index_prelude = -1;
+name_current = 0;
+error_name = 0;
+code = [0 ; SIZE_CODE + 16];
+size_code = 0;
+cst = [0 ; SIZE_CONST + 16];
+size_const = 0;
+const_head = 0;
+fix_pos = [0 ; MAX_FIX];
+fix_val = [0 ; MAX_FIX];
+fix_method = [false ; MAX_FIX];
+n_fix = 0;
+
+// ---- symbol table (one column per field) ----
+s_ofs = [0 ; MAX_SYM];
+s_len = [0 ; MAX_SYM];
+s_type = [0 ; MAX_SYM];
+s_flags = [0 ; MAX_SYM];
+s_nparam = [0 ; MAX_SYM];
+s_end = [0 ; MAX_SYM];
+s_extra = [0 ; MAX_SYM];
+s_regs = [0 ; MAX_SYM];   // methods: saved registers (learned in the previous pass)
+n_sym = 0;
+n_globals = 0;
+
+// ---- data models (records): NAME = @[field: TYPE(width); …]; ----
+MAX_MODEL = 1024;
+MAX_FIELD = 16384;
+m_sym = [0 ; MAX_MODEL];      // symbol of the model's name
+m_first = [0 ; MAX_MODEL];    // first field in f_*
+m_n = [0 ; MAX_MODEL];        // number of fields
+m_schema = [0 ; MAX_MODEL];   // constant: ARRAY of INT [n, type1, width1, type2, width2, …]
+m_names = [0 ; MAX_MODEL];    // constant: STRING with the field names separated by spaces
+m_title = [0 ; MAX_MODEL];    // constant: STRING with the model's name
+n_models = 0;
+f_start = [0 ; MAX_FIELD];
+f_len = [0 ; MAX_FIELD];
+f_type = [0 ; MAX_FIELD];
+f_width = [0 ; MAX_FIELD];
+n_fields = 0;
+
+// ---- method parameters ----
+p_type = [0 ; MAX_PARAM];
+p_default = [0 ; MAX_PARAM];
+n_param = 0;
+lit_type = 0;
+lit_value = 0;
+
+// ---- lexer (lx_buf: the expanded source, or the raw arena during expansion) ----
+lx_buf = source;
+lx_pos = 0;
+lx_end = 0;
+lx_line = 1;
+lx_lstart = 0;
+lx_backslash = 0;
+esc_q = 0;
+tok_type = 0;
+tok_start = 0;
+tok_len = 0;
+tok_value = 0;
+tok_line = 1;
+tok_lstart = 0;
+copies_lexer = [0 ; 12 * 64];
+n_copies_lexer = 0;
+
+// ---- passadas ----
+final_pass = false;
+unknowns = 0;
+discovered = false;
+altered = false;    // an already known type changed (e.g. INT → INT?): redo the pass
+n_passes = 0;
+const_base = 0;
+n_sym_base = 0;
+const_empty = 0;
+pos_init = 0;
+
+// ---- compilation in progress ----
+method_current = -1;
+saw_value = false;
+saw_empty = false;
+saw_absent = false;
+call_end = -1;
+level = 0;
+slots = 0;
+max_slots = 0;
+pos_frame = 0;
+pending = [0 ; 65536];
+n_pending = 0;
+
+// ---- prescan ----
+pv_type = 0;
+pv_start = 0;
+pv_len = 0;
+pv_line = 0;
+pv2_type = 0;
+pv2_start = 0;
+pv2_len = 0;
+pv2_line = 0;
+
+// ---- optimizations (M9) ----
+optimize = true;                 // "-O0 " before the path turns them off (the same bytes as stage 0)
+REGS = [3, 12, 13, 14, 15];     // rbx, r12 … r15 (preserved by the runtime)
+n_regs = 0;                     // registers in use in the current method
+limit_regs = 0;                // how many the current method saved in its prologue
+candidates = 0;                 // live locals that would fit in a register
+demand = 0;                    // largest number of candidates at the same time (up to 5)
+base_frame = 0;                // bytes of the saved registers, below rbp
+last_target = -1;               // last position some jump points to
+start_assignment = -1;         // the code of an assignment's expression starts here
+
+// ---- error message being built ----
+msg = [0 ; 1024];
+msg_len = 0;

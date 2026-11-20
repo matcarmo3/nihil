@@ -1,0 +1,23 @@
+// << reads a line and converts it to the type of the variable
+name = "";
+age = 0;
+height = 0.0;
+married = false;
+<< name; << age; << height; << married;
+>> name; >> "|"; >> age + 1; >> "|"; >> height * 2.0; >> "|"; >> !married; >> "\n";
+// optional: _ at the end of input
+line? = "";
+<< line;
+total = 0;
+* line != _ {
+    n? = 0;
+    << n;
+    total = total + (n || 0);
+    line = _;
+    n != _ { line = "more"; }
+}
+>> total; >> "\n";
+// an ordinary variable at the end of input: the type's zero
+x = 99;
+<< x;
+>> x; >> "\n";

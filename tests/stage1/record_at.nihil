@@ -1,0 +1,33 @@
+// NAME @[i] path reads only record i; NAME @?[i] gives _ when there is none;
+// NAME @# path counts the records from the file's size
+ITEM = @[id: INT(4); name: STRING(8)];
+path = "build/record_at.dat";
+@>> path, [ITEM(10, "ten"), ITEM(20, "twenty"), ITEM(30, "thirty")];
+>> ITEM @# path; >> "\n";
+r = ITEM @[1] path;
+>> r.id; >> " "; >> r.name; >> "\n";
+>> (ITEM @[2] path).name; >> "\n";
+k = 0;
+>> (ITEM @[k] path).id; >> "\n";             // any INT expression
+// a last line without its "\n" still counts
+@>> path, "  10ten     \n  20twenty  ";
+>> ITEM @# path; >> " "; >> (ITEM @[1] path).name; >> "\n";
+x? = ITEM @?[5] path;                         // no record 5
+>> x == _; >> "\n";
+y? = ITEM @?[0] "build/no_such_file.dat";      // no file
+>> y == _; >> "\n";
+>> ITEM @# "build/no_such_file.dat"; >> "\n";  // no file: 0 records
+z? = ITEM @?[0] path;
+>> (z || ITEM()).name; >> "\n";
+// walking a table one record at a time
+n = ITEM @# path;
+i = 0;
+n { >> (ITEM @[i] path).id; >> " "; i = i + 1; }
+>> "\n";
+// a large table: reading record 49999 does not read the others
+big = [ITEM() ; 50000];
+i = 0;
+50000 { big[i].id = i % 10000; i = i + 1; }
+big[49999].name = "last";
+@>> path, big;
+>> ITEM @# path; >> " "; >> (ITEM @[49999] path).name; >> "\n";

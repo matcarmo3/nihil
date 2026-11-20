@@ -1,0 +1,208 @@
+// =============================================================================
+// Prescan (reads tokens only, emits no code):
+//  • every name assigned at the top level, outside { } ( ) [ ], becomes a
+//    global with no type yet (s_extra = line of the first assignment);
+//  • every "name( … ) {" at the top level becomes a method, with the types and
+//    defaults of its parameters.
+// =============================================================================
+
+prescan() {
+    prescan_models();                    // the data models first: anything may use them
+    init_lexer();
+    next_token();
+    braces = 0;
+    parens = 0;
+    pv_type = T_END;
+    * tok_type != T_END {
+        t = tok_type;
+        t == T_IDENT && braces == 0 && parens == 0 {
+            peek_type() == '(' { try_method(); }
+            t = tok_type;
+        }
+        t == '{' { braces = braces + 1; }
+        t == '}' { braces = braces - 1; }
+        t == '(' || t == '[' { parens = parens + 1; }
+        t == ')' || t == ']' { parens = parens - 1; }
+        t == '=' && braces == 0 && parens == 0 && pv_type == '?' && pv2_type == T_IDENT {
+            k = lookup(pv2_start, pv2_len);
+            k < 0 {
+                k = create_global(pv2_start, pv2_len, 0);
+                n_globals = n_globals + 1;      // value + presence
+                s_flags[k] = FLAG_GLOBAL | FLAG_OPT;
+                s_extra[k] = pv2_line;
+            } || s_flags[k] & FLAG_METHOD != 0 {
+                tok_start = pv2_start;
+                error("this name already belongs to a method and cannot receive a value");
+            }
+        }
+        t == '=' && braces == 0 && parens == 0 && pv_type == T_IDENT {
+            k = lookup(pv_start, pv_len);
+            k < 0 {
+                k = create_global(pv_start, pv_len, 0);
+                s_extra[k] = pv_line;
+            } || s_flags[k] & FLAG_METHOD != 0 {
+                tok_start = pv_start;           // the error points to the name
+                error("this name already belongs to a method and cannot receive a value");
+            }
+        }
+        pv2_type = pv_type;
+        pv2_start = pv_start;
+        pv2_len = pv_len;
+        pv2_line = pv_line;
+        pv_type = tok_type;
+        pv_start = tok_start;
+        pv_len = tok_len;
+        pv_line = tok_line;
+        next_token();
+    }
+}
+
+// tok = name followed by "(". If it has declaration form ("f()" or
+// "f(name = …" or "f(name? …") and the matching ")" is followed by "{",
+// registers the method. The lexer goes back to the name.
+try_method() {
+    save_lexer();
+    next_token();                        // name → "("
+    e = peek_type();
+    form = false;
+    depth = 0;
+    e == ')' {
+        form = true;
+    } || e == T_IDENT {
+        next_token();                    // "(" → name
+        e2 = peek_type();
+        e2 == '=' || e2 == '?' {
+            form = true;
+            depth = 1;                       // already inside the "("
+            next_token();
+        }
+    }
+    declare = false;
+    searching = form;
+    * searching {
+        t = tok_type;
+        t == T_END {
+            searching = false;
+        } || {
+            t == '(' { depth = depth + 1; }
+            t == ')' {
+                depth = depth - 1;
+                depth == 0 {
+                    next_token();
+                    declare = tok_type == '{';
+                    searching = false;
+                }
+            }
+            searching { next_token(); }
+        }
+    }
+    back_lexer();
+    declare {
+        register_method();
+        back_lexer();
+    }
+    drop_lexer();
+}
+
+// tok = name of the declaration
+register_method() {
+    k = lookup(tok_start, tok_len);
+    k >= 0 {
+        error_start();
+        put_str("'");
+        put_source(tok_start, tok_len);
+        s_flags[k] & FLAG_METHOD != 0 {
+            put_str("' was already declared on line ");
+            put_line(s_end[k]);
+        } || {
+            put_str("' is already a global variable and cannot be a method");
+        }
+        error_end();
+    }
+    k = new_symbol(tok_start, tok_len, 0);  // return type not known yet
+    s_flags[k] = FLAG_METHOD;
+    s_extra[k] = n_param;
+    s_end[k] = tok_line;                     // (line, only until the first pass)
+    next_token();                        // name → "("
+    next_token();
+    * tok_type != ')' {
+        tok_type != T_IDENT { error_expected("a parameter (name = default value)"); }
+        pi = tok_start; pl = tok_len; pn = tok_line; pli = tok_lstart;
+        next_token();
+        opt = false;
+        tok_type == '?' {
+            opt = true;
+            next_token();
+        }
+        tok_type != '=' {
+            restore_pos(pi, pl, pn, pli);
+            error_start();
+            put_str("parameter '");
+            put_source(pi, pl);
+            put_str("' needs a default value, which also sets its type: x = 0, x = \"\" or x = false");
+            error_end();
+        }
+        next_token();                    // "=" → default
+        tok_type == '[' {
+            next_token();
+            read_literal();
+            next_token();
+            tok_type != ']' { error("the default of an ARRAY parameter is a one-element literal: [0], [\"\"] or [false]"); }
+            lit_type = lit_type | TYPE_ARR;
+        } || {
+            read_literal();
+        }
+        opt { lit_type = lit_type | TYPE_OPT; }
+        n_param >= MAX_PARAM { error("too many parameters in the program"); }
+        p_type[n_param] = lit_type;
+        p_default[n_param] = lit_value;
+        n_param = n_param + 1;
+        s_nparam[k] = s_nparam[k] + 1;
+        next_token();
+        tok_type == ',' {
+            next_token();
+            tok_type == ')' { error_expected("a parameter (name = default value)"); }
+        } || tok_type != ')' {
+            error_expected("',' or ')'");
+        }
+    }
+}
+
+// default literal: tok = start → lit_type, lit_value; the lexer stays on the
+// last token of the literal
+read_literal() {
+    negativo = false;
+    tok_type == '-' {
+        negativo = true;
+        next_token();
+        tok_type != T_INT && tok_type != T_FLOAT { error("the default value must be a literal: 0, -1, 0xFF, a, \"text\", true or false"); }
+    }
+    t = tok_type;
+    t == T_INT {
+        lit_type = TYPE_INT;
+        lit_value = tok_value;
+        negativo { lit_value = -lit_value; }
+        :;
+    }
+    t == T_FLOAT {
+        lit_type = TYPE_FLOAT;
+        lit_value = tok_value;
+        negativo { lit_value = lit_value ^ (1 << 63); }
+        :;
+    }
+    t == T_STR { lit_type = TYPE_STR; lit_value = tok_value; :; }
+    t == T_IDENT {
+        k = lookup(tok_start, tok_len);
+        is_model(k) && peek_type() == '(' {
+            next_token();                    // name → "("
+            next_token();
+            tok_type != ')' { error("the default of a record parameter is an empty record: NAME()"); }
+            lit_type = model_type(s_extra[k]);
+            lit_value = 0;
+            :;
+        }
+    }
+    t == T_TRUE { lit_type = TYPE_BOOL; lit_value = 1; :; }
+    t == T_FALSE { lit_type = TYPE_BOOL; lit_value = 0; :; }
+    error("the default value must be a literal: 0, -1, 0xFF, a, \"text\", true, false or NAME() for a record");
+}
