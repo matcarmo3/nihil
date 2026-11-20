@@ -662,6 +662,26 @@ model_key(m = 0) {
 // tok = "{" of NAME @{key} path / NAME @?{key} path: the record with that key,
 // found through the index "<path>.nihil-idx" (built when missing or old)
 record_by_key(m = 0, opt = false) {
+    kf = key_expression(m);
+    model_path(m, "@{key}");
+    emit(0x50);                            // push rax (path)
+    push_model(m);
+    emit(0xB8);                            // mov eax, key field ; push rax
+    emit_d(kf);
+    emit(0x50);
+    opt { eb(0xB8, 1, 0, 0, 0); } || { eb(0x31, 0xC0); }
+    emit(0x50);                            // push the "optional" flag
+    call_prelude("__nihil_key_get", 56);
+    opt {
+        eb(0x31, 0xD2, 0x48, 0x85, 0xC0, 0x0F, 0x95, 0xC2);   // xor edx,edx ; test rax,rax ; setne dl
+        : model_type(m) | TYPE_OPT;
+    }
+    : model_type(m);
+}
+
+// tok = "{" of @{key}: the key expression, checked against the key field of
+// model m and pushed; → the key field
+key_expression(m = 0) {
     kf = model_key(m);
     next_token();
     pi = tok_start; pl = tok_len; pn = tok_line; pli = tok_lstart;
@@ -682,6 +702,29 @@ record_by_key(m = 0, opt = false) {
     }
     expect('}', "'}'");
     emit(0x50);                            // push rax (the key)
+    : kf;
+}
+
+// tok = model name, followed by "@{" or "@?{": is it NAME @{k} path = _; ?
+key_delete_ahead() {
+    save_lexer();
+    next_token();
+    next_token();
+    r = tok_type == '{';
+    back_lexer();
+    drop_lexer();
+    : r;
+}
+
+// NAME @{k} path = _;  deletes the record with key k (an error if there is
+// none; NAME @?{k} path = _; does nothing then). The last record takes its
+// place, and the file gets one line shorter.
+cmd_key_delete(k = 0) {
+    m = s_extra[k];
+    next_token();                        // name → "@"
+    opt = tok_type == T_AT_OPT;
+    next_token();                        // → "{"
+    kf = key_expression(m);
     model_path(m, "@{key}");
     emit(0x50);                            // push rax (path)
     push_model(m);
@@ -689,13 +732,12 @@ record_by_key(m = 0, opt = false) {
     emit_d(kf);
     emit(0x50);
     opt { eb(0xB8, 1, 0, 0, 0); } || { eb(0x31, 0xC0); }
-    emit(0x50);                            // push the "optional" flag
-    call_prelude("__nihil_key_get", 56);
-    opt {
-        eb(0x31, 0xD2, 0x48, 0x85, 0xC0, 0x0F, 0x95, 0xC2);   // xor edx,edx ; test rax,rax ; setne dl
-        : model_type(m) | TYPE_OPT;
-    }
-    : model_type(m);
+    emit(0x50);
+    expect('=', "'= _;' (NAME @{key} path = _; deletes that record)");
+    tok_type != T_UNDERSCORE { error_expected("'_': a record is deleted with NAME @{key} path = _; and written with @{}>> path, r;"); }
+    next_token();
+    call_prelude("__nihil_key_delete", 56);
+    expect(';', "';'");
 }
 
 // @{}>> path, r;  writes r under its key: replaces the record with the same
@@ -737,7 +779,8 @@ cmd_put_key() {
 
 // file access for the prelude: __nihil_fsize(path) → INT (-1: no file),
 // __nihil_fstamp(path) → INT, __nihil_pread(path, offset, n) → INT (STRING
-// address, 0: no file), __nihil_pwrite(path, offset, text) (pwrite + fsync)
+// address, 0: no file), __nihil_pwrite(path, offset, text) (pwrite + fsync),
+// __nihil_pwrite_ns(path, offset, text) (no fsync), __nihil_truncate(path, size)
 file_intrinsic(kind = 0) {
     next_token();                        // name → "("
     next_token();
@@ -752,6 +795,13 @@ file_intrinsic(kind = 0) {
     emit(0x50);
     expect(',', "','");
     expression();
+    kind == 6 {                            // __nihil_truncate(path, size)
+        eb(0x48, 0x89, 0xC2, 0x58);         // mov rdx, rax ; pop rax
+        emit_call_rt(RT_TRUNCATE);
+        call_end = size_code;
+        expect(')', "')'");
+        : TYPE_NONE;
+    }
     emit(0x50);
     expect(',', "','");
     expression();
@@ -762,7 +812,7 @@ file_intrinsic(kind = 0) {
         : TYPE_INT;
     }
     eb(0x48, 0x89, 0xC1, 0x5A, 0x58);       // mov rcx, rax ; pop rdx ; pop rax
-    emit_call_rt(RT_WRITE_AT);
+    kind == 5 { emit_call_rt(RT_WRITE_AT_NS); } || { emit_call_rt(RT_WRITE_AT); }
     call_end = size_code;                // a command by itself, like a call
     expect(')', "')'");
     : TYPE_NONE;

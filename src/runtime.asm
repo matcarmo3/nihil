@@ -50,6 +50,8 @@ t_write_file:   jmp strict near rt_write_file      ; RT_WRITE_FILE
 t_append_file:  jmp strict near rt_append_file     ; RT_APPEND_FILE
 t_read_at:      jmp strict near rt_read_at         ; RT_READ_AT
 t_write_at:     jmp strict near rt_write_at        ; RT_WRITE_AT
+t_write_at_ns:  jmp strict near rt_write_at_ns     ; RT_WRITE_AT_NS
+t_truncate:     jmp strict near rt_truncate        ; RT_TRUNCATE
 
 ; ---- arithmetic -------------------------------------------------------------
 ; Division truncated toward zero (as in C). MIN / -1 gives MIN (idiv
@@ -645,16 +647,27 @@ rt_sleep:
 ; rt_append_file: same arguments; appends the text (creating the file), then fsyncs.
 ; rt_write_at: same arguments and rdx = offset; writes the text there (pwrite,
 ; creating the file, keeping the rest of it), then fsyncs.
+; rt_write_at_ns: the same without the fsync (the caller syncs later).
+; rt_truncate: rax = path, rdx = size: cuts the file to that size, then fsyncs.
 ; Any failure is a runtime error naming the file and the reason (exit code 2).
 %define WF_PATH     0               ; [rsp + WF_PATH]: the path, 0-terminated
 %define WF_TEMP     4096            ; [rsp + WF_TEMP]: the temporary path
 %define WF_FRAME    8192
-%define WF_FLAG     (WF_FRAME + 40) ; 0 = replace, 1 = append, 2 = at an offset (pushed before 5 registers)
+%define WF_FLAG     (WF_FRAME + 40) ; 0 replace, 1 append, 2 at an offset, 3 truncate, 4 at an offset without fsync
 %define WF_OFFSET   (WF_FRAME + 48) ; where the next byte goes (flag 2)
 %define WF_MAX_PATH 4080            ; leaves room for ".nihil-tmp" and the 0
 rt_write_at:
     push rdx
     push qword 2
+    jmp rt_write_file.body
+rt_write_at_ns:
+    push rdx
+    push qword 4
+    jmp rt_write_file.body
+rt_truncate:
+    mov rcx, rax                    ; any STRING: no text is written
+    push rdx
+    push qword 3
     jmp rt_write_file.body
 rt_append_file:
     push qword 0
@@ -701,7 +714,10 @@ rt_write_file:
     mov edx, 0x441                  ; O_WRONLY | O_CREAT | O_APPEND
     cmp qword [rsp + WF_FLAG], 1
     je .open
-    mov edx, 0x41                   ; O_WRONLY | O_CREAT (flag 2: in place)
+    mov edx, 0x41                   ; O_WRONLY | O_CREAT (flags 2 and 4: in place)
+    cmp qword [rsp + WF_FLAG], 3
+    jne .open
+    mov edx, 1                      ; O_WRONLY (flag 3: it must exist)
 .open:
     mov eax, 257                    ; sys_openat(AT_FDCWD, r15, flags, 0644)
     mov rdi, -100
@@ -711,6 +727,16 @@ rt_write_file:
     test rax, rax
     js .report
     mov r13, rax                    ; fd
+    cmp qword [rsp + WF_FLAG], 3
+    jne .text
+    mov eax, 77                     ; sys_ftruncate(fd, size)
+    mov rdi, r13
+    mov rsi, [rsp + WF_OFFSET]
+    syscall
+    test rax, rax
+    js .fail_open_fd
+    jmp .sync
+.text:
     mov rbx, r12                    ; next byte to write
     mov r14, [r12 - 8]              ; bytes left
 .write:
@@ -721,7 +747,7 @@ rt_write_file:
     mov rsi, rbx
     mov rdx, r14
     cmp qword [rsp + WF_FLAG], 2
-    jne .syscall_write
+    jb .syscall_write
     mov eax, 18                     ; sys_pwrite64(fd, buf, count, offset)
     mov r10, [rsp + WF_OFFSET]
 .syscall_write:
@@ -735,11 +761,14 @@ rt_write_file:
     sub r14, rax
     jmp .write
 .sync:
+    cmp qword [rsp + WF_FLAG], 4
+    je .close
     mov eax, 74                     ; sys_fsync: the data is on the disk
     mov rdi, r13
     syscall
     test rax, rax
     js .fail_open_fd
+.close:
     mov eax, 3                      ; sys_close
     mov rdi, r13
     syscall
@@ -1051,3 +1080,5 @@ ASSERT_AT t_write_file,   RT_WRITE_FILE
 ASSERT_AT t_append_file,  RT_APPEND_FILE
 ASSERT_AT t_read_at,      RT_READ_AT
 ASSERT_AT t_write_at,     RT_WRITE_AT
+ASSERT_AT t_write_at_ns,  RT_WRITE_AT_NS
+ASSERT_AT t_truncate,     RT_TRUNCATE

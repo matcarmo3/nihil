@@ -1,4 +1,5 @@
 // A small stock register: items are found by their SKU, a STRING key.
+// An item that reaches 0 leaves the table.
 // "#sku" makes it the key; the index lives in stock.dat.nihil-idx and is
 // rebuilt by itself whenever it does not match the table.
 ITEM = @[#sku: STRING(12); name: STRING(24); qty: INT(6)];
@@ -24,5 +25,10 @@ found == _ {
 n = 0;
 << n;
 item.qty = item.qty + n;
+item.qty <= 0 {
+    ITEM @?{sku} FILE = _;              // deletes it (nothing to do if it was new)
+    >> "Removed: "; >> item.name; >> " is out of stock.\n";
+    :: 0;
+}
 @{}>> FILE, item;                       // replaces it in place, or adds it
 >> "Saved: "; >> item.name; >> " now has "; >> item.qty; >> ".\n";

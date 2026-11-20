@@ -1,0 +1,18 @@
+// NAME @{k} path = _; deletes: the last record takes the place of the deleted one
+P = @[#code: INT(4); name: STRING(6)];
+F = "build/kdel.dat";
+@>> F, "";
+i = 1;
+* i <= 6 { @{}>> F, P(i * 10, "n"); i = i + 1; }
+P @{20} F = _;
+>> $(P @ F);
+P @{60} F = _;                 // now the last one
+P @?{99} F = _;                // @?: nothing to delete is fine
+>> P @# F; >> " "; >> (P @?{20} F) == _; >> " "; >> (P @{50} F).code; >> "\n";
+P @{10} F = _; P @{50} F = _; P @{30} F = _; P @{40} F = _;
+>> P @# F; >> "\n";
+@{}>> F, P(7, "again");
+>> $(P @ F);
+// a deletion stopped between the move and the cut: the last record twice
+@>> F, "  10a     \n  40d     \n  30c     \n  40d     \n";
+>> (P @{40} F).name; >> " "; >> P @# F; >> "\n";

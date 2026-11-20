@@ -42,6 +42,7 @@ command_name() {
         put_str("' is a data model and cannot receive a value");
         error_end();
     }
+    is_model(km) && (e == '@' || e == T_AT_OPT) && key_delete_ahead() { cmd_key_delete(km); :; }
     (e == '.' || e == '[') && field_assign_ahead() { cmd_field_assign(); :; }
     e == '=' || e == '?' { cmd_assignment(); :; }
     e == '[' {

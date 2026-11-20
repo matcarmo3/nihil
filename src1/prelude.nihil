@@ -506,6 +506,12 @@ __nihil_key_rebuild(path = "", size = 0, stamp = 0, schema = [0], names = "", mo
         * __slots[__j] != 0 {
             __o = __slots[__j] - 1;
             __nihil_key_at(__text, __o * __w, schema, names, path, __o + 1, kf) == __k {
+                __i == __n - 1 && __nihil_same_line(__text, __o * __w, __at, __w - 1) {
+                    // a deletion that stopped after moving the last record into
+                    // place: finish it, and index the table it leaves
+                    __nihil_truncate(path, __at);
+                    : __nihil_key_rebuild(path, __nihil_fsize(path), __nihil_fstamp(path), schema, names, model, kf);
+                }
                 __nihil_table_bad(path, __i + 1, "the key " + __nihil_word(names, kf) + " = " + __k + " is also in line " + __nihil_int_text(__o + 1) + ", and a key is unique");
             }
             __j = (__j + 1) & (__c - 1);
@@ -522,6 +528,24 @@ __nihil_key_rebuild(path = "", size = 0, stamp = 0, schema = [0], names = "", mo
     : __c;
 }
 
+__nihil_same_line(s = "", a = 0, b = 0, n = 0) {
+    __i = 0;
+    * __i < n {
+        s[a + __i] != s[b + __i] { : false; }
+        __i = __i + 1;
+    }
+    : true;
+}
+
+// slot j of the index (0 = empty)
+__nihil_key_slot(idx = "", j = 0) {
+    __p = __nihil_pread(idx, 16 + j * 4, 4);
+    __p == 0 { : 0; }
+    __s = __nihil_str_at(__p);
+    #__s != 4 { : 0; }
+    : __nihil_le_at(__s, 0, 4);
+}
+
 // where the key is: [record number or -1, its slot (or the empty one where it
 // would go), the capacity]. Every slot found is checked against the record.
 __nihil_key_find(key = "", path = "", size = 0, stamp = 0, schema = [0], names = "", model = "", kf = 0) {
@@ -532,12 +556,7 @@ __nihil_key_find(key = "", path = "", size = 0, stamp = 0, schema = [0], names =
     __j = __nihil_key_hash(key) & (__c - 1);
     __left = __c;
     * __left > 0 {
-        __v = 0;
-        __p = __nihil_pread(__idx, 16 + __j * 4, 4);
-        __p != 0 {
-            __s = __nihil_str_at(__p);
-            #__s == 4 { __v = __nihil_le_at(__s, 0, 4); }
-        }
+        __v = __nihil_key_slot(__idx, __j);
         __v == 0 { : [-1, __j, __c]; }
         __o = __v - 1;
         __a = __nihil_pread(path, __o * __w, __w - 1);
@@ -581,6 +600,8 @@ __nihil_key_put(path = "", r = 0, schema = [0], names = "", model = "", kf = 0) 
     __size = __nihil_fsize(path);
     __size < 0 { __size = 0; }
     __f = __nihil_key_find(__key, path, __size, __nihil_fstamp(path), schema, names, model, kf);
+    __size = __nihil_fsize(path);                   // a rebuild may have finished a deletion
+    __size < 0 { __size = 0; }
     __w = #__text;
     __idx = path + ".nihil-idx";
     __f[0] >= 0 {
@@ -599,7 +620,7 @@ __nihil_key_put(path = "", r = 0, schema = [0], names = "", model = "", kf = 0) 
         }
         __nihil_pwrite(__idx, 16 + __f[1] * 4, __nihil_le(__n + 1, 4));
     }
-    __nihil_pwrite(__idx, 0, __nihil_key_header(path));
+    __nihil_pwrite_ns(__idx, 0, __nihil_key_header(path));   // if lost: rebuilt
 }
 
 // @[i]>> path, r for a model with a key: the index stays right when the key
@@ -621,8 +642,84 @@ __nihil_key_write_at(i = 0, path = "", r = 0, schema = [0], names = "", model = 
     }
     __nihil_pwrite(path, (i + 1) * __w - #__text, __text);
     __same {
-        __nihil_pwrite(__idx, 0, __nihil_key_header(path));
+        __nihil_pwrite_ns(__idx, 0, __nihil_key_header(path));
     } || __c > 0 {
         __nihil_pwrite(__idx, 0, __nihil_le(-1, 16));
     }
+}
+
+// NAME @{k} path = _; : the last record moves into the place of the deleted
+// one and the file loses its last line. The table is changed (and synced)
+// first, so a crash before the index is right leaves an index that does not
+// match, which is rebuilt; a crash between the move and the cut leaves the
+// last record twice, which the rebuild recognizes and finishes.
+__nihil_key_delete(k = 0, path = "", schema = [0], names = "", model = "", kf = 0, opt = false) {
+    __size = __nihil_fsize(path);
+    __size < 0 {
+        opt { :; }
+        !>> "nihil: could not read '" + path + "'\n";
+        :: 2;
+    }
+    __ty = schema[1 + kf * 2];
+    __key = __nihil_key_value(k, __ty);
+    __f = __nihil_key_find(__key, path, __size, __nihil_fstamp(path), schema, names, model, kf);
+    __f[0] < 0 {
+        opt { :; }
+        __q = __key;
+        __ty == 3 { __q = "\"" + __key + "\""; }
+        !>> "nihil: '" + path + "' has no " + model + " with " + __nihil_word(names, kf) + " = " + __q + " to delete\n";
+        :: 2;
+    }
+    __size = __nihil_fsize(path);                   // a rebuild may have finished a deletion
+    __n = __nihil_rec_count(path, __size, schema, model);
+    __w = __nihil_rec_width(schema) + 1;
+    __i = __f[0];
+    __mask = __f[2] - 1;
+    __idx = path + ".nihil-idx";
+    __last = __n - 1;
+    __moved = "";
+    __i != __last {
+        __line = __nihil_str_at(__nihil_pread(path, __last * __w, __w - 1));
+        __moved = __nihil_key_at(__line, 0, schema, names, path, __last + 1, kf);
+        __nihil_pwrite(path, __i * __w, __line + "\n");
+    }
+    __nihil_truncate(path, __last * __w);
+    // the index: the moved record's slot now points to its new place …
+    __i != __last {
+        __j = __nihil_key_hash(__moved) & __mask;
+        __left = __mask + 1;
+        * __left > 0 && __nihil_key_slot(__idx, __j) != __last + 1 {
+            __j = (__j + 1) & __mask;
+            __left = __left - 1;
+        }
+        __left == 0 {                               // not found: the index is wrong
+            __nihil_pwrite(__idx, 0, __nihil_le(-1, 16));
+            :;
+        }
+        __nihil_pwrite_ns(__idx, 16 + __j * 4, __nihil_le(__i + 1, 4));
+    }
+    // … and the deleted key's slot is emptied, moving back each slot after it
+    // whose home is not between the hole and itself (linear probing)
+    __j = __f[1];
+    __k = (__j + 1) & __mask;
+    __v = __nihil_key_slot(__idx, __k);
+    * __v != 0 {
+        __r = __v - 1;
+        __t = __nihil_str_at(__nihil_pread(path, __r * __w, __w - 1));
+        __h = __nihil_key_hash(__nihil_key_at(__t, 0, schema, names, path, __r + 1, kf)) & __mask;
+        __stay = false;
+        __j < __k {
+            __stay = __h > __j && __h <= __k;
+        } || {
+            __stay = __h > __j || __h <= __k;
+        }
+        !__stay {
+            __nihil_pwrite_ns(__idx, 16 + __j * 4, __nihil_le(__v, 4));
+            __j = __k;
+        }
+        __k = (__k + 1) & __mask;
+        __v = __nihil_key_slot(__idx, __k);
+    }
+    __nihil_pwrite(__idx, 16 + __j * 4, __nihil_le(0, 4));   // synced: every slot is on the disk
+    __nihil_pwrite_ns(__idx, 0, __nihil_key_header(path));
 }

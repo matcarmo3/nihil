@@ -102,6 +102,8 @@ RT_WRITE_FILE = 140;
 RT_APPEND_FILE = 145;
 RT_READ_AT = 150;
 RT_WRITE_AT = 155;
+RT_WRITE_AT_NS = 160;
+RT_TRUNCATE = 165;
 
 // ---- limits (the same as the stage 0 arenas) ----
 SIZE_SOURCE = 16 << 20;

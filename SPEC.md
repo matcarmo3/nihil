@@ -1,4 +1,4 @@
-# Nihil — Language Specification (v2.7)
+# Nihil — Language Specification (v2.8)
 
 > **Nihil**: an imperative, minimalist language compiled straight to x86_64 machine
 > code, with no libc, no linker and no VM. The name is Latin for
@@ -339,6 +339,7 @@ m > 20 add(5);       // calls if m > 20
 | `@+>> path, text;` | **Appends** `text` to the file, creating it if needed, and syncs it to disk before going on (stage 1). |
 | `@[i]>> path, r;` | **Changes record `i`** of a table file in place, writing only that line (§20.4, stage 1). |
 | `@{}>> path, r;` | **Writes `r` under its key**: replaces the record with the same key, or adds `r` (§20.5, stage 1). |
+| `NAME @{k} path = _;` | **Deletes** the record with key `k`; `NAME @?{k} path = _;` does nothing if there is none (§20.5, stage 1). |
 
 ### 8.1.1 Writing files
 
@@ -483,6 +484,7 @@ command         ::= method                      (* top level only *)
                   | ( "@>>" | "@+>>" ) expression "," expression ";"
                   | "@" "[" expression "]" ">>" expression "," expression ";"
                   | "@" "{" "}" ">>" expression "," expression ";"   (* by key, §20.5 *)
+                  | IDENT ( "@" | "@?" ) "{" expression "}" unary "=" "_" ";"   (* delete by key *)
                   | ">>>" expression ";"
                   | "<<"  IDENT ";"
                   | "<<<" IDENT ";"
@@ -917,6 +919,7 @@ p = PRODUCT @{42} "products.dat";                    // the record with code 42
 p.price = 13.75;
 @{}>> "products.dat", p;                             // same key: replaced in place
 q? = PRODUCT @?{99} "products.dat";                  // _ : there is none
+PRODUCT @{42} "products.dat" = _;                    // deletes it
 ```
 
 | Form | Result |
@@ -924,6 +927,15 @@ q? = PRODUCT @?{99} "products.dat";                  // _ : there is none
 | `NAME @{k} path` | the record whose key is `k` (an INT or STRING, the key's type); an error if there is none |
 | `NAME @?{k} path` | `NAME?`: the same, but `_` when there is none or the file does not exist |
 | `@{}>> path, r;` | writes `r` under its own key: replaces that record in place (one line), or adds `r` at the end |
+| `NAME @{k} path = _;` | deletes the record with key `k` (it "becomes nothing"); an error if there is none |
+| `NAME @?{k} path = _;` | the same, but nothing happens when there is none or the file does not exist |
+
+**Deleting** keeps the table without holes: the last record moves into the
+place of the deleted one and the file gets one line shorter (`ftruncate`). So
+the order of the records changes, and record numbers (`@[i]`) are not stable
+in a table that is changed by key. In the index, the deleted slot is emptied
+and the slots after it move back where needed (deletion for linear probing),
+so the index stays right without being rebuilt.
 
 A STRING key is compared without the spaces on its right, as the table file
 keeps it. The table stays an ordinary table file: `NAME @ path`, `@[i]`, `@#`
@@ -944,11 +956,17 @@ once and rebuilds the index (atomically, like `@>>`). A missing or damaged
 index is rebuilt the same way, so it can always be deleted. `@[i]>>` keeps the
 index right when the key of line *i* does not change.
 
-Each key write syncs the table and then the index to disk (`fsync`), so a
-crash leaves at worst an index that no longer matches, and that is rebuilt.
+Each key operation changes the table first and syncs it to disk (`fsync`),
+then the index slots (synced), then the header (not synced: if it is lost, the
+index is rebuilt). A crash leaves at worst an index that no longer matches,
+which is rebuilt. A deletion syncs the moved record before cutting the file;
+a crash between the two leaves the last record twice, byte for byte, and the
+rebuild recognizes that and finishes the deletion (two different records with
+the same key are still an error).
 
 ```text
 nihil: 'products.dat' has no PRODUCT with code = 99
+nihil: 'products.dat' has no PRODUCT with code = 99 to delete
 nihil: 'products.dat', line 3: the key code = 1 is also in line 1, and a key is unique
 ```
 
@@ -1003,6 +1021,7 @@ with models always get the prelude.
 | **v1.9:** saved registers learned between passes | The prologue comes before the body; using the count from the previous pass avoids saving registers for nothing |
 | **v2.1:** `... ms;` waits | Animations need a fixed speed; a busy loop depends on the machine. The ellipsis reads as a pause and cannot start any valid expression |
 | **v2.2:** renamed from Ket to Nihil | Latin for *nothing*: no keywords, and `_` for the missing value |
+| **v2.8:** `NAME @{k} path = _;` deletes by key | Completes the key-value store. The record "becomes nothing": `_` already means no value. Moving the last record into the hole keeps the table a plain file without deleted lines, which every other read would have to skip |
 | **v2.7:** key fields `#name`, `NAME @{k} path`, `@{}>> path, r;` | A key-value store: finding a record by its key without reading the table. The index lives in its own file as a cache that is rebuilt when it does not match the table, so the table stays a plain text file that any write or editor may change. `#` reads as "number"; `{}` after `@` was never valid |
 | **v2.6:** `@[i]>> path, r;` | A key-value store needs to change one record without rewriting the table. With fixed widths the line's position is known, so one `pwrite` replaces it. `@[i]` already meant "record i" and `>>` "write"; a command never started with `@[` before |
 | **v2.5:** `NAME @[i] path`, `NAME @?[i] path`, `NAME @# path` | Reading one record should not cost reading the whole table: with fixed widths its position is known, and `pread` reads only that line. The count comes from the file's size, which also detects a file cut in the middle of a record |

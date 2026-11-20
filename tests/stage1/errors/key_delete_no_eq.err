@@ -1,0 +1,1 @@
+expected '= _;' (NAME @{key} path = _; deletes that record)
