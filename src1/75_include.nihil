@@ -255,6 +255,7 @@ load_program() {
         #name_p { names[size_names + i] = name_p[i]; i = i + 1; }
         index_prelude = store_name(size_names, #name_p);
         expand(index_prelude, 0);
+        prelude_end = n_source;
         expand(main, 0);
     }
     expanding = false;

@@ -266,7 +266,26 @@ cmd_while() {
 
 // -----------------------------------------------------------------------------
 // name(p1 = default, …) { … }   — method declaration (k = symbol)
+// a prelude method left out of this pass: its tokens are read and dropped
+// (the strings they decode are not kept as constants)
+skip_method() {
+    sc = size_const;
+    * tok_type != '{' { next_token(); }
+    depth = 0;
+    going = true;
+    * going {
+        tok_type == '{' { depth = depth + 1; }
+        tok_type == '}' {
+            depth = depth - 1;
+            depth == 0 { going = false; }
+        }
+        next_token();
+    }
+    size_const = sc;
+}
+
 cmd_method(k = 0) {
+    s_skip[k] != 0 { skip_method(); :; }   // a prelude method the program does not reach
     emit(0xE9);                            // jmp over the body
     jump = size_code;
     emit_d(0);

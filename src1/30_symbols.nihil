@@ -40,12 +40,68 @@ lookup_text(s = "") {
     : -1;
 }
 
+// a call from the method being compiled (or the top level) to method k: what
+// the program reaches, so prelude methods nobody calls can be left out
+note_call(k = 0) {
+    final_pass && s_skip[k] != 0 { error_general("internal error: a call to a prelude method that was left out"); }
+    n_calls < MAX_CALLS {
+        call_from[n_calls] = method_current;
+        call_to[n_calls] = k;
+    }
+    n_calls = n_calls + 1;
+}
+
+// after a pass: the prelude methods the program reaches (from the top level or
+// from its own methods, through any chain of calls) stay; the others are left
+// out of the next pass. Changing that set means another pass.
+prune_prelude() {
+    prelude_end == 0 { :; }
+    k = 0;
+    n_sym_base { s_reach[k] = 0; k = k + 1; }
+    n_calls > MAX_CALLS {
+        k = 0;
+        n_sym_base { s_reach[k] = 1; k = k + 1; }   // too many calls to follow: keep everything
+    }
+    changed = true;
+    * changed {
+        changed = false;
+        i = 0;
+        * i < n_calls && i < MAX_CALLS {
+            f = call_from[i];
+            t = call_to[i];
+            s_reach[t] == 0 && (f < 0 || s_ofs[f] >= prelude_end || s_reach[f] != 0) {
+                s_reach[t] = 1;
+                changed = true;
+            }
+            i = i + 1;
+        }
+    }
+    k = 0;
+    * k < n_sym_base {
+        s_flags[k] & FLAG_METHOD != 0 && s_ofs[k] < prelude_end {
+            s_reach[k] == 0 && s_skip[k] == 0 && s_kept[k] == 0 {
+                s_skip[k] = 1;
+                discovered = true;
+                altered = true;
+            }
+            s_reach[k] != 0 && s_skip[k] != 0 {
+                s_skip[k] = 0;                 // needed after all (a type changed): for good
+                s_kept[k] = 1;
+                discovered = true;
+                altered = true;
+            }
+        }
+        k = k + 1;
+    }
+}
+
 // calls a prelude method (the arguments are already pushed)
 call_prelude(name = "", bytes_args = 0) {
     k = lookup_text(name);
     k < 0 || s_flags[k] & FLAG_METHOD == 0 {
         error_general("internal error: the prelude was not included");
     }
+    note_call(k);
     emit(0xE8);
     register_fixup(size_code, k, true);
     emit_d(0);

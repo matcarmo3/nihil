@@ -1,4 +1,4 @@
-# Nihil — Language Specification (v3.1)
+# Nihil — Language Specification (v3.2)
 
 > **Nihil**: an imperative, minimalist language compiled straight to x86_64 machine
 > code, with no libc, no linker and no VM. The name is Latin for
@@ -771,9 +771,18 @@ Some of the language's routines are written in the language itself, in
 
 - `nihilc1` **includes `bigint.nihil` and `float_text.nihil` itself**, to convert FLOAT
   literals at compile time.
-- All three go, as text, **to the start of every program that uses FLOAT or
-  `<<`**, in a segment named `<prelude>`. Programs that use neither do not get
-  the prelude.
+- All three go, as text, **to the start of every program that uses FLOAT,
+  `<<`, records or the library**, in a segment named `<prelude>`. Programs that
+  use none of them do not get the prelude.
+- **Only what the program reaches is compiled.** In each pass the compiler
+  notes every call (which method makes it, which one it calls) and then follows
+  them from the top level and from the program's own methods; the prelude
+  methods no chain reaches are left out of the next pass (their tokens are read
+  and dropped). A change in that set means one more pass, as a new type does; a
+  method left out once and then needed (because a type changed) is never left
+  out again, so the passes always settle. `x = 1.5; >> x;` gets the FLOAT
+  printing and the big integers, 20 KB in all; none of the records or the
+  library.
 - The conversion is checked against Python (`make floatcheck`: 100,000 cases plus
   the edge cases): the text reads back as the same number, is the shortest
   possible, and parsing is exact.
@@ -1075,8 +1084,9 @@ nihilc: f.nihil:2:7: STRING has no method 'size': it has find, has, starts, ends
 The library is written in Nihil, in the prelude (§18), as methods named
 `__nihil_s_find`, `__nihil_ai_sort` (ARRAY of INT), `__nihil_af_*` (FLOAT) and
 `__nihil_as_*` (STRING); the compiler passes the value as the first argument.
-`$` of an INT is a runtime routine, so it needs no prelude. Every program that
-gets the prelude gets all of it, which adds about 15 KB to the executable.
+`$` of an INT is a runtime routine, so it needs no prelude. Only the prelude
+methods a program reaches go into its executable (§18), so the library costs
+nothing to a program that does not use it.
 
 ## Appendix A — What changed since v1.0, and why
 
@@ -1119,6 +1129,7 @@ gets the prelude gets all of it, which adds about 15 KB to the executable.
 | **v1.9:** saved registers learned between passes | The prologue comes before the body; using the count from the previous pass avoids saving registers for nothing |
 | **v2.1:** `... ms;` waits | Animations need a fixed speed; a busy loop depends on the machine. The ellipsis reads as a pause and cannot start any valid expression |
 | **v2.2:** renamed from Ket to Nihil | Latin for *nothing*: no keywords, and `_` for the missing value |
+| **v3.2:** only the prelude methods a program reaches are compiled | With the library, every program that used FLOAT, records or `.` carried all of the prelude: `x = 1.5; >> x;` was 66 KB, now 20 KB. The passes already redo everything, so the set of methods is found like a type: from the calls of one pass, for the next |
 | **v3.1:** `ARRAY + ARRAY` | Building a list of unknown length meant counting first and filling after. `+` already joined STRINGs, which are arrays of bytes |
 | **v3.0:** the library `value.name(…)`, and `$` of INT, FLOAT and BOOL | Every program was rewriting the same text and array routines, and a number could not be turned into text. Names after a `.` cannot clash with the program's names, so the language still has no reserved words |
 | **v2.9:** a garbage collector (conservative mark and sweep) | Programs that run for a long time or make many temporary texts grew without limit: a loop of 3 million small texts and arrays used 633 MB, now 19 MB. Conservative, so the compilers need no change and keep producing identical bytes |

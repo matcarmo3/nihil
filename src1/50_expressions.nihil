@@ -679,6 +679,7 @@ call_method(k = 0, pre = 0) {
         i = i + 1;
     }
     next_token();                        // consome ")"
+    note_call(k);
     emit(0xE8);                            // call method (patched at the end of the pass)
     register_fixup(size_code, k, true);
     emit_d(0);
