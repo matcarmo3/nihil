@@ -43,6 +43,91 @@ def list_files():
     return sorted(out)
 
 
+MODEL_RE = re.compile(r'(?m)^\s*([A-Za-z_]\w*)\s*=\s*@\[(.*?)\]\s*;', re.S)
+FIELD_RE = re.compile(r'^\s*(#?)\s*([A-Za-z_]\w*)\s*:\s*(INT|STRING|FLOAT|BOOL)\s*(?:\(\s*(\d+)\s*\))?\s*$')
+MAX_TABLE_ROWS = 2000
+
+
+def list_tables():
+    out = []
+    for folder in EDITABLE:
+        for dirpath, _, names in os.walk(os.path.join(ROOT, folder)):
+            for n in sorted(names):
+                if n.endswith('.dat'):
+                    out.append(os.path.relpath(os.path.join(dirpath, n), ROOT))
+    return sorted(out)
+
+
+def find_models():
+    """Every data model declared in the editable .nihil files: name, fields, width, file, text."""
+    models = []
+    for rel in list_files():
+        try:
+            with open(os.path.join(ROOT, rel), encoding='utf-8', errors='replace') as f:
+                text = f.read()
+        except OSError:
+            continue
+        clean = re.sub(r'//[^\n]*', '', text)
+        for m in MODEL_RE.finditer(clean):
+            fields = []
+            for part in m.group(2).split(';'):
+                if not part.strip():
+                    continue
+                fm = FIELD_RE.match(part)
+                if not fm:
+                    fields = None
+                    break
+                key, name, typ, width = fm.groups()
+                fields.append({'name': name, 'type': typ, 'key': key == '#',
+                               'width': 1 if typ == 'BOOL' else int(width or 0)})
+            if fields:
+                models.append({'name': m.group(1), 'fields': fields, 'file': rel, 'text': text,
+                               'width': sum(f['width'] for f in fields)})
+    return models
+
+
+def read_table(rel):
+    """A table file split by the model that fits it (its line width, and a program that names the file)."""
+    path = resolve(rel, EDITABLE)
+    if not path or not os.path.isfile(path) or not rel.endswith('.dat'):
+        return {'error': 'table not found'}
+    with open(path, 'rb') as f:
+        data = f.read()
+    lines = data.split(b'\n')
+    if lines and lines[-1] == b'':
+        lines.pop()
+    width = len(lines[0]) if lines else None
+    base = os.path.basename(rel)
+    fitting = [m for m in find_models() if width is None or m['width'] == width]
+    fitting.sort(key=lambda m: (base not in m['text'], m['file']))
+    result = {'path': rel, 'bytes': len(data), 'total': len(lines), 'width': width,
+              'truncated': len(lines) > MAX_TABLE_ROWS,
+              'others': []}
+    if fitting:                                   # other models that fit, not copies of the one chosen
+        sig = lambda m: (m['name'], tuple((f['name'], f['type'], f['width']) for f in m['fields']))
+        chosen = sig(fitting[0])
+        result['others'] = sorted({m['name'] + ' (' + m['file'] + ')' for m in fitting[1:] if sig(m) != chosen})
+    if not fitting:
+        result['raw'] = [l.decode('utf-8', 'replace') for l in lines[:MAX_TABLE_ROWS]]
+        return result
+    model = fitting[0]
+    rows = []
+    for line in lines[:MAX_TABLE_ROWS]:
+        row, pos = [], 0
+        if len(line) != model['width']:
+            rows.append({'bad': line.decode('utf-8', 'replace')})
+            continue
+        for fld in model['fields']:
+            cell = line[pos:pos + fld['width']].decode('utf-8', 'replace')
+            pos += fld['width']
+            row.append(cell.rstrip() if fld['type'] == 'STRING' else cell.strip())
+        rows.append({'cells': row})
+    result.update({'model': model['name'], 'from': model['file'],
+                   'fields': [{k: f[k] for k in ('name', 'type', 'key', 'width')} for f in model['fields']],
+                   'rows': rows})
+    return result
+
+
 def compile_file(rel, optimize):
     """Compiles rel (relative to ROOT) → (binary path or None, errors, stderr, ms)."""
     fd, binary = tempfile.mkstemp(prefix='nihil-ide-')
@@ -134,7 +219,10 @@ class Handler(BaseHTTPRequestHandler):
         if url.path.startswith('/static/'):
             return self.send_static(url.path[len('/static/'):])
         if url.path == '/api/files':
-            return self.send_json({'files': list_files()})
+            return self.send_json({'files': list_files(), 'tables': list_tables()})
+        if url.path == '/api/table':
+            t = read_table(q.get('path', [''])[0])
+            return self.send_json(t, 404 if 'error' in t else 200)
         if url.path == '/api/file':
             path = resolve(q.get('path', [''])[0], READABLE)
             if not path or not os.path.isfile(path):

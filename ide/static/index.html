@@ -19,7 +19,7 @@
 <style>
 :root {
   --bg: #16171d; --panel: #1d1f27; --panel2: #252833; --line: #2f3340; --text: #d7dae0;
-  --dim: #8a90a0; --accent: #e8a33c; --ok: #6cc070; --err: #ef6b6b; --sel: #2c3a55;
+  --dim: #8a90a0; --accent: #19e3e8; --ok: #6cc070; --err: #ef6b6b; --sel: #2c3a55;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
@@ -34,7 +34,7 @@ header .logo span { color: #19e3e8; font-weight: 600; }
 button { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px;
   padding: 5px 11px; font: inherit; cursor: pointer; }
 button:hover { border-color: var(--dim); }
-button.primary { background: var(--accent); color: #1a1406; border-color: var(--accent); font-weight: 600; }
+button.primary { background: var(--accent); color: #04191a; border-color: var(--accent); font-weight: 600; }
 button:disabled { opacity: .45; cursor: default; }
 label.opt { display: flex; gap: 5px; align-items: center; color: var(--dim); margin-left: 6px; cursor: pointer; }
 .spacer { flex: 1; }
@@ -47,6 +47,20 @@ aside .file { padding: 3px 12px 3px 20px; cursor: pointer; font-family: ui-monos
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 aside .file:hover { background: var(--panel2); }
 aside .file.active { background: var(--sel); }
+aside .file.table::before { content: "▦ "; color: var(--accent); }
+#table .head { padding: 8px 12px; color: var(--dim); display: flex; gap: 12px; align-items: center;
+  border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--panel); }
+#table .head b { color: var(--text); font-weight: 600; }
+#table table { border-collapse: collapse; font: 12px/1.5 ui-monospace, monospace; margin: 0 0 8px; }
+#table th { position: sticky; top: 37px; background: var(--panel2); color: var(--text); text-align: left;
+  padding: 4px 14px 4px 10px; border-bottom: 1px solid var(--line); font-weight: 600; white-space: nowrap; }
+#table th small { color: var(--dim); font-weight: 400; margin-left: 6px; }
+#table th.key { color: var(--accent); }
+#table td { padding: 3px 14px 3px 10px; border-bottom: 1px solid #23262f; white-space: pre; }
+#table td.num { text-align: right; } #table td.i { color: #555b6b; text-align: right; }
+#table td.bool-T { color: var(--ok); } #table td.bool-F { color: var(--dim); }
+#table tr.bad td { color: var(--err); }
+#table tr:hover td { background: #22252e; }
 #work { display: grid; grid-template-rows: 1fr 6px 38%; min-height: 0; min-width: 0; }
 #editor { min-height: 0; }
 .CodeMirror { height: 100%; background: var(--bg); color: var(--text);
@@ -114,10 +128,12 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
           <div class="tab active" data-pane="terminal">Terminal</div>
           <div class="tab" data-pane="problems">Problems<span class="count" id="probCount" hidden></span></div>
           <div class="tab" data-pane="asm">Assembly</div>
+          <div class="tab" data-pane="table">Table</div>
         </div>
         <div class="pane active" id="terminal"></div>
         <div class="pane" id="problems"><div class="empty">No problems.</div></div>
         <div class="pane" id="asm"><div class="empty">Click "Assembly" to see the machine code of the current file.</div></div>
+        <div class="pane" id="table"><div class="empty">Click a table on the left to see its records.</div></div>
       </div>
     </div>
   </main>
@@ -281,8 +297,9 @@ term.onData((d) => {
 });
 
 // ---------------------------------------------------------------- files
+let tableOpen = null;
 async function loadFiles() {
-  const { files } = await api('/api/files');
+  const { files, tables } = await api('/api/files');
   const groups = {};
   for (const f of files) { const d = f.slice(0, f.lastIndexOf('/')); (groups[d] = groups[d] || []).push(f); }
   const box = $('files'); box.innerHTML = '';
@@ -293,7 +310,42 @@ async function loadFiles() {
       el.textContent = f.slice(dir.length + 1); el.title = f; el.onclick = () => open(f); box.appendChild(el);
     }
   }
+  if (tables.length) {
+    const h = document.createElement('h3'); h.textContent = 'Tables'; box.appendChild(h);
+    for (const t of tables) {
+      const el = document.createElement('div'); el.className = 'file table' + (t === tableOpen ? ' active' : '');
+      el.textContent = t.slice(t.lastIndexOf('/') + 1); el.title = t; el.onclick = () => showTable(t); box.appendChild(el);
+    }
+  }
+  if (tableOpen && !tables.includes(tableOpen)) { tableOpen = null; $('table').innerHTML = '<div class="empty">The table is gone.</div>'; }
   return files;
+}
+const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+async function showTable(path, quiet) {
+  const r = await api('/api/table?path=' + encodeURIComponent(path));
+  const box = $('table');
+  if (r.error) { box.innerHTML = `<div class="empty">${esc(r.error)}</div>`; return; }
+  tableOpen = path;
+  document.querySelectorAll('aside .file.table').forEach((e) => e.classList.toggle('active', e.title === path));
+  const count = `${r.total} record${r.total === 1 ? '' : 's'}${r.truncated ? ' (showing the first 2000)' : ''}`;
+  let html;
+  if (!r.fields) {
+    html = `<div class="head"><b>${esc(path)}</b><span>${count}</span><span>no data model in the programs has lines of ${r.width} bytes</span></div>` +
+      `<table>${r.raw.map((l, i) => `<tr><td class="i">${i}</td><td>${esc(l)}</td></tr>`).join('')}</table>`;
+  } else {
+    const head = r.fields.map((f) => `<th class="${f.key ? 'key' : ''}">${f.key ? '#' : ''}${esc(f.name)}<small>${f.type}${f.type === 'BOOL' ? '' : '(' + f.width + ')'}</small></th>`).join('');
+    const body = r.rows.map((row, i) => row.bad !== undefined
+      ? `<tr class="bad"><td class="i">${i}</td><td colspan="${r.fields.length}">does not fit ${esc(r.model)}: ${esc(row.bad)}</td></tr>`
+      : `<tr><td class="i">${i}</td>${row.cells.map((c, j) => {
+          const t = r.fields[j].type;
+          const cls = t === 'INT' || t === 'FLOAT' ? 'num' : t === 'BOOL' ? 'bool-' + c : '';
+          return `<td class="${cls}">${esc(c)}</td>`; }).join('')}</tr>`).join('');
+    const others = r.others.length ? `<span title="${esc(r.others.join(', '))}">also fits: ${r.others.length}</span>` : '';
+    html = `<div class="head"><b>${esc(path)}</b><span>${esc(r.model)} from ${esc(r.from)}</span><span>${count}</span><span>${r.width + 1} bytes per line</span>${others}</div>` +
+      `<table><tr><th></th>${head}</tr>${body}</table>`;
+  }
+  box.innerHTML = html;
+  if (!quiet) showTab('table');
 }
 async function open(path, line, col) {
   if (path !== current) {
@@ -402,6 +454,8 @@ async function run() {
     status((killed ? 'Stopped' : `Finished with exit code ${code} in ${secs} s`) + anim, code === 0 ? 'ok' : 'bad');
   } catch (err) { status('Connection lost: ' + err.message, 'bad'); }
   clearInterval(live); runId = null; setRunning(false);
+  await loadFiles();                                  // the program may have written a table
+  if (tableOpen) showTable(tableOpen, true);
 }
 async function stop() { if (runId) await api('/api/stop', { id: runId }); }
 $('btnRun').onclick = run; $('btnStop').onclick = stop;
@@ -445,10 +499,11 @@ addEventListener('keydown', (e) => {
 (async () => {
   const files = await loadFiles();
   let last = null; try { last = localStorage.getItem('nihil-ide-file'); } catch (e) {}
-  const want = new URLSearchParams(location.hash.slice(1));    // #open=path or #run=path
+  const want = new URLSearchParams(location.hash.slice(1));    // #open=path, #run=path, #table=path.dat
   const target = want.get('run') || want.get('open');
   await open(files.includes(target) ? target : files.includes(last) ? last : (files.includes('ide/workspace/hello.nihil') ? 'ide/workspace/hello.nihil' : files[0]));
   if (want.get('run')) run();
+  if (want.get('table')) showTable(want.get('table'));
 })();
 </script>
 </body>
