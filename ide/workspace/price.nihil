@@ -1,0 +1,22 @@
+// Changes the price of one product, rewriting only its line of the file.
+// Create some products first with products.nihil (same model, same file).
+PRODUCT = @[code: INT(6); name: STRING(24); price: FLOAT(10); active: BOOL];
+FILE = "ide/workspace/products.dat";
+
+n = PRODUCT @# FILE;
+>> "The file has "; >> n; >> " product(s).\n";
+>> "Product code: ";
+code = 0;
+<< code;
+code < 1 || code > n {
+    >> "There is no product "; >> code; >> ".\n";
+    :: 0;
+}
+p = PRODUCT @[code - 1] FILE;           // code 1 is record 0
+>> p.name; >> " costs $"; >> p.price; >> ". New price: ";
+price = 0.0;
+<< price;
+p.price = price;
+@[code - 1]>> FILE, p;                  // one line, in place: the rest stays
+>> "Saved. The line in the file:\n";
+>> $(PRODUCT @[code - 1] FILE);

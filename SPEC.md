@@ -1,4 +1,4 @@
-# Nihil — Language Specification (v2.5)
+# Nihil — Language Specification (v2.6)
 
 > **Nihil**: an imperative, minimalist language compiled straight to x86_64 machine
 > code, with no libc, no linker and no VM. The name is Latin for
@@ -337,6 +337,7 @@ m > 20 add(5);       // calls if m > 20
 | `... expr;` | **Waits** `expr` milliseconds (an INT; `<= 0` does not wait). Output is flushed first, so what was written shows up before the pause. Uses `nanosleep` and resumes after a signal (stage 1). |
 | `@>> path, text;` | **Writes a file**: creates it or replaces its contents with the STRING `text` (stage 1). Atomic: the text goes to `path.nihil-tmp`, which is synced to disk (`fsync`) and renamed over `path`, so a crash leaves the old file or the new one, never a mix. A new file gets mode `0644` (minus the umask); a replaced file gets those permissions too. |
 | `@+>> path, text;` | **Appends** `text` to the file, creating it if needed, and syncs it to disk before going on (stage 1). |
+| `@[i]>> path, r;` | **Changes record `i`** of a table file in place, writing only that line (§20.4, stage 1). |
 
 ### 8.1.1 Writing files
 
@@ -479,6 +480,7 @@ command         ::= method                      (* top level only *)
                   | "::" [ expression ] ";"
                   | "..." expression ";"
                   | ( "@>>" | "@+>>" ) expression "," expression ";"
+                  | "@" "[" expression "]" ">>" expression "," expression ";"
                   | ">>>" expression ";"
                   | "<<"  IDENT ";"
                   | "<<<" IDENT ";"
@@ -874,6 +876,31 @@ nihil: 'products.dat', line 6: the file ends in the middle of a PRODUCT record (
 The path after `@`, `@[i]` or `@#` is a unary expression: a computed path goes in
 parentheses, `NAME @[i] (dir + "/products.dat")`.
 
+**Changing one record in place:** `@[i]>> path, r;` writes record `r` as line
+*i* of the file and leaves every other byte as it is: one `pwrite` of that line,
+then `fsync`. The model comes from the type of `r`.
+
+```text
+p = PRODUCT @[3] "products.dat";
+p.price = 13.75;
+@[3]>> "products.dat", p;                        // only line 3 changes
+@[PRODUCT @# "products.dat"]>> "products.dat", q; // i = the count adds a line
+```
+
+- *i* goes from 0 to the count: *i* equal to the count adds a line at the end, a
+  file that does not exist has 0 records, and a larger *i* is an error (a table
+  never has holes). If the last line lacks its `\n`, it gets one first.
+- The file is checked as by `@#`, so one cut in the middle of a record is an
+  error and nothing is written. A value that does not fit stops the program
+  before anything is written, too.
+- One line is small, so in practice it is written whole; but unlike `@>>`
+  (temporary file + `rename`) it is not atomic against a crash in the middle of
+  the write. To change many records at once safely, rewrite the table with `@>>`.
+
+```text
+nihil: 'products.dat' has no record 7 to write (it has 5: 0 to 4, or 5 to add one)
+```
+
 ### 20.5 Implementation
 
 A record is a block of 8-byte slots with the ARRAY layout (§3); a STRING field
@@ -925,6 +952,7 @@ with models always get the prelude.
 | **v1.9:** saved registers learned between passes | The prologue comes before the body; using the count from the previous pass avoids saving registers for nothing |
 | **v2.1:** `... ms;` waits | Animations need a fixed speed; a busy loop depends on the machine. The ellipsis reads as a pause and cannot start any valid expression |
 | **v2.2:** renamed from Ket to Nihil | Latin for *nothing*: no keywords, and `_` for the missing value |
+| **v2.6:** `@[i]>> path, r;` | A key-value store needs to change one record without rewriting the table. With fixed widths the line's position is known, so one `pwrite` replaces it. `@[i]` already meant "record i" and `>>` "write"; a command never started with `@[` before |
 | **v2.5:** `NAME @[i] path`, `NAME @?[i] path`, `NAME @# path` | Reading one record should not cost reading the whole table: with fixed widths its position is known, and `pread` reads only that line. The count comes from the file's size, which also detects a file cut in the middle of a record |
 | **v2.4:** data models `NAME = @[field: TYPE(width); …];`, records, `r.field`, `NAME @ path` | Programs needed structured data that matches a file layout. Fixed widths make a file a table where record *n* has a known position, which a key-value store will need; names without quotes let the compiler check every field. `@[` keeps the "file" meaning of `@`; `.` after a value was never valid before |
 | **v2.3:** `@>> path, text;` and `@+>> path, text;` write files | Programs could read files but not save anything. The first step towards storing data: atomic replace (temporary + `fsync` + `rename`) so a crash never leaves half a file, and a durable append for logs. `@` already meant "file" and `>>` "write"; neither combination was valid before |

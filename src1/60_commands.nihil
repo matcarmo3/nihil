@@ -24,6 +24,7 @@ command() {
     t == T_PAUSE { cmd_pause(); :; }
     t == T_WRITE_FILE || t == T_APPEND_FILE { cmd_write_file(t); :; }
     t == T_ERROR_OUT { cmd_print_error(); :; }
+    t == '@' && peek_type() == '[' { cmd_write_record(); :; }
     t == '@' { error("the inclusion @ \"file\"; can only appear at the top level, alone on its line"); }
     init_expression(t) { cmd_expr_block(); :; }
     error_expected("a command");

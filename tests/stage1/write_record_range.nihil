@@ -1,0 +1,3 @@
+I = @[a: INT(2)];
+@>> "build/wrr.dat", [I(1), I(2)];
+@[3]>> "build/wrr.dat", I(4);

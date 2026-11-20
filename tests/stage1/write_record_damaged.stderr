@@ -1,0 +1,1 @@
+nihil: 'build/wrd.dat', line 3: the file ends in the middle of a I record (7 bytes is not a whole number of 3-byte lines)

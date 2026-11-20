@@ -359,6 +359,23 @@ __nihil_rec_count(path = "", size = 0, schema = [0], model = "") {
     : __n;
 }
 
+// @[i]>> path, r : the line to write in place, after checking that i is a
+// record of the file or the one just after the last (size: -1 = no file).
+// If the last line lacks its "\n", writing after it puts the "\n" first.
+__nihil_rec_place(i = 0, path = "", r = 0, size = 0, schema = [0], names = "", model = "") {
+    __n = __nihil_rec_count(path, size, schema, model);
+    i < 0 || i > __n {
+        __last = "";
+        __n > 0 { __last = ": 0 to " + __nihil_int_text(__n - 1) + ", or " + __nihil_int_text(__n) + " to add one"; }
+        __n == 0 { __last = ": only 0, to add the first"; }
+        !>> "nihil: '" + path + "' has no record " + __nihil_int_text(i) + " to write (it has " + __nihil_int_text(__n) + __last + ")\n";
+        :: 2;
+    }
+    __text = __nihil_rec_text(r, schema, names, model);
+    i == __n && size > 0 && size % (#__text) != 0 { : "\n" + __text; }
+    : __text;
+}
+
 // NAME @[i] path : the line read at record i (chunk: STRING address, 0 = no
 // file) → the record's address, or 0 (= _) for @?[i] when there is none
 __nihil_rec_at(i = 0, path = "", chunk = 0, size = 0, schema = [0], names = "", model = "", opt = false) {

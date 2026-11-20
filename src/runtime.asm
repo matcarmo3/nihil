@@ -49,6 +49,7 @@ t_sleep:        jmp strict near rt_sleep           ; RT_SLEEP
 t_write_file:   jmp strict near rt_write_file      ; RT_WRITE_FILE
 t_append_file:  jmp strict near rt_append_file     ; RT_APPEND_FILE
 t_read_at:      jmp strict near rt_read_at         ; RT_READ_AT
+t_write_at:     jmp strict near rt_write_at        ; RT_WRITE_AT
 
 ; ---- arithmetic -------------------------------------------------------------
 ; Division truncated toward zero (as in C). MIN / -1 gives MIN (idiv
@@ -642,16 +643,25 @@ rt_sleep:
 ; atomically: writes "<path>.nihil-tmp", fsyncs it and renames it over the path,
 ; so a crash leaves either the old file or the new one, never half of it.
 ; rt_append_file: same arguments; appends the text (creating the file), then fsyncs.
+; rt_write_at: same arguments and rdx = offset; writes the text there (pwrite,
+; creating the file, keeping the rest of it), then fsyncs.
 ; Any failure is a runtime error naming the file and the reason (exit code 2).
 %define WF_PATH     0               ; [rsp + WF_PATH]: the path, 0-terminated
 %define WF_TEMP     4096            ; [rsp + WF_TEMP]: the temporary path
 %define WF_FRAME    8192
-%define WF_FLAG     (WF_FRAME + 40) ; 0 = replace, 1 = append (pushed before 5 registers)
+%define WF_FLAG     (WF_FRAME + 40) ; 0 = replace, 1 = append, 2 = at an offset (pushed before 5 registers)
+%define WF_OFFSET   (WF_FRAME + 48) ; where the next byte goes (flag 2)
 %define WF_MAX_PATH 4080            ; leaves room for ".nihil-tmp" and the 0
+rt_write_at:
+    push rdx
+    push qword 2
+    jmp rt_write_file.body
 rt_append_file:
+    push qword 0
     push qword 1
     jmp rt_write_file.body
 rt_write_file:
+    push qword 0
     push qword 0
 .body:
     push rbx
@@ -689,6 +699,9 @@ rt_write_file:
 .append:
     lea r15, [rsp + WF_PATH]
     mov edx, 0x441                  ; O_WRONLY | O_CREAT | O_APPEND
+    cmp qword [rsp + WF_FLAG], 1
+    je .open
+    mov edx, 0x41                   ; O_WRONLY | O_CREAT (flag 2: in place)
 .open:
     mov eax, 257                    ; sys_openat(AT_FDCWD, r15, flags, 0644)
     mov rdi, -100
@@ -707,11 +720,17 @@ rt_write_file:
     mov rdi, r13
     mov rsi, rbx
     mov rdx, r14
+    cmp qword [rsp + WF_FLAG], 2
+    jne .syscall_write
+    mov eax, 18                     ; sys_pwrite64(fd, buf, count, offset)
+    mov r10, [rsp + WF_OFFSET]
+.syscall_write:
     syscall
     cmp rax, -4                     ; -EINTR: try again
     je .write
     test rax, rax
     js .fail_open_fd
+    add [rsp + WF_OFFSET], rax
     add rbx, rax
     sub r14, rax
     jmp .write
@@ -741,7 +760,7 @@ rt_write_file:
     pop r13
     pop r12
     pop rbx
-    add rsp, 8                      ; flag
+    add rsp, 16                     ; flag and offset
     ret
 .fail_open_fd:
     mov r14, rax
@@ -1022,3 +1041,4 @@ ASSERT_AT t_sleep,        RT_SLEEP
 ASSERT_AT t_write_file,   RT_WRITE_FILE
 ASSERT_AT t_append_file,  RT_APPEND_FILE
 ASSERT_AT t_read_at,      RT_READ_AT
+ASSERT_AT t_write_at,     RT_WRITE_AT

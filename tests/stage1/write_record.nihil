@@ -1,0 +1,22 @@
+// @[i]>> path, r; changes one line in place and can add the next one
+ITEM = @[code: INT(4); name: STRING(8); ok: BOOL];
+@>> "build/wr.dat", [ITEM(1, "one", true), ITEM(2, "two", false), ITEM(3, "three", true)];
+p = ITEM @[1] "build/wr.dat";
+p.name = "TWO";
+p.ok = true;
+@[1]>> "build/wr.dat", p;
+@[ITEM @# "build/wr.dat"]>> "build/wr.dat", ITEM(4, "four", false);
+>> $(ITEM @ "build/wr.dat");
+>> ITEM @# "build/wr.dat"; >> "\n";
+// the last line without "\n": adding after it puts the "\n" first
+@>> "build/wr2.dat", "   1a       T";
+@[1]>> "build/wr2.dat", ITEM(2, "b", false);
+>> $(ITEM @ "build/wr2.dat");
+// rewriting that last line gives it its "\n"
+@>> "build/wr3.dat", "   1a       T";
+@[0]>> "build/wr3.dat", ITEM(5, "e", false);
+>> #(@ "build/wr3.dat"); >> "\n";
+// an empty file starts with record 0
+@>> "build/wr4.dat", "";
+@[0]>> "build/wr4.dat", ITEM(9, "nine", true);
+>> $(ITEM @ "build/wr4.dat");
