@@ -1,0 +1,3 @@
+P = @[code: INT(4); name: STRING(12); price: FLOAT(8); active: BOOL];
+rows = [P()];
+x = rows.size();

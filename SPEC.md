@@ -1,4 +1,4 @@
-# Nihil — Language Specification (v3.2)
+# Nihil — Language Specification (v3.3)
 
 > **Nihil**: an imperative, minimalist language compiled straight to x86_64 machine
 > code, with no libc, no linker and no VM. The name is Latin for
@@ -1075,6 +1075,35 @@ n = "42".int() || 0;                    // 42; "4x".int() is _
 | `v.sum()`, `v.min()`, `v.max()` | INT and FLOAT only: the total (0 for none); the smallest and largest as `INT?`/`FLOAT?`, `_` for none |
 | `parts.join(sep)` | ARRAY of STRING only: one STRING with `sep` between the parts |
 
+### 21.1 Queries on an ARRAY of records
+
+On an ARRAY of records the argument is an **expression of the fields**: inside
+it, the model's field names stand for the fields of each element in turn. It
+can use any other name of the program, locals of the method included, and
+other calls; a field name hides a variable with the same name there.
+
+```text
+rows = PRODUCT @ "products.dat";
+cheap = rows.where(price <= limit && active);   // limit: a local, say
+>> $rows.sort(price);                            // the table in order of price
+best? = rows.sort(-price).first(active);         // the most expensive active one
+total = rows.where(active).sum(price);
+```
+
+| Call | Result |
+|---|---|
+| `rows.where(cond)` | a new ARRAY with the records for which the BOOL `cond` is true, in order |
+| `rows.count(cond)` | `INT`: how many |
+| `rows.first(cond)` | `NAME?`: the first one, or `_` |
+| `rows.sort(key)` | a new ARRAY in increasing order of the INT, FLOAT or STRING `key` (stable; `-key` for a number gives decreasing order) |
+| `rows.sum(expr)` | the total of an INT or FLOAT expression (0 for none) |
+
+The compiler writes the loop where the call is (the expression is compiled
+once, with the element in a hidden local), so the expression is a full part of
+the program and costs no call per element. Only `sort` calls the prelude, with
+the keys already computed. The records are the same ones (a record is a
+reference, §20.2): `where` and `sort` make new ARRAYs, not new records.
+
 A name the type does not have is a compile error that lists the ones it has:
 
 ```text
@@ -1129,6 +1158,7 @@ nothing to a program that does not use it.
 | **v1.9:** saved registers learned between passes | The prologue comes before the body; using the count from the previous pass avoids saving registers for nothing |
 | **v2.1:** `... ms;` waits | Animations need a fixed speed; a busy loop depends on the machine. The ellipsis reads as a pause and cannot start any valid expression |
 | **v2.2:** renamed from Ket to Nihil | Latin for *nothing*: no keywords, and `_` for the missing value |
+| **v3.3:** queries `rows.where(cond)`, `count`, `first`, `sort(key)`, `sum(expr)` | Tables could be read but not searched or ordered by a field. Field names inside the call need no new symbol and no function values; compiling the loop in place lets the condition use the program's locals |
 | **v3.2:** only the prelude methods a program reaches are compiled | With the library, every program that used FLOAT, records or `.` carried all of the prelude: `x = 1.5; >> x;` was 66 KB, now 20 KB. The passes already redo everything, so the set of methods is found like a type: from the calls of one pass, for the next |
 | **v3.1:** `ARRAY + ARRAY` | Building a list of unknown length meant counting first and filling after. `+` already joined STRINGs, which are arrays of bytes |
 | **v3.0:** the library `value.name(…)`, and `$` of INT, FLOAT and BOOL | Every program was rewriting the same text and array routines, and a number could not be turned into text. Names after a `.` cannot clash with the program's names, so the language still has no reserved words |

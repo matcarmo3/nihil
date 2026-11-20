@@ -1,0 +1,24 @@
+// A report of the products in the table (create some with products.nihil):
+// queries on an ARRAY of records use the field names in their expression.
+PRODUCT = @[code: INT(6); name: STRING(24); price: FLOAT(10); active: BOOL];
+FILE = "ide/workspace/products.dat";
+
+rows = PRODUCT @? FILE;
+>> $#rows + " product(s), " + $rows.count(active) + " active\n";
+#rows == 0 { :: 0; }
+
+>> "\nBy price:\n";
+>> $rows.where(active).sort(price);
+
+>> "Price limit: ";
+limit = 0.0;
+<< limit;
+cheap = rows.where(active && price <= limit);
+>> "\n" + $#cheap + " up to $" + $limit + ", worth $" + $cheap.sum(price) + " in all:\n";
+>> $cheap.sort(name);
+
+priciest? = rows.sort(-price).first(active);
+priciest != _ {
+    p = priciest || PRODUCT();
+    >> "The most expensive: " + p.name.trim() + ", $" + $p.price + "\n";
+}

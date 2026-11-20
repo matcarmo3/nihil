@@ -1,0 +1,1 @@
+'.where' needs a BOOL condition, but the expression is FLOAT

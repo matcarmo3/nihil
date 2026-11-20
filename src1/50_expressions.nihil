@@ -435,6 +435,10 @@ primary() {
 
 primary_name() {
     pi = tok_start; pl = tok_len; pn = tok_line; pli = tok_lstart;
+    q_model >= 0 {
+        qt = query_field();                // inside rows.where(…): a field of the element
+        qt >= 0 { : qt; }
+    }
     k = lookup(tok_start, tok_len);
     e = peek_type();
     e == '(' {

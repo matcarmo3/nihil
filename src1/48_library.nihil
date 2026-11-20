@@ -106,21 +106,26 @@ library_call(t = 0) {
     next_token();                        // "." → name
     ns = tok_start; nl = tok_len;
     t == TYPE_UNKNOWN {
-        // the value has no type yet: compile the arguments and decide in the next pass
-        next_token();
-        next_token();
-        * tok_type != ')' {
-            expression();
-            tok_type == ',' {
-                next_token();
-            } || tok_type != ')' {
-                error_expected("',' or ')'");
+        // the value has no type yet: skip the arguments (they may use field
+        // names) and decide in the next pass
+        sc = size_const;
+        next_token();                    // name → "("
+        depth = 0;
+        going = true;
+        * going {
+            tok_type == T_END { error_expected("')'"); }
+            tok_type == '(' || tok_type == '[' || tok_type == '{' { depth = depth + 1; }
+            tok_type == ')' || tok_type == ']' || tok_type == '}' {
+                depth = depth - 1;
+                depth == 0 { going = false; }
             }
+            next_token();
         }
-        next_token();
+        size_const = sc;
         unknowns = unknowns + 1;
         : TYPE_UNKNOWN;
     }
+    is_rec_array(t) { : query_call(t); }
     target = lib_target(t, ns, nl);
     #target == 0 { lib_missing(t, ns, nl); }
     k = lookup_text(target);
@@ -132,4 +137,205 @@ library_call(t = 0) {
     lib_k = sv_k; lib_name_start = sv_s; lib_name_len = sv_l;
     t == TYPE_STR && name_is(ns, nl, "float") { r = TYPE_FLOAT | TYPE_OPT; }   // the prelude gives the bits
     : r;
+}
+
+// ---- queries on an ARRAY of records (SPEC §21.1) ---------------------------------
+// rows.where(cond), rows.count(cond), rows.first(cond), rows.sort(key),
+// rows.sum(expr): the argument is compiled once, inside a loop over the
+// elements, with the model's field names standing for the fields of the
+// current element. It can use any other name of the program, locals included.
+
+// hidden locals of the loop: [rbp + d] with d from new_slot()
+q_load(r = 0, d = 0) {                  // mov rax|rcx|rdx, [rbp + d]  (r: 0, 1, 2)
+    r == 0 { eb(0x48, 0x8B, 0x85); }
+    r == 1 { eb(0x48, 0x8B, 0x8D); }
+    r == 2 { eb(0x48, 0x8B, 0x95); }
+    emit_d(d);
+}
+
+q_store(d = 0) {                        // mov [rbp + d], rax
+    eb(0x48, 0x89, 0x85);
+    emit_d(d);
+}
+
+q_zero(d = 0) {                         // mov qword [rbp + d], 0
+    eb(0x48, 0xC7, 0x85);
+    emit_d(d);
+    emit_d(0);
+}
+
+q_inc(d = 0) {                          // inc qword [rbp + d]
+    eb(0x48, 0xFF, 0x85);
+    emit_d(d);
+}
+
+// inside a query: a field name of the current element → its value
+query_field() {
+    q_model < 0 || peek_type() == '(' { : -1; }
+    j = find_field(q_model, tok_start, tok_len);
+    j < 0 { : -1; }
+    q_load(0, q_elem);
+    eb(0x48, 0x8B, 0x80);                   // mov rax, [rax + disp32]
+    emit_d(j * 8);
+    next_token();
+    : f_type[m_first[q_model] + j];
+}
+
+query_missing(t = 0, s = 0, n = 0) {
+    error_start();
+    put_type(t);
+    put_str(" has no method '");
+    put_source(s, n);
+    put_str("': it has where, count, first, sort and sum, with an expression of the fields (rows.where(price > 10.0))");
+    error_end();
+}
+
+// tok = name of rows.name(…), the ARRAY (type t) in rax → the result's type
+query_call(t = 0) {
+    ns = tok_start; nl = tok_len;
+    kind = 0;
+    name_is(ns, nl, "where") { kind = 1; }
+    name_is(ns, nl, "count") { kind = 2; }
+    name_is(ns, nl, "first") { kind = 3; }
+    name_is(ns, nl, "sort") { kind = 4; }
+    name_is(ns, nl, "sum") { kind = 5; }
+    kind == 0 { query_missing(t, ns, nl); }
+    m = (t & ~TYPE_ARR) >> 8;
+    next_token();                        // name → "("
+    next_token();
+    tok_type == ')' {
+        error_start();
+        put_str("'.");
+        put_source(ns, nl);
+        put_str("' needs an expression of the fields of ");
+        put_type(model_type(m));
+        put_str(", like rows.");
+        put_source(ns, nl);
+        kind == 4 || kind == 5 { put_str("(price)"); } || { put_str("(price > 10.0)"); }
+        error_end();
+    }
+    sv_slots = slots;
+    d_arr = new_slot();
+    d_i = new_slot();
+    d_res = new_slot();
+    d_n = new_slot();
+    d_el = new_slot();
+    q_store(d_arr);
+    q_zero(d_i);
+    q_zero(d_n);
+    q_zero(d_res);
+    kind == 1 || kind == 4 {
+        eb(0x48, 0x8B, 0x48, 0xF8);         // mov rcx, [rax - 8]
+        emit_call_rt(RT_ALLOC);            // the result (where) or the keys (sort)
+        q_store(d_res);
+    }
+    top = size_code;
+    last_target = size_code;               // the loop comes back here
+    q_load(0, d_i);
+    q_load(1, d_arr);
+    eb(0x48, 0x3B, 0x41, 0xF8);             // cmp rax, [rcx - 8]
+    eb(0x0F, 0x8D);                         // jge end
+    p_end = size_code;
+    emit_d(0);
+    eb(0x48, 0x8B, 0x04, 0xC1);             // mov rax, [rcx + rax*8]
+    q_store(d_el);
+    sv_m = q_model; sv_e = q_elem;
+    q_model = m; q_elem = d_el;
+    pi = tok_start; pl = tok_len; pn = tok_line; pli = tok_lstart;
+    u = expression();
+    q_model = sv_m; q_elem = sv_e;
+    p_next = -1;
+    p_break = -1;
+    kind <= 3 {
+        u != TYPE_BOOL && u != TYPE_UNKNOWN { query_type(ns, nl, u, "a BOOL condition", pi, pl, pn, pli); }
+        eb(0x48, 0x85, 0xC0, 0x0F, 0x84);   // test rax, rax ; jz next
+        p_next = size_code;
+        emit_d(0);
+        kind == 1 {
+            q_load(1, d_res);
+            q_load(2, d_n);
+            q_load(0, d_el);
+            eb(0x48, 0x89, 0x04, 0xD1);     // mov [rcx + rdx*8], rax
+            q_inc(d_n);
+        }
+        kind == 2 { q_inc(d_n); }
+        kind == 3 {
+            q_load(0, d_el);
+            q_store(d_res);
+            q_inc(d_n);
+            emit(0xE9);                    // jmp end: the first one is enough
+            p_break = size_code;
+            emit_d(0);
+        }
+    }
+    kind == 4 {
+        u != TYPE_INT && u != TYPE_FLOAT && u != TYPE_STR && u != TYPE_UNKNOWN {
+            query_type(ns, nl, u, "an INT, FLOAT or STRING key", pi, pl, pn, pli);
+        }
+        q_load(1, d_res);
+        q_load(2, d_i);
+        eb(0x48, 0x89, 0x04, 0xD1);         // mov [rcx + rdx*8], rax (the key)
+    }
+    kind == 5 {
+        u != TYPE_INT && u != TYPE_FLOAT && u != TYPE_UNKNOWN { query_type(ns, nl, u, "an INT or FLOAT", pi, pl, pn, pli); }
+        u == TYPE_FLOAT {
+            eb(0xF3, 0x0F, 0x7E, 0x85);     // movq xmm0, [rbp + d_n]
+            emit_d(d_n);
+            eb(0x66, 0x48, 0x0F, 0x6E, 0xC8);   // movq xmm1, rax
+            eb(0xF2, 0x0F, 0x58, 0xC1);     // addsd xmm0, xmm1
+            eb(0x66, 0x0F, 0xD6, 0x85);     // movq [rbp + d_n], xmm0
+            emit_d(d_n);
+        } || {
+            eb(0x48, 0x01, 0x85);           // add [rbp + d_n], rax
+            emit_d(d_n);
+        }
+    }
+    p_next >= 0 { patch_here(p_next); }
+    q_inc(d_i);
+    emit_jmp_to(top);
+    patch_here(p_end);
+    p_break >= 0 { patch_here(p_break); }
+    expect(')', "')' (one expression of the fields)");
+    r = t;
+    kind == 1 {
+        q_load(0, d_res);
+        q_load(1, d_n);
+        eb(0x48, 0x89, 0x48, 0xF8);         // mov [rax - 8], rcx: the elements that passed
+    }
+    kind == 2 { q_load(0, d_n); r = TYPE_INT; }
+    kind == 3 {
+        q_load(0, d_res);
+        q_load(2, d_n);                    // presence: 1 if one was found
+        r = model_type(m) | TYPE_OPT;
+    }
+    kind == 4 {
+        q_load(0, d_arr);
+        emit(0x50);
+        q_load(0, d_res);
+        emit(0x50);
+        emit(0xB8);                        // mov eax, kind of key ; push rax
+        u == TYPE_UNKNOWN { emit_d(1); } || { emit_d(u); }
+        emit(0x50);
+        call_prelude("__nihil_sort_by", 24);
+    }
+    kind == 5 {
+        q_load(0, d_n);
+        r = TYPE_INT;
+        u == TYPE_FLOAT { r = TYPE_FLOAT; }
+        u == TYPE_UNKNOWN { r = TYPE_UNKNOWN; }
+    }
+    slots = sv_slots;
+    : r;
+}
+
+query_type(ns = 0, nl = 0, u = 0, what = "", pi = 0, pl = 0, pn = 0, pli = 0) {
+    restore_pos(pi, pl, pn, pli);
+    error_start();
+    put_str("'.");
+    put_source(ns, nl);
+    put_str("' needs ");
+    put_str(what);
+    put_str(", but the expression is ");
+    put_type(u);
+    error_end();
 }

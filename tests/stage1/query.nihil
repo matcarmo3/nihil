@@ -1,0 +1,17 @@
+// queries on an ARRAY of records: the argument uses the field names of each element
+P = @[code: INT(4); name: STRING(12); price: FLOAT(8); active: BOOL];
+rows = [P(1, "coffee", 12.5, true), P(2, "tea", 8.0, true), P(3, "cake", 15.0, false), P(4, "juice", 6.5, true), P(5, "bread", 8.0, true)];
+cheap(limit = 0.0) {
+    : rows.where(price <= limit && active);
+}
+>> $cheap(8.0);
+>> rows.count(active); >> " "; >> rows.count(price > 100.0); >> "\n";
+f? = rows.first(name.starts("c") && !active);
+>> (f || P()).name; >> " "; >> rows.first(code == 99) == _; >> "\n";
+>> $rows.sort(price);
+>> $rows.sort(name);
+>> $rows.sort(-code).where(code % 2 == 1);
+>> rows.sum(price); >> " "; >> rows.sum(code * 10); >> " "; >> rows.where(active).sum(price); >> "\n";
+>> rows.sort(name).first(price > 10.0) == _; >> "\n";
+none = rows.where(false);
+>> #none; >> " "; >> none.sum(price); >> "\n";
