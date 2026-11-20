@@ -50,6 +50,11 @@ TYPE_ABSENT = 6;   // type of the literal _
 TYPE_FLOAT = 7;     // double, kept as 64 bits in rax
 TYPE_OPT = 32;      // T? = TYPE_OPT | T
 TYPE_REC = 64;      // a record of model m: TYPE_REC | (m << 8)
+TYPE_MAP = 128;     // a MAP of map type n: TYPE_MAP | (n << 8) (§22)
+MAX_MAPT = 4096;
+mt_key = [0 ; MAX_MAPT];       // key type of each map type
+mt_val = [0 ; MAX_MAPT];       // value type
+n_mapt = 0;
 
 // ---- symbol flags ----
 FLAG_GLOBAL = 1;

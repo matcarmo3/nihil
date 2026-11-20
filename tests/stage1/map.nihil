@@ -1,0 +1,31 @@
+// MAP: literals, m[k] (V?), m[k] = v, m[k] = _, #m, has, keys, values, parameters, records as values
+idade = {"ana": 30, "bob": 25};
+idade["carla"] = 41;
+idade["bob"] = 26;
+>> #idade; >> " "; >> idade["ana"] || 0; >> " "; >> idade["bob"] || 0; >> " "; >> idade["zed"] == _; >> "\n";
+idade["ana"] = _;
+>> #idade; >> " "; >> idade.has("ana"); >> idade.has("carla"); >> "\n";
+>> idade.keys().sort().join(","); >> " "; >> idade.values().sort().sum(); >> "\n";
+cont = {0: 0 ; 1000};
+i = 0;
+* i < 100000 { k = (i * 7919) % 1000; cont[k] = (cont[k] || 0) + 1; i = i + 1; }
+>> #cont; >> " "; >> cont[5] || -1; >> " "; >> cont.values().sum(); >> "\n";
+i = 0;
+* i < 1000 { i % 2 == 0 { cont[i] = _; } i = i + 1; }
+ok = true;
+i = 0;
+* i < 1000 { (cont[i] == _) != (i % 2 == 0) { ok = false; } i = i + 1; }
+>> #cont; >> " "; >> ok; >> "\n";
+soma(m = {"": 0.0}) {
+    t = 0.0;
+    ks = m.keys();
+    j = 0;
+    * j < #ks { t = t + (m[ks[j]] || 0.0); j = j + 1; }
+    : t;
+}
+precos = {"cafe": 12.5, "cha": 8.0};
+>> soma(precos); >> " "; >> soma(); >> "\n";
+P = @[n: INT(3)];
+regs = {7: P(1)};
+regs[8] = P(2);
+>> (regs[8] || P()).n; >> " "; >> #regs; >> "\n";

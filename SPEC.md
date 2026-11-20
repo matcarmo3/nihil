@@ -1,4 +1,4 @@
-# Nihil — Language Specification (v3.3)
+# Nihil — Language Specification (v3.4)
 
 > **Nihil**: an imperative, minimalist language compiled straight to x86_64 machine
 > code, with no libc, no linker and no VM. The name is Latin for
@@ -1117,6 +1117,42 @@ The library is written in Nihil, in the prelude (§18), as methods named
 methods a program reaches go into its executable (§18), so the library costs
 nothing to a program that does not use it.
 
+## 22. MAP (stage 1)
+
+A **MAP** holds values by key, in memory: a hash table. The key is an INT or a
+STRING; the value can be any type (INT, FLOAT, BOOL, STRING, a record, an
+ARRAY). Its type is written `MAP of K to V`.
+
+```text
+idade = {"ana": 30, "bob": 25};        // the types come from the first pair
+vendas = {0: 0.0 ; 100000};            // an empty map of that type, with room for 100,000 keys
+idade["carla"] = 41;                   // adds or replaces
+x = idade["ana"] || 0;                 // m[k] is V?: _ when the key is not there
+vendas[k] = (vendas[k] || 0.0) + q;    // the usual way to add up by key
+idade["bob"] = _;                      // deletes (nothing happens if it is not there)
+>> #idade;                             // how many keys
+nomes = idade.keys().sort();           // m.keys(), m.values(): new ARRAYs
+idade.has("ana") { … }
+```
+
+- Every pair of a literal must have the same types as the first one; `{k: v ;
+  n}` uses its pair only for the types.
+- A map is a **reference**, like an ARRAY or a record: `n = m;` makes both names
+  point to the same table, and a method that receives a map can change it. A
+  parameter's default is a pair of literals, `f(m = {"": 0})`, and gives a new
+  empty map on every call; a global map starts empty.
+- `m.keys()` and `m.values()` come in the table's order, which is not the order
+  of insertion: sort them when the order matters.
+- Maps cannot be compared, printed whole, turned into text with `$` or put in an
+  ARRAY.
+
+**Implementation.** The table is prelude code (`__nihil_map_*`): open
+addressing with linear probing, at most two thirds full (it doubles when it
+gets fuller), FNV-1a for STRING keys and Fibonacci hashing for INT keys.
+Deleting moves back the entries after the hole, so the table never fills up
+with deleted slots. Adding 15 million values over 2 million INT keys takes
+about 3.5 s and 160 MB.
+
 ## Appendix A — What changed since v1.0, and why
 
 | Change | Reason |
@@ -1158,6 +1194,7 @@ nothing to a program that does not use it.
 | **v1.9:** saved registers learned between passes | The prologue comes before the body; using the count from the previous pass avoids saving registers for nothing |
 | **v2.1:** `... ms;` waits | Animations need a fixed speed; a busy loop depends on the machine. The ellipsis reads as a pause and cannot start any valid expression |
 | **v2.2:** renamed from Ket to Nihil | Latin for *nothing*: no keywords, and `_` for the missing value |
+| **v3.4:** `MAP of K to V`: `{k: v}`, `m[k]`, `m[k] = v`, `m[k] = _`, `#m`, `has`, `keys`, `values` | Grouping and adding up by key (sales by product, store and month) needed a table in memory; the one on disk syncs every write. Braces after `=` or `(` never started an expression before, and `m[k] = _` deletes as `NAME @{k} path = _` does |
 | **v3.3:** queries `rows.where(cond)`, `count`, `first`, `sort(key)`, `sum(expr)` | Tables could be read but not searched or ordered by a field. Field names inside the call need no new symbol and no function values; compiling the loop in place lets the condition use the program's locals |
 | **v3.2:** only the prelude methods a program reaches are compiled | With the library, every program that used FLOAT, records or `.` carried all of the prelude: `x = 1.5; >> x;` was 66 KB, now 20 KB. The passes already redo everything, so the set of methods is found like a type: from the calls of one pass, for the next |
 | **v3.1:** `ARRAY + ARRAY` | Building a list of unknown length meant counting first and filling after. `+` already joined STRINGs, which are arrays of bytes |

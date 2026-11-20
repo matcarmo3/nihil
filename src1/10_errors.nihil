@@ -40,7 +40,13 @@ put_type(t = 0) {
     o = t & TYPE_OPT != 0;
     t = t & ~TYPE_OPT;
     t & TYPE_ARR != 0 { put_str("ARRAY of "); t = t & ~TYPE_ARR; }
-    t & TYPE_REC != 0 { put_source(s_ofs[m_sym[t >> 8]], s_len[m_sym[t >> 8]]); }
+    t & TYPE_MAP != 0 {
+        put_str("MAP of ");
+        put_type(mt_key[t >> 8]);
+        put_str(" to ");
+        put_type(mt_val[t >> 8]);
+    }
+    || t & TYPE_REC != 0 { put_source(s_ofs[m_sym[t >> 8]], s_len[m_sym[t >> 8]]); }
     || t == TYPE_INT { put_str("INT"); }
     || t == TYPE_BOOL { put_str("BOOL"); }
     || t == TYPE_STR { put_str("STRING"); }

@@ -117,6 +117,7 @@ compiled stage 1 (no optionals, FLOAT or anything newer).
 | `@ path`, `@? path`, `@>> path, text;`, `@+>> path, text;` | read a file (or `_`), replace it atomically, append to it |
 | `... ms;` | wait |
 | `@ "other.nihil";` | include another file |
+| `m = {"ana": 30}`, `m[k] = v;`, `m[k] \|\| 0`, `m[k] = _;` | a MAP: values by key, in memory (§22) |
 | `s.find(t)`, `v.sort()`, `rows.where(cond)` | the library, called on values (§21) |
 
 The names after a `.` exist only there, so they never take a name from your

@@ -228,7 +228,7 @@ binary(nv = 0) {
             emit_call_rt(RT_ARRAY_CONCAT); // ARRAY + ARRAY of the same type: a new one
             r = t;
         } || mode == MODE_EQUAL {
-            t != u || t & (TYPE_ARR | TYPE_REC) != 0 || is_opt(t) || t == TYPE_ABSENT { error_op_types(pi, pl, pn, pli, t, u); }
+            t != u || t & (TYPE_ARR | TYPE_REC | TYPE_MAP) != 0 || is_opt(t) || t == TYPE_ABSENT { error_op_types(pi, pl, pn, pli, t, u); }
             r = TYPE_BOOL;
             t == TYPE_STR {
                 emit_call_rt(RT_STR_EQUAL);        // STRING: compares the contents
@@ -258,6 +258,10 @@ unary() {
         u = unary();
         ok = u == TYPE_UNKNOWN;
         t == '#' && u & TYPE_ARR != 0 && !is_opt(u) { ok = true; }
+        t == '#' && is_map(u) {
+            eb(0x48, 0x8B, 0x00);           // mov rax, [rax]: the count, first word of the map
+            : TYPE_INT;
+        }
         t == T_AT_OPT {
             !ok && u != TYPE_STR { error_op_types(pi, pl, pn, pli, u, 0); }
             emit_call_rt(RT_READ_FILE_OPT);   // @? path → STRING? (_ if it does not open)
@@ -358,6 +362,7 @@ postfix_rest(t = 0, stop = false) {
 
 // tok = "[" after a value of type t (in rax) → the element; returns its type
 index_step(t = 0) {
+    is_map(t) { : map_get(t); }
     target_ok = t == TYPE_STR || t == TYPE_UNKNOWN || t & TYPE_ARR != 0 && !is_opt(t);
     !target_ok {
         error_start();
@@ -429,6 +434,7 @@ primary() {
         : TYPE_ABSENT;
     }
     t == '[' { : primary_array(); }
+    t == '{' { : map_literal(); }
     error_expected("an expression");
     : 0;
 }
@@ -716,6 +722,10 @@ emit_default(e = 0) {
     b = p_type[e] & ~(TYPE_ARR | TYPE_OPT);
     b & TYPE_REC != 0 {
         emit_alloc_record(b >> 8);        // NAME(): a new empty record on every call
+        :;
+    }
+    is_map(b) {
+        emit_new_map(b);                  // {k: v}: a new empty map on every call
         :;
     }
     b == TYPE_STR {

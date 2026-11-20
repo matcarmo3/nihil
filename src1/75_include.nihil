@@ -150,6 +150,7 @@ expand(k = 0, depth = 0) {
             uses_prelude = true;
         }
         t == '@' && peek_type() == '[' { uses_prelude = true; }    // a data model: records use the prelude
+        t == '{' && (prev == '=' || prev == '(' || prev == ',' || prev == ':' || prev == '[') { uses_prelude = true; }   // a MAP literal
         t == '@' && peek_type() != '[' && peek_type() != '{' && braces == 0 && (prev == T_END || prev == ';' || prev == '}') {
             pi = tok_start; pl = tok_len; pn = tok_line; pli = tok_lstart;
             i = tok_lstart;                   // before the "@" on the line: only spaces
