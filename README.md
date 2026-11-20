@@ -9,12 +9,26 @@
 
 # Nihil
 
-A minimalist language with **no keywords**, compiled straight to x86_64 ELF64
-machine code: no libc, no linker, no VM. The name is Latin for
-*nothing*: there are no keywords at all, only symbols, and `_` is the value that
-is not there.
+A small programming language with **no keywords at all**: no `if`, no `while`,
+no `return`, only symbols. It compiles straight to x86_64 Linux machine code,
+with no libc, no linker and no virtual machine, and its compiler is written in
+Nihil itself. The name is Latin for *nothing*, and `_` is the value that is not
+there.
+
+- **Self-hosted.** A first compiler in assembly bootstraps a second one written
+  in Nihil, which then compiles itself to a fixed point. Both produce the same
+  bytes for every program the first one accepts.
+- **Statically typed, without annotations.** Types come from values and
+  defaults, across several passes.
+- **Batteries for data.** Files of fixed-width records, with an index on disk
+  for reading, writing and deleting by key, and queries like
+  `rows.where(price > 10.0).sort(name)`.
+- **Memory is managed.** A conservative garbage collector lives in the small
+  runtime embedded in each executable. A "hello world" is 6 KB.
 
 The full specification is in [SPEC.md](SPEC.md).
+
+## A taste
 
 ```text
 fib(n = 0) {
@@ -33,93 +47,130 @@ find(v = [0], x = 0) {
 
 >> fib(30); >> "\n";               // 832040
 pos = find([5, 8, 13], 8) || -1;   // "||" takes the value, or the fallback
-3 { >> pos; }                      // an INT before "{" repeats the block
+3 { >> pos; }                      // an INT before "{" repeats the block: 111
 >> "\n";
 >> 0.1 + 0.2; >> "\n";             // 0.30000000000000004
+words = "  pear, apple, fig ".trim().split(", ");
+>> words.sort().join(" < ") + "\n";  // apple < fig < pear
 ```
 
-## Building and testing
+And a small table on disk:
 
-Requires Linux on x86_64, `nasm` and `ld`.
+```text
+PRODUCT = @[#code: INT(4); name: STRING(12); price: FLOAT(6)];   // a data model; # marks the key
+FILE = "products.dat";
+
+@{}>> FILE, PRODUCT(1, "Coffee", 12.5);    // write by key: adds it, or replaces it in place
+@{}>> FILE, PRODUCT(2, "Tea", 8.0);
+@{}>> FILE, PRODUCT(3, "Cake", 15.0);
+
+p = PRODUCT @{2} FILE;                      // one record by its key (a hash index on disk)
+p.price = 7.5;
+@{}>> FILE, p;
+
+rows = PRODUCT @ FILE;                      // the whole table: an ARRAY of PRODUCT
+>> $rows.where(price < 13.0).sort(name);    // a query; $ turns records into table lines
+>> "total: " + $rows.sum(price) + "\n";     // total: 35.0
+PRODUCT @{3} FILE = _;                      // delete by key
+```
+
+`products.dat` is plain text, one record per line, which you can read with any
+editor:
+
+```text
+   1Coffee        12.5
+   2Tea            7.5
+```
+
+## Quick start
+
+You need Linux on x86_64, `nasm`, `ld` (binutils) and `make`. `python3` is only
+used by `make floatcheck` and the IDE.
 
 ```sh
-make                 # build/nihilc (stage 0, assembly) and build/nihilc1 (stage 1, Nihil)
-make test            # the test suite with nihilc
-make test1           # the suite plus the stage 1 tests, with nihilc1
-make test1-O0        # the same, without optimizations
-make compare         # nihilc and nihilc1 -O0 produce identical bytes for every test program
-make fixedpoint      # nihilc1 compiles itself to a fixed point
-make floatcheck      # FLOAT ⇄ text conversions checked against Python
-make gcstress        # the suite and the fixed point with a collection every 256 KiB
-
-./build/nihilc program.nihil program && ./program
-./nihilc1.sh program.nihil program && ./program
+git clone https://github.com/wnmonzine/nihil.git && cd nihil
+make                                        # both compilers, in build/
+echo '>> "Hello, Nihil!\n";' > hello.nihil
+./nihilc1.sh hello.nihil hello && ./hello   # Hello, Nihil!
 ```
 
-GitHub Actions runs all of these checks on every push, on a clean Ubuntu
-(`.github/workflows/tests.yml`).
+`./nihilc1.sh` is the current compiler. `build/nihilc`, the one in assembly, is
+frozen and only bootstraps; it accepts the language as it was when it first
+compiled stage 1 (no optionals, FLOAT or anything newer).
 
-## Status
+## The language at a glance
 
-All 9 milestones of the original plan are done:
+| Write | Meaning |
+|---|---|
+| `x = 1;` | a variable; its type comes from the value (INT, FLOAT, BOOL, STRING, ARRAY, records) |
+| `cond { … } \|\| cond { … } \|\| { … }` | if / else if / else (`cond` is a BOOL) |
+| `* cond { … }` | while |
+| `n { … }` | repeat `n` times (`n` is an INT) |
+| `f(a = 0, s = "") { … }` | a method; every parameter has a default, which gives its type |
+| `: value;` / `:;` | return |
+| `:: code;` | end the program, with an exit code |
+| `>> x;` / `!>> x;` / `<< x;` | write to standard output / to standard error / read a line into `x` |
+| `x? = 5;`, `x = _;`, `x \|\| 0`, `x == _` | optionals: a value that may be missing |
+| `#s`, `s[i]`, `[0 ; n]`, `a + b` | length, index, an array of `n` copies, joining |
+| `$42`, `$[72, 105]`, `"42".int()` | text of a number, text from bytes, number from text |
+| `.n`, `#f` | INT to FLOAT, FLOAT to INT |
+| `@ path`, `@? path`, `@>> path, text;`, `@+>> path, text;` | read a file (or `_`), replace it atomically, append to it |
+| `... ms;` | wait |
+| `@ "other.nihil";` | include another file |
+| `s.find(t)`, `v.sort()`, `rows.where(cond)` | the library, called on values (§21) |
 
-1. Infrastructure and the ELF writer.
-2. Lexer and expressions.
-3. Control flow.
-4. Methods and recursion.
-5. Arrays, strings and raw bytes.
-6. **Self-hosting**: the compiler written in Nihil (`src1/`) compiles itself, and
-   without optimizations produces exactly the same bytes as the assembly
-   compiler. Then `::`, `!>>`, file reading (`@`), `$` and inclusion
-   (`@ "file.nihil";`).
-7. Optionals (`x? = 1`, `_`, `x || default`, `x == _`).
-8. FLOAT (exact literals, shortest round-trip printing, `.n` and `#f`), `<<`
-   input and STRING `+`.
-9. Optimizations: registers, `inc`, fused compare-and-branch, `cmov`
-   (`NIHIL_O0=1` turns them off).
+The names after a `.` exist only there, so they never take a name from your
+program.
 
-After the plan: `... ms;` (sleep), `@>> path, text;` and `@+>> path, text;`
-(write and append files, crash-safe), data models and records that map to
-fixed-width table files (`PRODUCT = @[code: INT(6); name: STRING(30)];`), read whole
-(`PRODUCT @ path`) or one record at a time (`PRODUCT @[i] path`, `PRODUCT @# path`),
-one record changed in place (`@[i]>> path, r;`), keys with an index on disk
-(`@[#code: INT(6); …]`, `PRODUCT @{42} path`, `@{}>> path, p;`, `PRODUCT @{42} path = _;`),
-a garbage collector (conservative mark and sweep, in the runtime only), a
-library called on values (`s.trim().split(",")`, `v.sort()`, `"42".int()`, `$n`),
-queries on tables (`rows.where(price > 10.0).sort(name)`), and `examples/doom_fire.nihil`, the PSX Doom
-fire effect on a 24-bit color terminal (`./nihilc1.sh examples/doom_fire.nihil fire && ./fire`).
+## The IDE
 
-## IDE
-
-`ide/` is a small web IDE (Python standard library, nothing to install):
+`ide/` is a small web IDE written with the Python standard library, so there is
+nothing to install:
 
 ```sh
-python3 ide/server.py            # then open http://<this machine>:8730
+python3 ide/server.py --host 127.0.0.1     # then open http://127.0.0.1:8730
 ```
 
-Editor with Nihil highlighting, a color terminal for the program's output and
-input, compile errors marked in the code (also in included files), an
-optimization switch and the generated machine code. Files are saved in
-`ide/workspace/` and `examples/`. **It runs any code it receives: use it only on
-a trusted network** (`--host 127.0.0.1` keeps it local).
+<p align="center"><img src="assets/ide.png" width="800" alt="The Nihil IDE: the editor with a program that queries a table, and the Table tab showing a file of records in columns"></p>
 
-Since M7 the assembly compiler is frozen and only bootstraps; new features go
-into the compiler written in Nihil (SPEC §17).
+It has an editor with Nihil highlighting and a color terminal for the
+program's output and input. Compile errors are marked in the code, and the
+generated machine code is one click away. The **Table** tab shows any `.dat`
+file in columns, using the data model that describes it. Files live in
+`ide/workspace/` and `examples/`. **The server runs any code it receives:** keep
+it on `127.0.0.1`, or use it only on a network you trust.
 
-## Layout
+## How it works
 
 | Path | Contents |
 |---|---|
-| `src/nihilc.asm`, `src/commands.inc` | stage 0 compiler (assembly): lexer, expressions, symbols, emission; commands and methods |
-| `src/runtime.asm`, `src/layout.inc` | routines embedded in every executable; shared addresses |
-| `src1/` | stage 1 compiler, written in Nihil (`nihilc1.nihil` lists the parts) |
-| `src1/bigint.nihil`, `float_text.nihil`, `prelude.nihil` | the prelude: big integers, FLOAT ⇄ text, `<<` |
-| `nihilc1.sh` | stage 1 command line (same as `nihilc`) |
-| `tests/` | test suite (`tests/stage1/` for stage-1-only features) |
-| `examples/` | example programs (the Doom fire) |
-| `ide/` | the web IDE (`server.py`, `static/index.html`, `workspace/`) |
-| `assets/` | the logo: `logo.png` (light backgrounds), `logo-dark.png` (dark), `logo-source.png` (original) |
+| `src/nihilc.asm`, `src/commands.inc` | stage 0: the compiler in assembly (frozen) |
+| `src/runtime.asm`, `src/layout.inc` | the runtime copied into every executable: I/O, files, the heap and its garbage collector |
+| `src1/` | stage 1: the compiler written in Nihil (`nihilc1.nihil` lists its parts) |
+| `src1/bigint.nihil`, `float_text.nihil`, `prelude.nihil` | the prelude, in Nihil: exact FLOAT ⇄ text, records, the key index and the library; a program gets only the methods it reaches |
+| `tests/` | the test suite (`tests/stage1/` for the newer features) |
+| `examples/`, `ide/workspace/` | example programs, including the PSX Doom fire on a 24-bit color terminal |
+| `ide/` | the web IDE |
+
+The compiler writes the ELF file by itself, one pass at a time, until the types
+settle. The generated code is a stack machine with a peephole optimizer (locals
+in registers, fused compare-and-branch, `cmov`). [SPEC.md](SPEC.md) explains
+each part, and its Appendix A records why each decision was made.
+
+## Testing
+
+```sh
+make test            # stage 0 on the test suite
+make test1           # stage 1 on the suite and its own tests
+make test1-O0        # the same, without optimizations
+make compare         # stage 0 and stage 1 -O0 give identical bytes for every program both accept
+make fixedpoint      # stage 1 compiles itself to a fixed point
+make floatcheck      # FLOAT ⇄ text checked against Python on 100,000 numbers
+make gcstress        # the suite and the fixed point with a collection every 256 KiB
+```
+
+GitHub Actions runs all of them on every push, on a clean Ubuntu.
 
 ## License
 
-MIT: see [LICENSE](LICENSE). Use it for anything, keeping the copyright notice.
+MIT: see [LICENSE](LICENSE).
