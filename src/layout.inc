@@ -81,3 +81,8 @@
 %define RT_TRUNCATE_NS      170 ; the same, without the fsync
 %define RT_INT_TEXT         175 ; rax = INT → rax = STRING with it in decimal
 %define RT_ARRAY_CONCAT     180 ; rax = ARRAY + ARRAY rcx (same type) → a new ARRAY
+%define RT_NET_LISTEN       185 ; rax = port, rcx = every address? → rax = socket (or -errno)
+%define RT_NET_ACCEPT       190 ; rax = socket → rax = connection (or -errno)
+%define RT_FD_READ          195 ; rax = fd, rcx = most → rax = STRING (length 0 at the end)
+%define RT_FD_SEND          200 ; rax = fd, rcx = text → rax = 0 or -errno
+%define RT_FD_CLOSE         205 ; rax = fd

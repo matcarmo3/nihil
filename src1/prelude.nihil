@@ -1668,3 +1668,145 @@ __nihil_s_json_quote(s = "") {
     __nihil_poke(__r, __p, '"');
     : __r;
 }
+
+// ---- network (SPEC §23): a TCP server, and HTTP on top of it ------------------------
+// A port and a connection are INTs (the sockets); the calls are on them:
+// 8080.listen(), srv.accept(), c.receive(), c.send(text), c.respond(…), c.close().
+
+__nihil_i_listen(port = 0) {
+    : __nihil_listen(port, 0);                      // only 127.0.0.1: the machine itself
+}
+
+__nihil_i_listen_all(port = 0) {
+    : __nihil_listen(port, 1);                      // every address: the network can reach it
+}
+
+__nihil_i_accept(fd = 0) {
+    : __nihil_accept(fd);
+}
+
+__nihil_i_close(fd = 0) {
+    __nihil_fd_close(fd);
+}
+
+__nihil_i_send(fd = 0, t = "") {
+    : __nihil_fd_send(fd, t);
+}
+
+// the Content-Length of the headers h (0 without one)
+__nihil_http_length(h = "") {
+    __l = h.lower();
+    __i? = __l.find("\ncontent-length:");
+    __i == _ { : 0; }
+    __a = (__i || 0) + 16;
+    __e? = __l.find("\r", __a);
+    : __l.slice(__a, __e || #__l).int() || 0;
+}
+
+// c.receive() → a whole HTTP request: the headers and, after them, a body of
+// Content-Length bytes; "" if the connection closed first
+__nihil_i_receive(fd = 0) {
+    __r = "";
+    * true {
+        __s = __nihil_str_at(__nihil_fd_read(fd, 65536));
+        #__s == 0 { : __r; }
+        __r = __r + __s;
+        __h? = __r.find("\r\n\r\n");
+        __h != _ {
+            __hh = __h || 0;
+            #__r >= __hh + 4 + __nihil_http_length(__r.slice(0, __hh + 2)) { : __r; }
+        }
+        #__r > 16777216 { : __r; }                 // 16 MiB: enough for a request
+    }
+    : __r;
+}
+
+__nihil_http_reason(status = 0) {
+    status == 200 { : "OK"; }
+    status == 204 { : "No Content"; }
+    status == 400 { : "Bad Request"; }
+    status == 404 { : "Not Found"; }
+    status == 405 { : "Method Not Allowed"; }
+    status == 500 { : "Internal Server Error"; }
+    : "Status";
+}
+
+// c.respond(status, content type, body): the whole HTTP response, then closes
+__nihil_i_respond(fd = 0, status = 200, tipo = "", corpo = "") {
+    __nihil_fd_send(fd, "HTTP/1.1 " + $status + " " + __nihil_http_reason(status) + "\r\nContent-Type: " + tipo
+        + "\r\nContent-Length: " + $#corpo + "\r\nConnection: close\r\nAccess-Control-Allow-Origin: *\r\n\r\n" + corpo);
+    __nihil_fd_close(fd);
+}
+
+// the first line of a request: "GET /plano/293?mes=1 HTTP/1.1"
+__nihil_http_line(s = "") {
+    __e? = s.find("\r\n");
+    : s.slice(0, __e || #s);
+}
+
+__nihil_s_http_method(s = "") {
+    __l = __nihil_http_line(s);
+    : __l.slice(0, __l.find(" ") || #__l);
+}
+
+// the target of the request line (between the two spaces)
+__nihil_http_target(s = "") {
+    __l = __nihil_http_line(s);
+    __a = (__l.find(" ") || #__l) + 1;
+    __b? = __l.find(" ", __a);
+    : __l.slice(__a, __b || #__l);
+}
+
+// s.http_path() → the path, without the query and decoded: "/plano/293"
+__nihil_s_http_path(s = "") {
+    __t = __nihil_http_target(s);
+    : __nihil_s_url_decode(__t.slice(0, __t.find("?") || #__t));
+}
+
+// s.http_param(name) → STRING?: the value of name in the query (?mes=1&loja=2), decoded
+__nihil_s_http_param(s = "", name = "") {
+    __t = __nihil_http_target(s);
+    __q? = __t.find("?");
+    __q == _ { : _; }
+    __ps = __t.slice((__q || 0) + 1).split("&");
+    __i = 0;
+    * __i < #__ps {
+        __kv = __ps[__i];
+        __eq? = __kv.find("=");
+        __k = __kv.slice(0, __eq || #__kv);
+        __nihil_s_url_decode(__k) == name {
+            __eq == _ { : ""; }
+            : __nihil_s_url_decode(__kv.slice((__eq || 0) + 1));
+        }
+        __i = __i + 1;
+    }
+    : _;
+}
+
+// s.http_body() → what comes after the headers
+__nihil_s_http_body(s = "") {
+    __h? = s.find("\r\n\r\n");
+    __h == _ { : ""; }
+    : s.slice((__h || 0) + 4);
+}
+
+// s.url_decode() → %XX as bytes and + as a space
+__nihil_s_url_decode(s = "") {
+    !s.has("%") && !s.has("+") { : s; }
+    __r = __nihil_bytes(#s);
+    __n = 0;
+    __i = 0;
+    * __i < #s {
+        __c = s[__i];
+        __c == '%' && __i + 2 < #s && __nihil_json_hex(s[__i + 1]) >= 0 && __nihil_json_hex(s[__i + 2]) >= 0 {
+            __c = __nihil_json_hex(s[__i + 1]) * 16 + __nihil_json_hex(s[__i + 2]);
+            __i = __i + 2;
+        } || __c == '+' {
+            __c = ' ';
+        }
+        __nihil_poke(__r, __n, __c);
+        __n = __n + 1;
+        __i = __i + 1;
+    }
+    : __nihil_sub(__r, 0, __n);
+}

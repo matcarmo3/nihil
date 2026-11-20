@@ -1,4 +1,4 @@
-# Nihil — Language Specification (v3.5)
+# Nihil — Language Specification (v3.6)
 
 > **Nihil**: an imperative, minimalist language compiled straight to x86_64 machine
 > code, with no libc, no linker and no VM. The name is Latin for
@@ -1180,6 +1180,40 @@ Deleting moves back the entries after the hole, so the table never fills up
 with deleted slots. Adding 15 million values over 2 million INT keys takes
 about 3.5 s and 160 MB.
 
+## 23. Network: a TCP server and HTTP (stage 1)
+
+A port and a connection are INTs (the sockets), and the calls are made on them,
+like the library (§21). A server answers one connection at a time:
+
+```text
+srv = 8740.listen();                     // only 127.0.0.1; 8740.listen_all() opens it to the network
+* true {
+    c = srv.accept();                    // waits for a connection (what was printed shows up first)
+    req = c.receive();                   // the whole request: headers and the body (Content-Length)
+    req.http_path() == "/saude" {
+        c.respond(200, "application/json", "{\"ok\": true}");   // the response, then closes
+    } || {
+        c.respond(404, "text/plain", "não encontrado");
+    }
+}
+```
+
+| Call | Result |
+|---|---|
+| `port.listen()`, `port.listen_all()` | the listening socket (`INT`), or a negative number (`-errno`) if the port cannot be opened; `0.listen()` takes any free port |
+| `srv.accept()` | the next connection (`INT`); waits until one arrives |
+| `c.receive()` | `STRING`: the request, its headers and a body of `Content-Length` bytes; `""` if the client closed first |
+| `c.send(text)` | sends all of `text`; `0`, or `-errno` (a client that went away is an error, not the end of the program) |
+| `c.respond(status, type, body)` | an HTTP/1.1 response with `Content-Type`, `Content-Length`, `Connection: close` and `Access-Control-Allow-Origin: *`, then closes |
+| `c.close()` | closes the connection or the port |
+| `req.http_method()`, `req.http_path()` | `"GET"`; the path without the query, decoded (`"/plano/293"`) |
+| `req.http_param(name)` | `STRING?`: the value of `name` in the query, decoded, or `_` |
+| `req.http_body()`, `s.url_decode()` | what follows the headers; `%XX` and `+` decoded |
+
+The runtime has five routines (`socket`/`bind`/`listen`, `accept4`, `read`,
+`sendto` with `MSG_NOSIGNAL`, `close`); HTTP is prelude code. There is no TLS:
+for the internet, put the server behind a proxy that has it.
+
 ## Appendix A — What changed since v1.0, and why
 
 | Change | Reason |
@@ -1221,6 +1255,7 @@ about 3.5 s and 160 MB.
 | **v1.9:** saved registers learned between passes | The prologue comes before the body; using the count from the previous pass avoids saving registers for nothing |
 | **v2.1:** `... ms;` waits | Animations need a fixed speed; a busy loop depends on the machine. The ellipsis reads as a pause and cannot start any valid expression |
 | **v2.2:** renamed from Ket to Nihil | Latin for *nothing*: no keywords, and `_` for the missing value |
+| **v3.6:** a TCP server and HTTP: `port.listen()`, `accept`, `receive`, `respond`, `http_path`, `http_param` | Serving analyses as JSON from one place, instead of one generated page per analysis. Calls on INT keep the language free of reserved words, as the library does |
 | **v3.5:** JSON as text: `s.json(key)`, `json_items`, `json_keys`, `json_values`, `json_text`, `json_quote` | Importing and serving data needs JSON. Keeping each value as its text needs no dynamic type: the compiler still knows every type, and the existing `.int()`/`.float()` convert numbers |
 | **v3.4:** `MAP of K to V`: `{k: v}`, `m[k]`, `m[k] = v`, `m[k] = _`, `#m`, `has`, `keys`, `values` | Grouping and adding up by key (sales by product, store and month) needed a table in memory; the one on disk syncs every write. Braces after `=` or `(` never started an expression before, and `m[k] = _` deletes as `NAME @{k} path = _` does |
 | **v3.3:** queries `rows.where(cond)`, `count`, `first`, `sort(key)`, `sum(expr)` | Tables could be read but not searched or ordered by a field. Field names inside the call need no new symbol and no function values; compiling the loop in place lets the condition use the program's locals |

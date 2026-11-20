@@ -49,6 +49,21 @@ lib_target(t = 0, s = 0, n = 0) {
         name_is(s, n, "json_values") { : "__nihil_s_json_values"; }
         name_is(s, n, "json_text") { : "__nihil_s_json_text"; }
         name_is(s, n, "json_quote") { : "__nihil_s_json_quote"; }
+        name_is(s, n, "http_method") { : "__nihil_s_http_method"; }
+        name_is(s, n, "http_path") { : "__nihil_s_http_path"; }
+        name_is(s, n, "http_param") { : "__nihil_s_http_param"; }
+        name_is(s, n, "http_body") { : "__nihil_s_http_body"; }
+        name_is(s, n, "url_decode") { : "__nihil_s_url_decode"; }
+        : "";
+    }
+    t == TYPE_INT {                      // a port or a connection (SPEC §23)
+        name_is(s, n, "listen") { : "__nihil_i_listen"; }
+        name_is(s, n, "listen_all") { : "__nihil_i_listen_all"; }
+        name_is(s, n, "accept") { : "__nihil_i_accept"; }
+        name_is(s, n, "receive") { : "__nihil_i_receive"; }
+        name_is(s, n, "send") { : "__nihil_i_send"; }
+        name_is(s, n, "respond") { : "__nihil_i_respond"; }
+        name_is(s, n, "close") { : "__nihil_i_close"; }
         : "";
     }
     t == TYPE_ARR | TYPE_INT {
@@ -88,7 +103,13 @@ lib_missing(t = 0, s = 0, n = 0) {
     t == TYPE_STR {
         put_str(" has no method '");
         put_source(s, n);
-        put_str("': it has find, has, starts, ends, slice, split, replace, trim, upper, lower, repeat, int, float, json, json_items, json_keys, json_values, json_text and json_quote");
+        put_str("': it has find, has, starts, ends, slice, split, replace, trim, upper, lower, repeat, int, float, json, json_items, json_keys, json_values, json_text, json_quote, http_method, http_path, http_param, http_body and url_decode");
+        error_end();
+    }
+    t == TYPE_INT {
+        put_str(" has no method '");
+        put_source(s, n);
+        put_str("': it has listen, listen_all, accept, receive, send, respond and close (a port or a connection)");
         error_end();
     }
     t == TYPE_ARR | TYPE_INT || t == TYPE_ARR | TYPE_FLOAT {

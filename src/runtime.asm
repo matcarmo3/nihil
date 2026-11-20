@@ -55,6 +55,11 @@ t_truncate:     jmp strict near rt_truncate        ; RT_TRUNCATE
 t_truncate_ns:  jmp strict near rt_truncate_ns     ; RT_TRUNCATE_NS
 t_int_text:     jmp strict near rt_int_text        ; RT_INT_TEXT
 t_array_concat: jmp strict near rt_array_concat    ; RT_ARRAY_CONCAT
+t_net_listen:   jmp strict near rt_net_listen      ; RT_NET_LISTEN
+t_net_accept:   jmp strict near rt_net_accept      ; RT_NET_ACCEPT
+t_fd_read:      jmp strict near rt_fd_read         ; RT_FD_READ
+t_fd_send:      jmp strict near rt_fd_send         ; RT_FD_SEND
+t_fd_close:     jmp strict near rt_fd_close        ; RT_FD_CLOSE
 
 ; ---- arithmetic -------------------------------------------------------------
 ; Division truncated toward zero (as in C). MIN / -1 gives MIN (idiv
@@ -122,6 +127,164 @@ rt_decimal:
     mov byte [rdi], '-'
 .finish:
     mov rsi, rdi
+    ret
+
+; ---- network (stage 1, SPEC §23): a TCP server -----------------------------------
+; rt_net_listen: rax = port, rcx = 1 to accept on every address (0: only 127.0.0.1)
+;   → rax = the listening socket, or -errno
+rt_net_listen:
+    push rbx
+    push r12
+    sub rsp, 32
+    mov r12, rax                    ; port
+    mov rbx, rcx                    ; every address?
+    mov eax, 41                     ; socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0)
+    mov edi, 2
+    mov esi, 1 | 0x80000
+    xor edx, edx
+    syscall
+    test rax, rax
+    js .end
+    mov [rsp + 24], rax             ; the socket
+    mov dword [rsp + 16], 1
+    mov eax, 54                     ; setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &1, 4)
+    mov rdi, [rsp + 24]
+    mov esi, 1
+    mov edx, 2
+    lea r10, [rsp + 16]
+    mov r8d, 4
+    syscall
+    mov word [rsp], 2               ; sockaddr_in: AF_INET,
+    mov eax, r12d
+    xchg al, ah                     ; the port in network order,
+    mov [rsp + 2], ax
+    mov dword [rsp + 4], 0x0100007F ; 127.0.0.1 …
+    test rbx, rbx
+    jz .bind
+    mov dword [rsp + 4], 0          ; … or every address
+.bind:
+    mov qword [rsp + 8], 0
+    mov eax, 49                     ; bind(fd, &addr, 16)
+    mov rdi, [rsp + 24]
+    mov rsi, rsp
+    mov edx, 16
+    syscall
+    test rax, rax
+    js .fail
+    mov eax, 50                     ; listen(fd, 128)
+    mov rdi, [rsp + 24]
+    mov esi, 128
+    syscall
+    test rax, rax
+    js .fail
+    mov rax, [rsp + 24]
+    jmp .end
+.fail:
+    push rax
+    mov eax, 3                      ; close the socket
+    mov rdi, [rsp + 32]
+    syscall
+    pop rax
+.end:
+    add rsp, 32
+    pop r12
+    pop rbx
+    ret
+
+; rt_net_accept: rax = listening socket → rax = the connection, or -errno. The pending
+; output is written first, so what the program printed shows up while it waits.
+rt_net_accept:
+    push rbx
+    mov rbx, rax
+    call rt_flush
+.again:
+    mov eax, 288                    ; accept4(fd, NULL, NULL, SOCK_CLOEXEC)
+    mov rdi, rbx
+    xor esi, esi
+    xor edx, edx
+    mov r10d, 0x80000
+    syscall
+    cmp rax, -4                     ; -EINTR: again
+    je .again
+    pop rbx
+    ret
+
+; rt_fd_read: rax = fd, rcx = most bytes → rax = a new STRING with what one read gave
+; (length 0 at the end, or on an error)
+rt_fd_read:
+    push rbx
+    push r12
+    push r13
+    mov r12, rax
+    mov r13, rcx
+    test r13, r13
+    jg .size
+    mov r13d, 65536
+.size:
+    lea rcx, [r13 + 8]
+    shr rcx, 3
+    call rt_alloc
+    mov rbx, rax
+.read:
+    xor eax, eax                    ; read(fd, buffer, most)
+    mov rdi, r12
+    mov rsi, rbx
+    mov rdx, r13
+    syscall
+    cmp rax, -4
+    je .read
+    test rax, rax
+    jns .got
+    xor eax, eax
+.got:
+    mov [rbx - 8], rax              ; the length (the block keeps its size)
+    mov byte [rbx + rax], 0
+    mov rax, rbx
+    pop r13
+    pop r12
+    pop rbx
+    ret
+
+; rt_fd_send: rax = fd (a socket), rcx = text → sends all of it; rax = 0, or -errno.
+; MSG_NOSIGNAL: a client that went away is an error, not the end of the program (SIGPIPE).
+rt_fd_send:
+    push rbx
+    push r12
+    push r13
+    mov r12, rax
+    mov rbx, rcx
+    mov r13, [rcx - 8]
+.loop:
+    test r13, r13
+    jz .done
+    mov eax, 44                     ; sendto(fd, text, n, MSG_NOSIGNAL, NULL, 0)
+    mov rdi, r12
+    mov rsi, rbx
+    mov rdx, r13
+    mov r10d, 0x4000
+    xor r8d, r8d
+    xor r9d, r9d
+    syscall
+    cmp rax, -4
+    je .loop
+    test rax, rax
+    js .end
+    add rbx, rax
+    sub r13, rax
+    jmp .loop
+.done:
+    xor eax, eax
+.end:
+    pop r13
+    pop r12
+    pop rbx
+    ret
+
+; rt_fd_close: rax = fd
+rt_fd_close:
+    mov rdi, rax
+    mov eax, 3
+    syscall
     ret
 
 ; rt_array_concat: rax = a, rcx = b (ARRAYs of one type) → a new ARRAY with
@@ -1919,3 +2082,8 @@ ASSERT_AT t_truncate,     RT_TRUNCATE
 ASSERT_AT t_truncate_ns,  RT_TRUNCATE_NS
 ASSERT_AT t_int_text,     RT_INT_TEXT
 ASSERT_AT t_array_concat, RT_ARRAY_CONCAT
+ASSERT_AT t_net_listen,   RT_NET_LISTEN
+ASSERT_AT t_net_accept,   RT_NET_ACCEPT
+ASSERT_AT t_fd_read,      RT_FD_READ
+ASSERT_AT t_fd_send,      RT_FD_SEND
+ASSERT_AT t_fd_close,     RT_FD_CLOSE

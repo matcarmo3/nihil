@@ -819,6 +819,32 @@ file_intrinsic(kind = 0) {
     : TYPE_NONE;
 }
 
+// network for the prelude (SPEC §23): __nihil_listen(port, every) → INT, __nihil_accept(fd) →
+// INT, __nihil_fd_read(fd, most) → INT (STRING address), __nihil_fd_send(fd, text) → INT,
+// __nihil_fd_close(fd)
+net_intrinsic(kind = 0) {
+    next_token();                        // name → "("
+    next_token();
+    expression();
+    kind == 2 || kind == 5 {
+        kind == 2 { emit_call_rt(RT_NET_ACCEPT); } || { emit_call_rt(RT_FD_CLOSE); }
+        call_end = size_code;
+        expect(')', "')'");
+        kind == 5 { : TYPE_NONE; }
+        : TYPE_INT;
+    }
+    emit(0x50);
+    expect(',', "','");
+    expression();
+    eb(0x48, 0x89, 0xC1, 0x58);             // mov rcx, rax ; pop rax
+    kind == 1 { emit_call_rt(RT_NET_LISTEN); }
+    kind == 3 { emit_call_rt(RT_FD_READ); }
+    kind == 4 { emit_call_rt(RT_FD_SEND); }
+    call_end = size_code;                // may stand alone as a command, like a call
+    expect(')', "')'");
+    : TYPE_INT;
+}
+
 // text for the prelude, one byte per character: __nihil_bytes(n) → a new
 // STRING of n zero bytes; __nihil_poke(s, i, b) puts byte b at s[i] (only in a
 // STRING the prelude has just made: STRING values do not change)
