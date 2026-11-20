@@ -54,6 +54,7 @@ t_write_at_ns:  jmp strict near rt_write_at_ns     ; RT_WRITE_AT_NS
 t_truncate:     jmp strict near rt_truncate        ; RT_TRUNCATE
 t_truncate_ns:  jmp strict near rt_truncate_ns     ; RT_TRUNCATE_NS
 t_int_text:     jmp strict near rt_int_text        ; RT_INT_TEXT
+t_array_concat: jmp strict near rt_array_concat    ; RT_ARRAY_CONCAT
 
 ; ---- arithmetic -------------------------------------------------------------
 ; Division truncated toward zero (as in C). MIN / -1 gives MIN (idiv
@@ -121,6 +122,27 @@ rt_decimal:
     mov byte [rdi], '-'
 .finish:
     mov rsi, rdi
+    ret
+
+; rt_array_concat: rax = a, rcx = b (ARRAYs of one type) → a new ARRAY with
+; the elements of a and then those of b
+rt_array_concat:
+    push rbx
+    push r12
+    mov rbx, rax
+    mov r12, rcx
+    mov rcx, [rbx - 8]
+    add rcx, [r12 - 8]
+    call rt_alloc
+    mov rdi, rax
+    mov rsi, rbx
+    mov rcx, [rbx - 8]
+    rep movsq
+    mov rsi, r12
+    mov rcx, [r12 - 8]
+    rep movsq
+    pop r12
+    pop rbx
     ret
 
 ; rt_int_text: rax = INT → rax = a new STRING with it in decimal ($n)
@@ -1896,3 +1918,4 @@ ASSERT_AT t_write_at_ns,  RT_WRITE_AT_NS
 ASSERT_AT t_truncate,     RT_TRUNCATE
 ASSERT_AT t_truncate_ns,  RT_TRUNCATE_NS
 ASSERT_AT t_int_text,     RT_INT_TEXT
+ASSERT_AT t_array_concat, RT_ARRAY_CONCAT

@@ -4,18 +4,11 @@
 line = "";
 << line;
 words = line.lower().replace(",", " ").replace(".", " ").replace("!", " ").split(" ");
-n = 0;                                  // the empty parts (two spaces) are left out
-i = 0;
-* i < #words {
-    #words[i].trim() > 0 { n = n + 1; }
-    i = i + 1;
-}
-kept = ["" ; n];
-n = 0;
+kept = ["" ; 0];                         // the empty parts (two spaces) are left out
 i = 0;
 * i < #words {
     w = words[i].trim();
-    #w > 0 { kept[n] = w; n = n + 1; }
+    #w > 0 { kept = kept + [w]; }       // ARRAY + ARRAY: a new one
     i = i + 1;
 }
 >> $#kept + " word(s); in order: " + kept.sort().join(", ") + "\n";

@@ -106,6 +106,7 @@ RT_WRITE_AT_NS = 160;
 RT_TRUNCATE = 165;
 RT_TRUNCATE_NS = 170;
 RT_INT_TEXT = 175;
+RT_ARRAY_CONCAT = 180;
 
 // ---- limits (the same as the stage 0 arenas) ----
 SIZE_SOURCE = 16 << 20;

@@ -1,4 +1,4 @@
-# Nihil — Language Specification (v3.0)
+# Nihil — Language Specification (v3.1)
 
 > **Nihil**: an imperative, minimalist language compiled straight to x86_64 machine
 > code, with no libc, no linker and no VM. The name is Latin for
@@ -261,6 +261,10 @@ from. Use `[0 ; 0]`.
   assignment only if the matching `]` is followed by `=`; otherwise it is an
   expression, as in `flags[i] { … }` or `v[0] == 3 { … }`.
 - Arrays cannot be compared with `==`.
+- `a + b` joins two arrays of the same type into a new one, the elements of `a`
+  first (`[1, 2] + [3]` is `[1, 2, 3]`; stage 1). Neither changes. Each `+`
+  copies both, so growing an array one element at a time costs *n*² copies;
+  for many elements, count first and fill `[x ; n]`.
 - Arrays (and STRINGs and records) live in a heap with a **garbage
   collector**: what the program can no longer reach is freed and its memory
   used again (§12.4). There is nothing to free by hand.
@@ -1115,6 +1119,7 @@ gets the prelude gets all of it, which adds about 15 KB to the executable.
 | **v1.9:** saved registers learned between passes | The prologue comes before the body; using the count from the previous pass avoids saving registers for nothing |
 | **v2.1:** `... ms;` waits | Animations need a fixed speed; a busy loop depends on the machine. The ellipsis reads as a pause and cannot start any valid expression |
 | **v2.2:** renamed from Ket to Nihil | Latin for *nothing*: no keywords, and `_` for the missing value |
+| **v3.1:** `ARRAY + ARRAY` | Building a list of unknown length meant counting first and filling after. `+` already joined STRINGs, which are arrays of bytes |
 | **v3.0:** the library `value.name(…)`, and `$` of INT, FLOAT and BOOL | Every program was rewriting the same text and array routines, and a number could not be turned into text. Names after a `.` cannot clash with the program's names, so the language still has no reserved words |
 | **v2.9:** a garbage collector (conservative mark and sweep) | Programs that run for a long time or make many temporary texts grew without limit: a loop of 3 million small texts and arrays used 633 MB, now 19 MB. Conservative, so the compilers need no change and keep producing identical bytes |
 | **v2.8:** `NAME @{k} path = _;` deletes by key | Completes the key-value store. The record "becomes nothing": `_` already means no value. Moving the last record into the hole keeps the table a plain file without deleted lines, which every other read would have to skip |

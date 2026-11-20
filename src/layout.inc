@@ -80,3 +80,4 @@
 %define RT_TRUNCATE         165 ; rax = path, rdx = size: cuts the file (ftruncate + fsync)
 %define RT_TRUNCATE_NS      170 ; the same, without the fsync
 %define RT_INT_TEXT         175 ; rax = INT → rax = STRING with it in decimal
+%define RT_ARRAY_CONCAT     180 ; rax = ARRAY + ARRAY rcx (same type) → a new ARRAY
