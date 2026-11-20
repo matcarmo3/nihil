@@ -1,0 +1,12 @@
+// f returns _ or the value of a method declared after it: in the first pass
+// l? has no type yet, and "l || default" must not lock s as BOOL
+f(c = 0) {
+    c == 1 { : _; }
+    : g(c);
+}
+g(c = 0) { : h(c); }
+h(c = 0) { : "abc"; }
+l? = f(0);
+s = l || "";
+m? = f(1);
+>> #s; >> " "; >> m || "none"; >> "\n";

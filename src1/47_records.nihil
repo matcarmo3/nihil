@@ -819,6 +819,34 @@ file_intrinsic(kind = 0) {
     : TYPE_NONE;
 }
 
+// text for the prelude, one byte per character: __nihil_bytes(n) → a new
+// STRING of n zero bytes; __nihil_poke(s, i, b) puts byte b at s[i] (only in a
+// STRING the prelude has just made: STRING values do not change)
+bytes_intrinsic(kind = 0) {
+    next_token();                        // name → "("
+    next_token();
+    expression();
+    kind == 1 {
+        emit(0x50);                        // push rax (n)
+        eb(0x48, 0x8D, 0x48, 0x08);         // lea rcx, [rax + 8]
+        eb(0x48, 0xC1, 0xE9, 0x03);         // shr rcx, 3: n + 1 bytes, in qwords
+        emit_call_rt(RT_ALLOC);            // zeroed memory
+        eb(0x59, 0x48, 0x89, 0x48, 0xF8);   // pop rcx ; mov [rax - 8], rcx
+        expect(')', "')'");
+        : TYPE_STR;
+    }
+    emit(0x50);
+    expect(',', "','");
+    expression();
+    emit(0x50);
+    expect(',', "','");
+    expression();
+    eb(0x59, 0x5A, 0x88, 0x04, 0x0A);       // pop rcx ; pop rdx ; mov [rdx + rcx], al
+    call_end = size_code;
+    expect(')', "')'");
+    : TYPE_NONE;
+}
+
 // ---- casts for the prelude (no code): __nihil_addr(x) → INT,
 // __nihil_str_at(INT) → STRING, __nihil_arr_at(INT) → ARRAY of INT
 intrinsic(r = 0) {

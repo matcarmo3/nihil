@@ -979,7 +979,10 @@ distinct type. The compiler reads the models before the methods and globals (so
 any part of the program can use them) and keeps, for each one, constants with
 the field types and widths, the field names and the model's name. The text
 conversions are prelude methods (§18) that receive those constants; programs
-with models always get the prelude.
+with models always get the prelude. The prelude builds text one byte per character, in a
+STRING it has just allocated (`__nihil_bytes(n)`, `__nihil_poke(s, i, b)`), and
+the FLOAT conversion reuses one buffer: writing or reading a table costs about
+two to three times the size of the file in memory, since nothing is freed.
 
 ## Appendix A — What changed since v1.0, and why
 

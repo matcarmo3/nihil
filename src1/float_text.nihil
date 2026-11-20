@@ -16,6 +16,7 @@ __nihil_ft_mp = __nihil_bi_new();
 __nihil_ft_mm = __nihil_bi_new();
 __nihil_ft_tmp = __nihil_bi_new();
 __nihil_ft_digits = [0 ; 800];               // decimal digits (0 … 9)
+__nihil_ft_buf = [0 ; 840];                  // the text being built (one for every conversion)
 __nihil_ft_n_digits = 0;
 __nihil_ft_k = 0;                             // value = 0.d1d2… × 10^k
 __nihil_ft_overflowed = false;                  // the last conversion went past the largest FLOAT
@@ -252,7 +253,7 @@ __nihil_ft_digits_shortest(b = 0) {
 
 // bits → text: "0.1", "3.0", "-2.5e-10", "1.0e+21", "inf", "-inf", "nan"
 __nihil_ft_text(b = 0) {
-    __buf = [0 ; 840];
+    __buf = __nihil_ft_buf;
     __n = 0;
     b < 0 { __buf[__n] = '-'; __n = __n + 1; }
     __ex = (b >> 52) & 0x7FF;
