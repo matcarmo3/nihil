@@ -422,6 +422,7 @@ primary_name() {
         k < 0 && name_is(pi, pl, "__nihil_pwrite") { : file_intrinsic(4); }
         k < 0 && name_is(pi, pl, "__nihil_pwrite_ns") { : file_intrinsic(5); }
         k < 0 && name_is(pi, pl, "__nihil_truncate") { : file_intrinsic(6); }
+        k < 0 && name_is(pi, pl, "__nihil_truncate_ns") { : file_intrinsic(7); }
         is_model(k) { : new_record(k); }
         : call_method(k);
     }

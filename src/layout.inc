@@ -58,3 +58,4 @@
 %define RT_WRITE_AT         155 ; rax = path, rcx = text, rdx = offset: writes the text there (pwrite + fsync)
 %define RT_WRITE_AT_NS      160 ; the same, without the fsync
 %define RT_TRUNCATE         165 ; rax = path, rdx = size: cuts the file (ftruncate + fsync)
+%define RT_TRUNCATE_NS      170 ; the same, without the fsync

@@ -649,10 +649,12 @@ __nihil_key_write_at(i = 0, path = "", r = 0, schema = [0], names = "", model = 
 }
 
 // NAME @{k} path = _; : the last record moves into the place of the deleted
-// one and the file loses its last line. The table is changed (and synced)
-// first, so a crash before the index is right leaves an index that does not
-// match, which is rebuilt; a crash between the move and the cut leaves the
-// last record twice, which the rebuild recognizes and finishes.
+// one and the file loses its last line. Two fsyncs: the table first (the
+// moved record, or the cut when the deleted record is the last one), then the
+// index slots, before its header. The cut after a move is not synced: if it is
+// lost, the last record is there twice, which the rebuild recognizes and
+// finishes. A crash before the index is right leaves an index that does not
+// match the table, which is rebuilt.
 __nihil_key_delete(k = 0, path = "", schema = [0], names = "", model = "", kf = 0, opt = false) {
     __size = __nihil_fsize(path);
     __size < 0 {
@@ -681,9 +683,11 @@ __nihil_key_delete(k = 0, path = "", schema = [0], names = "", model = "", kf = 
     __i != __last {
         __line = __nihil_str_at(__nihil_pread(path, __last * __w, __w - 1));
         __moved = __nihil_key_at(__line, 0, schema, names, path, __last + 1, kf);
-        __nihil_pwrite(path, __i * __w, __line + "\n");
+        __nihil_pwrite(path, __i * __w, __line + "\n");   // synced before the cut
+        __nihil_truncate_ns(path, __last * __w);
+    } || {
+        __nihil_truncate(path, __last * __w);
     }
-    __nihil_truncate(path, __last * __w);
     // the index: the moved record's slot now points to its new place …
     __i != __last {
         __j = __nihil_key_hash(__moved) & __mask;

@@ -960,9 +960,10 @@ Each key operation changes the table first and syncs it to disk (`fsync`),
 then the index slots (synced), then the header (not synced: if it is lost, the
 index is rebuilt). A crash leaves at worst an index that no longer matches,
 which is rebuilt. A deletion syncs the moved record before cutting the file;
-a crash between the two leaves the last record twice, byte for byte, and the
-rebuild recognizes that and finishes the deletion (two different records with
-the same key are still an error).
+the cut itself is not synced, because if it is lost the last record is there
+twice, byte for byte, and the rebuild recognizes that and finishes the deletion
+(two different records with the same key are still an error). So a key write
+and a deletion cost two `fsync`s each: one for the table, one for the index.
 
 ```text
 nihil: 'products.dat' has no PRODUCT with code = 99

@@ -52,6 +52,7 @@ t_read_at:      jmp strict near rt_read_at         ; RT_READ_AT
 t_write_at:     jmp strict near rt_write_at        ; RT_WRITE_AT
 t_write_at_ns:  jmp strict near rt_write_at_ns     ; RT_WRITE_AT_NS
 t_truncate:     jmp strict near rt_truncate        ; RT_TRUNCATE
+t_truncate_ns:  jmp strict near rt_truncate_ns     ; RT_TRUNCATE_NS
 
 ; ---- arithmetic -------------------------------------------------------------
 ; Division truncated toward zero (as in C). MIN / -1 gives MIN (idiv
@@ -649,11 +650,12 @@ rt_sleep:
 ; creating the file, keeping the rest of it), then fsyncs.
 ; rt_write_at_ns: the same without the fsync (the caller syncs later).
 ; rt_truncate: rax = path, rdx = size: cuts the file to that size, then fsyncs.
+; rt_truncate_ns: the same without the fsync.
 ; Any failure is a runtime error naming the file and the reason (exit code 2).
 %define WF_PATH     0               ; [rsp + WF_PATH]: the path, 0-terminated
 %define WF_TEMP     4096            ; [rsp + WF_TEMP]: the temporary path
 %define WF_FRAME    8192
-%define WF_FLAG     (WF_FRAME + 40) ; 0 replace, 1 append, 2 at an offset, 3 truncate, 4 at an offset without fsync
+%define WF_FLAG     (WF_FRAME + 40) ; 0 replace, 1 append, 2 at an offset, 3 truncate, 4 at an offset without fsync, 5 truncate without fsync
 %define WF_OFFSET   (WF_FRAME + 48) ; where the next byte goes (flag 2)
 %define WF_MAX_PATH 4080            ; leaves room for ".nihil-tmp" and the 0
 rt_write_at:
@@ -668,6 +670,11 @@ rt_truncate:
     mov rcx, rax                    ; any STRING: no text is written
     push rdx
     push qword 3
+    jmp rt_write_file.body
+rt_truncate_ns:
+    mov rcx, rax
+    push rdx
+    push qword 5
     jmp rt_write_file.body
 rt_append_file:
     push qword 0
@@ -716,8 +723,11 @@ rt_write_file:
     je .open
     mov edx, 0x41                   ; O_WRONLY | O_CREAT (flags 2 and 4: in place)
     cmp qword [rsp + WF_FLAG], 3
+    je .must_exist
+    cmp qword [rsp + WF_FLAG], 5
     jne .open
-    mov edx, 1                      ; O_WRONLY (flag 3: it must exist)
+.must_exist:
+    mov edx, 1                      ; O_WRONLY (flags 3 and 5: it must exist)
 .open:
     mov eax, 257                    ; sys_openat(AT_FDCWD, r15, flags, 0644)
     mov rdi, -100
@@ -728,7 +738,10 @@ rt_write_file:
     js .report
     mov r13, rax                    ; fd
     cmp qword [rsp + WF_FLAG], 3
+    je .truncate
+    cmp qword [rsp + WF_FLAG], 5
     jne .text
+.truncate:
     mov eax, 77                     ; sys_ftruncate(fd, size)
     mov rdi, r13
     mov rsi, [rsp + WF_OFFSET]
@@ -762,7 +775,7 @@ rt_write_file:
     jmp .write
 .sync:
     cmp qword [rsp + WF_FLAG], 4
-    je .close
+    jae .close                      ; flags 4 and 5: no fsync
     mov eax, 74                     ; sys_fsync: the data is on the disk
     mov rdi, r13
     syscall
@@ -1082,3 +1095,4 @@ ASSERT_AT t_read_at,      RT_READ_AT
 ASSERT_AT t_write_at,     RT_WRITE_AT
 ASSERT_AT t_write_at_ns,  RT_WRITE_AT_NS
 ASSERT_AT t_truncate,     RT_TRUNCATE
+ASSERT_AT t_truncate_ns,  RT_TRUNCATE_NS

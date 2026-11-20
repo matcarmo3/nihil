@@ -781,6 +781,7 @@ cmd_put_key() {
 // __nihil_fstamp(path) → INT, __nihil_pread(path, offset, n) → INT (STRING
 // address, 0: no file), __nihil_pwrite(path, offset, text) (pwrite + fsync),
 // __nihil_pwrite_ns(path, offset, text) (no fsync), __nihil_truncate(path, size)
+// (ftruncate + fsync), __nihil_truncate_ns(path, size) (no fsync)
 file_intrinsic(kind = 0) {
     next_token();                        // name → "("
     next_token();
@@ -795,9 +796,9 @@ file_intrinsic(kind = 0) {
     emit(0x50);
     expect(',', "','");
     expression();
-    kind == 6 {                            // __nihil_truncate(path, size)
+    kind >= 6 {                            // __nihil_truncate(path, size), _ns
         eb(0x48, 0x89, 0xC2, 0x58);         // mov rdx, rax ; pop rax
-        emit_call_rt(RT_TRUNCATE);
+        kind == 7 { emit_call_rt(RT_TRUNCATE_NS); } || { emit_call_rt(RT_TRUNCATE); }
         call_end = size_code;
         expect(')', "')'");
         : TYPE_NONE;
