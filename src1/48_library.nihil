@@ -1,0 +1,135 @@
+// =============================================================================
+// 48_library — value.name(…): the library (SPEC §21). The methods are written
+// in Nihil in the prelude, as __nihil_s_* (STRING), __nihil_ai_* (ARRAY of
+// INT), __nihil_af_* (FLOAT) and __nihil_as_* (STRING); the value goes as the
+// first argument. The names exist only after a ".", so they take no name away
+// from the program.
+// =============================================================================
+
+// the constant "true" or "false" (for $b)
+bool_text(b = false) {
+    const_init();
+    b { const_put_str("true"); } || { const_put_str("false"); }
+    : const_close();
+}
+
+// tok = "." : is it ". name (" (a library call) rather than a field?
+library_ahead() {
+    save_lexer();
+    next_token();
+    r = tok_type == T_IDENT;
+    r {
+        next_token();
+        r = tok_type == '(';
+    }
+    back_lexer();
+    drop_lexer();
+    : r;
+}
+
+// the prelude method for value type t and the name at s (n bytes); "" if none
+lib_target(t = 0, s = 0, n = 0) {
+    t == TYPE_STR {
+        name_is(s, n, "find") { : "__nihil_s_find"; }
+        name_is(s, n, "has") { : "__nihil_s_has"; }
+        name_is(s, n, "starts") { : "__nihil_s_starts"; }
+        name_is(s, n, "ends") { : "__nihil_s_ends"; }
+        name_is(s, n, "slice") { : "__nihil_s_slice"; }
+        name_is(s, n, "split") { : "__nihil_s_split"; }
+        name_is(s, n, "replace") { : "__nihil_s_replace"; }
+        name_is(s, n, "trim") { : "__nihil_s_trim"; }
+        name_is(s, n, "upper") { : "__nihil_s_upper"; }
+        name_is(s, n, "lower") { : "__nihil_s_lower"; }
+        name_is(s, n, "repeat") { : "__nihil_s_repeat"; }
+        name_is(s, n, "int") { : "__nihil_s_int"; }
+        name_is(s, n, "float") { : "__nihil_s_float"; }
+        : "";
+    }
+    t == TYPE_ARR | TYPE_INT {
+        name_is(s, n, "sort") { : "__nihil_ai_sort"; }
+        name_is(s, n, "find") { : "__nihil_ai_find"; }
+        name_is(s, n, "has") { : "__nihil_ai_has"; }
+        name_is(s, n, "reverse") { : "__nihil_ai_reverse"; }
+        name_is(s, n, "sum") { : "__nihil_ai_sum"; }
+        name_is(s, n, "min") { : "__nihil_ai_min"; }
+        name_is(s, n, "max") { : "__nihil_ai_max"; }
+        : "";
+    }
+    t == TYPE_ARR | TYPE_FLOAT {
+        name_is(s, n, "sort") { : "__nihil_af_sort"; }
+        name_is(s, n, "find") { : "__nihil_af_find"; }
+        name_is(s, n, "has") { : "__nihil_af_has"; }
+        name_is(s, n, "reverse") { : "__nihil_af_reverse"; }
+        name_is(s, n, "sum") { : "__nihil_af_sum"; }
+        name_is(s, n, "min") { : "__nihil_af_min"; }
+        name_is(s, n, "max") { : "__nihil_af_max"; }
+        : "";
+    }
+    t == TYPE_ARR | TYPE_STR {
+        name_is(s, n, "sort") { : "__nihil_as_sort"; }
+        name_is(s, n, "find") { : "__nihil_as_find"; }
+        name_is(s, n, "has") { : "__nihil_as_has"; }
+        name_is(s, n, "reverse") { : "__nihil_as_reverse"; }
+        name_is(s, n, "join") { : "__nihil_as_join"; }
+        : "";
+    }
+    : "";
+}
+
+lib_missing(t = 0, s = 0, n = 0) {
+    error_start();
+    put_type(t);
+    t == TYPE_STR {
+        put_str(" has no method '");
+        put_source(s, n);
+        put_str("': it has find, has, starts, ends, slice, split, replace, trim, upper, lower, repeat, int and float");
+        error_end();
+    }
+    t == TYPE_ARR | TYPE_INT || t == TYPE_ARR | TYPE_FLOAT {
+        put_str(" has no method '");
+        put_source(s, n);
+        put_str("': it has sort, find, has, reverse, sum, min and max");
+        error_end();
+    }
+    t == TYPE_ARR | TYPE_STR {
+        put_str(" has no method '");
+        put_source(s, n);
+        put_str("': it has sort, find, has, reverse and join");
+        error_end();
+    }
+    put_str(" has no methods (the library works on STRING and on ARRAY of INT, FLOAT or STRING)");
+    error_end();
+}
+
+// tok = "." of value.name(…), with the value (type t) in rax → the result's type
+library_call(t = 0) {
+    next_token();                        // "." → name
+    ns = tok_start; nl = tok_len;
+    t == TYPE_UNKNOWN {
+        // the value has no type yet: compile the arguments and decide in the next pass
+        next_token();
+        next_token();
+        * tok_type != ')' {
+            expression();
+            tok_type == ',' {
+                next_token();
+            } || tok_type != ')' {
+                error_expected("',' or ')'");
+            }
+        }
+        next_token();
+        unknowns = unknowns + 1;
+        : TYPE_UNKNOWN;
+    }
+    target = lib_target(t, ns, nl);
+    #target == 0 { lib_missing(t, ns, nl); }
+    k = lookup_text(target);
+    k < 0 || s_flags[k] & FLAG_METHOD == 0 { error_general("internal error: the library was not included"); }
+    emit(0x50);                            // push rax: the value is the first argument
+    sv_k = lib_k; sv_s = lib_name_start; sv_l = lib_name_len;
+    lib_k = k; lib_name_start = ns; lib_name_len = nl;
+    r = call_method(k, 1);
+    lib_k = sv_k; lib_name_start = sv_s; lib_name_len = sv_l;
+    t == TYPE_STR && name_is(ns, nl, "float") { r = TYPE_FLOAT | TYPE_OPT; }   // the prelude gives the bits
+    : r;
+}

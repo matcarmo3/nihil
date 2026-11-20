@@ -1,4 +1,4 @@
-# Nihil — Language Specification (v2.9)
+# Nihil — Language Specification (v3.0)
 
 > **Nihil**: an imperative, minimalist language compiled straight to x86_64 machine
 > code, with no libc, no linker and no VM. The name is Latin for
@@ -209,7 +209,10 @@ Unary operators:
 - The largest decimal literal is `9223372036854775807`; the minimum is written
   `-9223372036854775807 - 1`. Hexadecimal literals take up to 16 digits and can
   express any 64-bit pattern (`0xFFFFFFFFFFFFFFFF == -1`).
-- `$` is how text is built: fill an array and convert it.
+- `$` is how text is built: fill an array and convert it. `$` also turns an INT,
+  FLOAT or BOOL into its text (`$42` is `"42"`, `$2.5` is `"2.5"`, `$true` is
+  `"true"`; stage 1), and the library (§21) has `s.int()` and `s.float()` for the
+  other way.
   ```text
   buf = [0 ; 2];  buf[0] = 'o'; buf[1] = 'k';
   name = $buf;
@@ -516,7 +519,7 @@ shift           ::= sum  ( ( "<<" | ">>" ) sum )*
 sum             ::= prod ( ( "+" | "-" ) prod )*
 prod            ::= unary ( ( "*" | "/" | "%" ) unary )*
 unary           ::= ( "-" | "!" | "~" | "#" | "@" | "@?" | "$" | "." ) unary | postfix
-postfix         ::= primary ( "[" expression "]" | "." IDENT )*
+postfix         ::= primary ( "[" expression "]" | "." IDENT | "." IDENT "(" [ args ] ")" )*   (* a field, or the library, §21 *)
 primary         ::= INTEGER | CHARACTER | FLOAT | STRING | "true" | "false" | "_"
                   | "[" expression ( "," expression )* "]"
                   | "[" expression ";" expression "]"
@@ -1017,6 +1020,60 @@ STRING it has just allocated (`__nihil_bytes(n)`, `__nihil_poke(s, i, b)`), and
 the FLOAT conversion reuses one buffer: writing or reading a table costs about
 two to three times the size of the file in memory at its peak.
 
+## 21. The library (stage 1)
+
+The library is called **on a value**: `value.name(arguments)`. The names exist
+only after a `.`, so they take no name from the program (a method or variable
+called `find` is still fine) and the language keeps no reserved words. Every
+result is a new value: nothing changes the STRING or the ARRAY it is called on.
+
+```text
+line = "  pear, apple, fig  ";
+words = line.trim().split(", ");        // ["pear", "apple", "fig"]
+>> words.sort().join(" < ");            // apple < fig < pear
+n = "42".int() || 0;                    // 42; "4x".int() is _
+>> "total: " + $(n * 2) + "\n";         // $ of an INT is its text
+```
+
+**STRING**
+
+| Call | Result |
+|---|---|
+| `s.find(t)`, `s.find(t, from)` | `INT?`: the first position of `t` (from `from`), or `_` |
+| `s.has(t)` | `BOOL`: `t` appears in `s` |
+| `s.starts(t)`, `s.ends(t)` | `BOOL` |
+| `s.slice(a)`, `s.slice(a, b)` | the bytes `a` … `b - 1` (to the end without `b`); negative counts from the end, and both are kept inside the text |
+| `s.split(sep)` | `ARRAY of STRING`: the parts between each `sep` (`""` gives single bytes) |
+| `s.replace(a, b)` | every `a` replaced by `b` |
+| `s.trim()` | without spaces, tabs and line breaks at both ends |
+| `s.upper()`, `s.lower()` | ASCII letters changed, other bytes kept |
+| `s.repeat(n)` | `s` `n` times |
+| `s.int()` | `INT?`: the number in `s` (spaces around allowed, a sign), or `_` if it is not one or does not fit |
+| `s.float()` | `FLOAT?`: the same for a FLOAT (exact, §6.1.1) |
+
+**ARRAY of INT, FLOAT or STRING**
+
+| Call | Result |
+|---|---|
+| `v.sort()` | a new ARRAY in increasing order (merge sort: stable, *n* log *n*; STRING byte by byte) |
+| `v.find(x)` | `INT?`: the first position of `x`, or `_` |
+| `v.has(x)` | `BOOL` |
+| `v.reverse()` | a new ARRAY, last element first |
+| `v.sum()`, `v.min()`, `v.max()` | INT and FLOAT only: the total (0 for none); the smallest and largest as `INT?`/`FLOAT?`, `_` for none |
+| `parts.join(sep)` | ARRAY of STRING only: one STRING with `sep` between the parts |
+
+A name the type does not have is a compile error that lists the ones it has:
+
+```text
+nihilc: f.nihil:2:7: STRING has no method 'size': it has find, has, starts, ends, slice, split, replace, trim, upper, lower, repeat, int and float
+```
+
+The library is written in Nihil, in the prelude (§18), as methods named
+`__nihil_s_find`, `__nihil_ai_sort` (ARRAY of INT), `__nihil_af_*` (FLOAT) and
+`__nihil_as_*` (STRING); the compiler passes the value as the first argument.
+`$` of an INT is a runtime routine, so it needs no prelude. Every program that
+gets the prelude gets all of it, which adds about 15 KB to the executable.
+
 ## Appendix A — What changed since v1.0, and why
 
 | Change | Reason |
@@ -1058,6 +1115,7 @@ two to three times the size of the file in memory at its peak.
 | **v1.9:** saved registers learned between passes | The prologue comes before the body; using the count from the previous pass avoids saving registers for nothing |
 | **v2.1:** `... ms;` waits | Animations need a fixed speed; a busy loop depends on the machine. The ellipsis reads as a pause and cannot start any valid expression |
 | **v2.2:** renamed from Ket to Nihil | Latin for *nothing*: no keywords, and `_` for the missing value |
+| **v3.0:** the library `value.name(…)`, and `$` of INT, FLOAT and BOOL | Every program was rewriting the same text and array routines, and a number could not be turned into text. Names after a `.` cannot clash with the program's names, so the language still has no reserved words |
 | **v2.9:** a garbage collector (conservative mark and sweep) | Programs that run for a long time or make many temporary texts grew without limit: a loop of 3 million small texts and arrays used 633 MB, now 19 MB. Conservative, so the compilers need no change and keep producing identical bytes |
 | **v2.8:** `NAME @{k} path = _;` deletes by key | Completes the key-value store. The record "becomes nothing": `_` already means no value. Moving the last record into the hole keeps the table a plain file without deleted lines, which every other read would have to skip |
 | **v2.7:** key fields `#name`, `NAME @{k} path`, `@{}>> path, r;` | A key-value store: finding a record by its key without reading the table. The index lives in its own file as a cache that is rebuilt when it does not match the table, so the table stays a plain text file that any write or editor may change. `#` reads as "number"; `{}` after `@` was never valid |

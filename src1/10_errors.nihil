@@ -51,6 +51,11 @@ put_type(t = 0) {
 }
 
 put_name_method(k = 0) {
+    k == lib_k && k >= 0 {
+        put_str(".");
+        put_source(lib_name_start, lib_name_len);
+        :;
+    }
     put_source(s_ofs[k], s_len[k]);
 }
 

@@ -79,7 +79,8 @@ fixed-width table files (`PRODUCT = @[code: INT(6); name: STRING(30)];`), read w
 (`PRODUCT @ path`) or one record at a time (`PRODUCT @[i] path`, `PRODUCT @# path`),
 one record changed in place (`@[i]>> path, r;`), keys with an index on disk
 (`@[#code: INT(6); …]`, `PRODUCT @{42} path`, `@{}>> path, p;`, `PRODUCT @{42} path = _;`),
-a garbage collector (conservative mark and sweep, in the runtime only), and `examples/doom_fire.nihil`, the PSX Doom
+a garbage collector (conservative mark and sweep, in the runtime only), a
+library called on values (`s.trim().split(",")`, `v.sort()`, `"42".int()`, `$n`), and `examples/doom_fire.nihil`, the PSX Doom
 fire effect on a 24-bit color terminal (`./nihilc1.sh examples/doom_fire.nihil fire && ./fire`).
 
 ## IDE

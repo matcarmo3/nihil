@@ -16,6 +16,7 @@
 @ "40_emit.nihil";
 @ "45_optionals.nihil";
 @ "47_records.nihil";
+@ "48_library.nihil";
 @ "50_expressions.nihil";
 @ "60_commands.nihil";
 @ "70_prescan.nihil";

@@ -105,6 +105,7 @@ RT_WRITE_AT = 155;
 RT_WRITE_AT_NS = 160;
 RT_TRUNCATE = 165;
 RT_TRUNCATE_NS = 170;
+RT_INT_TEXT = 175;
 
 // ---- limits (the same as the stage 0 arenas) ----
 SIZE_SOURCE = 16 << 20;
@@ -224,6 +225,9 @@ saw_value = false;
 saw_empty = false;
 saw_absent = false;
 call_end = -1;
+lib_k = -1;                  // the library method being called (its errors say .name)
+lib_name_start = 0;
+lib_name_len = 0;
 level = 0;
 slots = 0;
 max_slots = 0;

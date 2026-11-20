@@ -1,0 +1,28 @@
+// Counts the words of a line and lists them in order, with the library:
+// value.name(…) on STRING and ARRAY, and $ to turn a number into text.
+>> "Type a sentence: ";
+line = "";
+<< line;
+words = line.lower().replace(",", " ").replace(".", " ").replace("!", " ").split(" ");
+n = 0;                                  // the empty parts (two spaces) are left out
+i = 0;
+* i < #words {
+    #words[i].trim() > 0 { n = n + 1; }
+    i = i + 1;
+}
+kept = ["" ; n];
+n = 0;
+i = 0;
+* i < #words {
+    w = words[i].trim();
+    #w > 0 { kept[n] = w; n = n + 1; }
+    i = i + 1;
+}
+>> $#kept + " word(s); in order: " + kept.sort().join(", ") + "\n";
+longest = "";
+i = 0;
+* i < #kept {
+    #kept[i] > #longest { longest = kept[i]; }
+    i = i + 1;
+}
+>> "The longest: " + longest.upper() + " (" + $#longest + " letters)\n";

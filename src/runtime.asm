@@ -53,6 +53,7 @@ t_write_at:     jmp strict near rt_write_at        ; RT_WRITE_AT
 t_write_at_ns:  jmp strict near rt_write_at_ns     ; RT_WRITE_AT_NS
 t_truncate:     jmp strict near rt_truncate        ; RT_TRUNCATE
 t_truncate_ns:  jmp strict near rt_truncate_ns     ; RT_TRUNCATE_NS
+t_int_text:     jmp strict near rt_int_text        ; RT_INT_TEXT
 
 ; ---- arithmetic -------------------------------------------------------------
 ; Division truncated toward zero (as in C). MIN / -1 gives MIN (idiv
@@ -120,6 +121,27 @@ rt_decimal:
     mov byte [rdi], '-'
 .finish:
     mov rsi, rdi
+    ret
+
+; rt_int_text: rax = INT → rax = a new STRING with it in decimal ($n)
+rt_int_text:
+    push rbx
+    sub rsp, 32
+    lea rdi, [rsp + 32]
+    call rt_decimal                 ; rsi = the first character
+    lea rbx, [rsp + 32]
+    sub rbx, rsi                    ; length
+    push rsi
+    lea rcx, [rbx + 8]
+    shr rcx, 3
+    call rt_alloc
+    pop rsi
+    mov [rax - 8], rbx
+    mov rdi, rax
+    mov rcx, rbx
+    rep movsb
+    add rsp, 32
+    pop rbx
     ret
 
 rt_print_bool:
@@ -1873,3 +1895,4 @@ ASSERT_AT t_write_at,     RT_WRITE_AT
 ASSERT_AT t_write_at_ns,  RT_WRITE_AT_NS
 ASSERT_AT t_truncate,     RT_TRUNCATE
 ASSERT_AT t_truncate_ns,  RT_TRUNCATE_NS
+ASSERT_AT t_int_text,     RT_INT_TEXT
