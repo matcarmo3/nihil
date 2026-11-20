@@ -110,3 +110,7 @@ into the compiler written in Nihil (SPEC §17).
 | `examples/` | example programs (the Doom fire) |
 | `ide/` | the web IDE (`server.py`, `static/index.html`, `workspace/`) |
 | `assets/` | the logo: `logo.png` (light backgrounds), `logo-dark.png` (dark), `logo-source.png` (original) |
+
+## License
+
+MIT: see [LICENSE](LICENSE). Use it for anything, keeping the copyright notice.
