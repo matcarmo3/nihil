@@ -821,7 +821,7 @@ file_intrinsic(kind = 0) {
 
 // network for the prelude (SPEC §23): __nihil_listen(port, every) → INT, __nihil_accept(fd) →
 // INT, __nihil_fd_read(fd, most) → INT (STRING address), __nihil_fd_send(fd, text) → INT,
-// __nihil_fd_close(fd)
+// __nihil_fd_close(fd), __nihil_connect(address, port) → INT
 net_intrinsic(kind = 0) {
     next_token();                        // name → "("
     next_token();
@@ -840,6 +840,7 @@ net_intrinsic(kind = 0) {
     kind == 1 { emit_call_rt(RT_NET_LISTEN); }
     kind == 3 { emit_call_rt(RT_FD_READ); }
     kind == 4 { emit_call_rt(RT_FD_SEND); }
+    kind == 6 { emit_call_rt(RT_NET_CONNECT); }
     call_end = size_code;                // may stand alone as a command, like a call
     expect(')', "')'");
     : TYPE_INT;

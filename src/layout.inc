@@ -91,4 +91,5 @@
 %define RT_PUT              225 ; rax = STRING r (new, being built), rcx = at, rdx = STRING t → t copied into r at; rax = at + #t
 %define RT_REC_PARSE        230 ; rax = text, rcx = where the line starts, rdx = schema → rax = the record (ARRAY address), or -1: let the prelude do it
 %define RT_LINES            235 ; rax = text, rcx = width → rax = how many lines, all of that width (-1 if one is not)
+%define RT_NET_CONNECT      240 ; rax = IPv4 address (a.b.c.d as a << 24 | … | d), rcx = port → rax = connected socket (or -errno)
 %define RT_SYSCALL          210 ; rax = ARRAY of INT [n, a1 … a6] (missing ones 0) → rax = what the kernel gave

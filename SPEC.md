@@ -1261,6 +1261,26 @@ The runtime has five routines (`socket`/`bind`/`listen`, `accept4`, `read`,
 `sendto` with `MSG_NOSIGNAL`, `close`); HTTP is prelude code. There is no TLS:
 for the internet, put the server behind a proxy that has it.
 
+**The client side.**
+
+```text
+r? = "http://127.0.0.1:11434/api/tags".http_get();          // the whole response, or _
+p? = "http://localhost:8740/plan/293".http_post("application/json", "{\"month\": 2}");
+status = (r || "").http_status() || 0;                        // 200
+body = (r || "").http_body();                                 // what came after the headers
+c? = "127.0.0.1".connect(8740);                               // a raw connection: send, receive, close
+```
+
+| Call | Result |
+|---|---|
+| `host.connect(port)` | `INT?`: a connection to `host:port`, on which `send`, `receive` and `close` work; `_` if the host is unknown or does not answer. The host is an IPv4 address (`"10.0.0.5"`), `"localhost"` or a name in `/etc/hosts` (no DNS yet) |
+| `url.http_get()`, `url.http_post(type, body)`, `url.http_request(method, type, body)` | `STRING?`: the whole response (status line, headers, a blank line, the body: put back together when it came in chunks), or `_` if the URL is not `http://…` or the server does not answer. The request says `Connection: close`, and the answer is read until the server closes |
+| `resp.http_status()` | `INT?`: the status of a response (`"HTTP/1.1 404 Not Found"` → `404`) |
+
+`resp.http_header(name)` and `resp.http_body()` read a response as they read a request. There is
+no TLS: `https://…` gives `_` (a local proxy can add it). The runtime has one more routine,
+`rt_net_connect` (`socket`, `connect`); finding the address and HTTP are prelude code.
+
 `accept` gives every connection a read deadline of 15 s: one that opens and sends nothing
 (browsers open connections ahead of time) delays the next request at most that long, instead of
 holding a server that serves one request at a time. `receive` reads into a buffer that doubles.
@@ -1365,6 +1385,7 @@ it. The IDE server (`ide/server.nihil`) is written with them and §23.
 | **v1.9:** saved registers learned between passes | The prologue comes before the body; using the count from the previous pass avoids saving registers for nothing |
 | **v2.1:** `... ms;` waits | Animations need a fixed speed; a busy loop depends on the machine. The ellipsis reads as a pause and cannot start any valid expression |
 | **v2.2:** renamed from Ket to Nihil | Latin for *nothing*: no keywords, and `_` for the missing value |
+| **v3.11:** the client side of the network: `host.connect(port)`, `url.http_get()`, `http_post`, `http_request`, `resp.http_status()` | A program can now ask other servers (an LLM served by Ollama, another planogram server) instead of only answering. The first use is an agent in Nihil that talks to a local model and calls the planogram's tools in the same process |
 | **v3.10:** `req.http_header(name)`, `req.http_host_is_local()`; `respond` no longer sends `Access-Control-Allow-Origin: *`; the IDE checks the host and a secret token, refuses hidden folders as projects, control bytes in paths, and serves only `.nihil` files; a path with a zero byte inside is refused everywhere (`@`, `@?`, `@>>`, `read_at`, the directory functions, `cmd.start`); accepted connections have a read deadline of 15 s; the IDE's programs run in `build/runs`, at most 8 at a time | A security review found that any page open in the browser could use the IDE through the SSH tunnel (read keys, write and run a program) and read the planogram's data: the `*` let other sites read the answers, and nothing checked who was asking. A server for one machine now answers only to it and to its own page |
 | **v3.9:** methods of a model: `MODEL.name(self = MODEL(), …) { … }`, called as `record.name(…)` | Programs organized around their data (a planogram, its shelves and items) read better when the operations live with the model. The `.` already called the library on a value; extending it to the program's own models needs no keyword and no runtime dispatch. Inheritance is left out: composition covers it and keeps the language small |
 | **v3.8:** directories and processes: `path.list()`, `is_dir`, `is_file`, `make_dir`, `remove`, `size`, `read_from`; `cmd.start(out, err, dir)`, `run`; `p.write`, `close_input`, `done`, `wait`, `kill` | Tools around the language (the IDE, data collection) needed to list folders and run programs. One kernel-call routine in the runtime and the rest in the prelude keeps the assembly small and the library testable; the IDE server moved from Python to Nihil |

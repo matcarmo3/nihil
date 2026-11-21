@@ -123,6 +123,7 @@ RT_SUB = 220;
 RT_PUT = 225;
 RT_REC_PARSE = 230;
 RT_LINES = 235;
+RT_NET_CONNECT = 240;
 
 // ---- limits (the same as the stage 0 arenas) ----
 SIZE_SOURCE = 16 << 20;

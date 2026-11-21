@@ -66,6 +66,7 @@ t_sub:          jmp strict near rt_sub             ; RT_SUB
 t_put:          jmp strict near rt_put             ; RT_PUT
 t_rec_parse:    jmp strict near rt_rec_parse       ; RT_REC_PARSE
 t_lines:        jmp strict near rt_lines           ; RT_LINES
+t_net_connect:  jmp strict near rt_net_connect     ; RT_NET_CONNECT
 
 ; ---- arithmetic -------------------------------------------------------------
 ; Division truncated toward zero (as in C). MIN / -1 gives MIN (idiv
@@ -193,6 +194,54 @@ rt_net_listen:
     pop rax
 .end:
     add rsp, 32
+    pop r12
+    pop rbx
+    ret
+
+; rt_net_connect: rax = IPv4 address (a << 24 | b << 16 | c << 8 | d), rcx = port
+;   → rax = a socket connected to it, or -errno (SPEC §23: the client side)
+rt_net_connect:
+    push rbx
+    push r12
+    sub rsp, 24
+    mov r12, rax                    ; address
+    mov rbx, rcx                    ; port
+    mov eax, 41                     ; socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0)
+    mov edi, 2
+    mov esi, 1 | 0x80000
+    xor edx, edx
+    syscall
+    test rax, rax
+    js .end
+    mov [rsp + 16], rax             ; the socket
+    mov word [rsp], 2               ; sockaddr_in: AF_INET,
+    mov eax, ebx
+    xchg al, ah                     ; the port in network order,
+    mov [rsp + 2], ax
+    mov eax, r12d
+    bswap eax                       ; the address in network order
+    mov [rsp + 4], eax
+    mov qword [rsp + 8], 0
+.again:
+    mov eax, 42                     ; connect(fd, &addr, 16)
+    mov rdi, [rsp + 16]
+    mov rsi, rsp
+    mov edx, 16
+    syscall
+    cmp rax, -4                     ; -EINTR: again
+    je .again
+    test rax, rax
+    js .fail
+    mov rax, [rsp + 16]
+    jmp .end
+.fail:
+    push rax
+    mov eax, 3                      ; close the socket
+    mov rdi, [rsp + 24]
+    syscall
+    pop rax
+.end:
+    add rsp, 24
     pop r12
     pop rbx
     ret
@@ -2656,3 +2705,4 @@ ASSERT_AT t_sub,          RT_SUB
 ASSERT_AT t_put,          RT_PUT
 ASSERT_AT t_rec_parse,    RT_REC_PARSE
 ASSERT_AT t_lines,        RT_LINES
+ASSERT_AT t_net_connect,  RT_NET_CONNECT
