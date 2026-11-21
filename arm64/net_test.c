@@ -13,7 +13,7 @@
 #include <signal.h>
 typedef int64_t i64;
 i64 *nh_alloc(i64); i64 nh_net_listen(i64, i64); i64 nh_net_accept(i64); char *nh_fd_read(i64, i64);
-i64 nh_fd_send(i64, const char *); void nh_fd_close(i64); i64 nh_json_end(const char *, i64);
+i64 nh_fd_send(i64, const char *); void nh_fd_close(i64); i64 nh_json_end(const char *, i64); i64 nh_net_connect(i64, i64);
 static int fails;
 static char *T(const char *c) { i64 n = (i64)strlen(c); i64 *a = nh_alloc((n + 8) >> 3); a[-1] = n; memcpy(a, c, (size_t)n); return (char *)a; }
 static void yes(const char *what, int ok) { printf("%s  %s\n", ok ? "ok  " : "FAIL", what); fails += !ok; }
@@ -62,6 +62,14 @@ int main(void) {
     yes("a silent connection: the read gives up after about 15 s with nothing", ((i64 *)nothing)[-1] == 0 && waited >= 14 && waited <= 17);
     nh_fd_close(c);
     nh_fd_close(s);
+    // the client side: connect to a listening socket of this process, then to a closed port
+    i64 srv = nh_net_listen(8798, 0);
+    i64 cl = nh_net_connect(0x7F000001, 8798);
+    i64 acc = nh_net_accept(srv);
+    nh_fd_send(cl, T("ping"));
+    yes("connect to 127.0.0.1:8798 and send: the server reads it", cl >= 0 && strcmp(nh_fd_read(acc, 0), "ping") == 0);
+    nh_fd_close(cl); nh_fd_close(acc); nh_fd_close(srv);
+    yes("connect to a closed port gives -errno", nh_net_connect(0x7F000001, 8797) < 0);
     const char *cases[][2] = {{"  \"a\\\"b\" , 1", "8"}, {"{\"x\": [1, {\"y\": \"}\"}], \"z\": 2} tail", "30"}, {"123,4", "3"},
                               {"true}", "4"}, {"[1, [2, 3]]", "11"}, {"\"open", "-1"}, {"[1, 2", "-1"}, {"   ", "-1"}, {",", "-1"}};
     for (int k = 0; k < 9; k++) {

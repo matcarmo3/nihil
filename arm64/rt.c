@@ -750,6 +750,29 @@ i64 nh_net_accept(i64 server) {
     }
 }
 
+// a socket connected to an IPv4 address (a << 24 | b << 16 | c << 8 | d) and port, or -errno
+// (the client side: the prelude finds the address and speaks HTTP)
+i64 nh_net_connect(i64 address, i64 port) {
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) return -errno;
+    cloexec(fd);
+    int one = 1;
+    setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof one);
+    struct sockaddr_in a;
+    memset(&a, 0, sizeof a);
+    a.sin_len = sizeof a;
+    a.sin_family = AF_INET;
+    a.sin_port = htons((uint16_t)port);
+    a.sin_addr.s_addr = htonl((uint32_t)address);
+    while (connect(fd, (struct sockaddr *)&a, sizeof a) != 0) {
+        if (errno == EINTR) continue;
+        int e = errno;
+        close(fd);
+        return -e;
+    }
+    return fd;
+}
+
 // a new STRING with what one read gave (at most `most` bytes; length 0 at the end or on error)
 char *nh_fd_read(i64 fd, i64 most) {
     if (most <= 0) most = 65536;
