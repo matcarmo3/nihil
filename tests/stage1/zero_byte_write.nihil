@@ -1,0 +1,3 @@
+// writing to a path with a zero byte inside ends the program, and writes nothing
+@>> "/tmp/nihil_zero_w.txt" + "\0" + ".nihil", "x";
+>> "not reached\n";

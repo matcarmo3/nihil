@@ -12,6 +12,9 @@
 PORT = 8730;
 MAX_RUN_MS = 600000;            // a program is stopped after 10 minutes
 ABANDONED_MS = 30000;           // … or when the page has not asked for its output for 30 s
+MAX_RUNS = 8;                   // programs running at a time
+RUNS_DIR = "";                  // build/runs: the programs and their output (not /tmp, where
+                                // another user could put a link with the name before us)
 SKIP = ["build", "node_modules", "__pycache__", "venv", "gerado_antes"];
 
 ROOT = "";                      // the Nihil repository (the folder the server starts in)
@@ -518,7 +521,7 @@ compile(project = "", rel = "", bin = "", optimize = true, base = "") {
 // ---- running ------------------------------------------------------------------------------
 NEXT_RUN = 1;
 RUN_PROC = {0: 0 ; 64};         // run → the process
-RUN_BASE = {0: "" ; 64};        // run → /tmp/nihil-ide-N (.bin .out .err)
+RUN_BASE = {0: "" ; 64};        // run → build/runs/N (.bin .out .err)
 RUN_T0 = {0: 0 ; 64};
 RUN_SEEN = {0: 0 ; 64};         // the last time the page asked for its output
 RUN_CODE = {0: 0 ; 64};         // the exit code, once it finished
@@ -552,9 +555,14 @@ run_json(project = "", body = "", asm = false) {
     rel = (body.json("path") || "\"\"").json_text() || "";
     optimize = (body.json("optimize") || "true") != "false";
     !safe_rel(rel) || !(project + "/" + rel).is_file() { : "{\"ok\": false, \"errors\": [" + error_json(rel, "cannot compile " + rel) + "]}"; }
+    running = 0;
+    ids = RUN_PROC.keys();
+    k = 0;
+    * k < #ids { RUN_CODE.contains(ids[k]) == false { running = running + 1; } k = k + 1; }
+    running >= MAX_RUNS { : "{\"ok\": false, \"errors\": [" + error_json(rel, $MAX_RUNS + " programs are running: stop one first") + "]}"; }
     id = NEXT_RUN;
     NEXT_RUN = NEXT_RUN + 1;
-    base = "/tmp/nihil-ide-" + $id;
+    base = RUNS_DIR + "/" + $id;
     bin = base + ".bin";
     !compile(project, rel, bin, optimize, base) {
         bin.remove();
@@ -763,6 +771,8 @@ main() {
     PROJECTS_FILE = ROOT + "/ide/projects.txt";
     TOKEN = ((@ "/proc/sys/kernel/random/uuid") + (@ "/proc/sys/kernel/random/uuid")).replace("\n", "").replace("-", "");
     (ROOT + "/ide/workspace").make_dir();
+    RUNS_DIR = ROOT + "/build/runs";
+    RUNS_DIR.make_dir();
     s? = PORT.listen();
     s == _ { !>> "nihil ide: port " + $PORT + " is taken\n"; :: 1; }
     srv = s || -1;

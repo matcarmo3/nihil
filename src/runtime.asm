@@ -212,6 +212,22 @@ rt_net_accept:
     syscall
     cmp rax, -4                     ; -EINTR: again
     je .again
+    test rax, rax
+    js .done
+    push rax                        ; a connection that sends nothing must not hold the server
+    sub rsp, 16                     ; (it serves one at a time): reads give up after 15 s
+    mov qword [rsp], 15             ; struct timeval: seconds,
+    mov qword [rsp + 8], 0          ; microseconds
+    mov rdi, rax
+    mov eax, 54                     ; setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, 16)
+    mov esi, 1
+    mov edx, 20
+    mov r10, rsp
+    mov r8d, 16
+    syscall
+    add rsp, 16
+    pop rax
+.done:
     pop rbx
     ret
 
@@ -1912,6 +1928,16 @@ rt_read_file:
     mov rdi, rsp
     rep movsb
     mov byte [rdi], 0
+    mov rcx, [rax - 8]              ; a zero byte inside the path: the kernel would open
+    test rcx, rcx                   ; another file (the path cut at the zero)
+    jz .path_ok
+    push rax
+    mov rdi, rax
+    xor eax, eax
+    repne scasb
+    pop rax
+    je .fail
+.path_ok:
     mov eax, 257                    ; sys_openat
     mov rdi, -100                   ; AT_FDCWD
     mov rsi, rsp
@@ -2192,6 +2218,20 @@ rt_write_file:
     lea rdi, [rsp + WF_PATH]
     rep movsb
     mov byte [rdi], 0
+    mov rcx, rbx                    ; a zero byte inside the path (what was copied of it)
+    cmp rcx, WF_MAX_PATH
+    jbe .scan
+    mov ecx, WF_MAX_PATH
+.scan:
+    test rcx, rcx
+    jz .no_zero
+    lea rdi, [rsp + WF_PATH]
+    xor eax, eax
+    repne scasb
+    jne .no_zero
+    mov rax, -255                   ; not an errno: "the path has a zero byte"
+    jmp .report
+.no_zero:
     mov rax, -36                    ; ENAMETOOLONG
     cmp rbx, WF_MAX_PATH
     ja .report
@@ -2389,6 +2429,16 @@ rt_read_at:
     mov rdi, rsp
     rep movsb
     mov byte [rdi], 0
+    mov rcx, [rax - 8]              ; a zero byte inside the path: no such file
+    test rcx, rcx
+    jz .path_ok
+    push rax
+    mov rdi, rax
+    xor eax, eax
+    repne scasb
+    pop rax
+    je .no_file
+.path_ok:
     mov eax, 257                    ; sys_openat(AT_FDCWD, path, O_RDONLY)
     mov rdi, -100
     mov rsi, rsp
@@ -2552,6 +2602,7 @@ errno_reasons:
     REASON 30,  "read-only file system"
     REASON 36,  "the path is too long"
     REASON 122, "disk quota exceeded"
+    REASON 255, "the path has a zero byte"
     db 0
 
 ; ---- checking the table offsets (assembly fails if they differ) -----
