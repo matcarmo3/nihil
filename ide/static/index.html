@@ -943,8 +943,19 @@ async function chatSend() {
     const denied = result.permission_denials || [];
     if (denied.length) {
       const el = document.createElement('div'); el.className = 'denied';
-      el.textContent = 'not allowed: ' + denied.map((x) => x.tool_name + ' ' + relPath((x.tool_input || {}).file_path || (x.tool_input || {}).command || '')).join(', ')
-        + ($('chatEdits').checked ? '' : ' (check "may edit" to let Claude change files)');
+      const seen = [...new Set(denied.map((x) => x.tool_name + ' ' + relPath((x.tool_input || {}).file_path || (x.tool_input || {}).command || '')))];
+      el.textContent = 'not allowed: ' + seen.join(', ');
+      if (!$('chatEdits').checked && denied.some((x) => x.tool_name === 'Edit' || x.tool_name === 'Write')) {
+        const go = document.createElement('button'); go.textContent = 'Allow edits and apply';
+        go.title = 'Checks "may edit" and asks Claude to make the changes it was not allowed to';
+        go.style.marginLeft = '8px';
+        go.onclick = () => {
+          $('chatEdits').checked = true; $('chatEdits').onchange();
+          $('chatText').value = 'You may edit the files now: make the changes you were not allowed to make.';
+          go.remove(); chatSend();
+        };
+        el.appendChild(go);
+      }
       box.appendChild(el);
     }
     const meta = document.createElement('div'); meta.className = 'meta';
