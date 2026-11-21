@@ -38,6 +38,11 @@ button.primary { background: var(--accent); color: #04191a; border-color: var(--
 button:disabled { opacity: .45; cursor: default; }
 label.opt { display: flex; gap: 5px; align-items: center; color: var(--dim); margin-left: 6px; cursor: pointer; }
 .spacer { flex: 1; }
+#table .head .pager { display: inline-flex; gap: 4px; }
+#table .head .pager button { padding: 1px 8px; }
+#table .head select { padding: 1px 6px; }
+select { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px;
+  padding: 5px 8px; font: inherit; max-width: 240px; cursor: pointer; }
 #current { color: var(--dim); font-family: ui-monospace, monospace; }
 #current.dirty::after { content: " ●"; color: var(--accent); }
 main { display: grid; grid-template-columns: 220px 1fr; min-height: 0; }
@@ -109,6 +114,8 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
 <div id="app">
   <header>
     <div class="logo"><img src="/static/mark.png" alt="">Nihil <span>IDE</span></div>
+    <select id="project" title="Project: the folder you are working in (programs run inside it)"></select>
+    <button id="btnProject" title="Open or create a project folder">Open folder…</button>
     <button id="btnNew" title="New file">New</button>
     <button id="btnSave" title="Save (Ctrl+S)">Save</button>
     <button id="btnRun" class="primary" title="Save and run (Ctrl+Enter)">▶ Run</button>
@@ -139,8 +146,16 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
   </main>
   <footer><span id="status">Ready</span><div class="spacer"></div><span id="cursorPos"></span></footer>
 </div>
+<dialog id="projDialog"><form method="dialog">
+  <div style="margin-bottom:8px">Project folder on the server (inside your home folder):</div>
+  <input id="projPath" autocomplete="off" placeholder="/home/you/my-project" style="width:420px">
+  <label class="opt" style="margin:10px 0 0"><input type="checkbox" id="projCreate"> create the folder if it does not exist</label>
+  <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end">
+    <button value="cancel">Cancel</button><button value="ok" class="primary">Open</button>
+  </div>
+</form></dialog>
 <dialog id="newDialog"><form method="dialog">
-  <div style="margin-bottom:8px">New file (inside <code>ide/workspace/</code> or <code>examples/</code>):</div>
+  <div style="margin-bottom:8px" id="newHint">New file (a path inside the project):</div>
   <input id="newName" value="ide/workspace/untitled.nihil" autocomplete="off">
   <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end">
     <button value="cancel">Cancel</button><button value="ok" class="primary">Create</button>
@@ -177,7 +192,8 @@ CodeMirror.defineSimpleMode('nihil', {
 
 // ---------------------------------------------------------------- state
 const $ = (id) => document.getElementById(id);
-let current = null, editable = true, savedText = '', runId = null, marks = [];
+let current = null, editable = true, savedText = '', savedHash = null, runId = null, marks = [];
+let project = null, projects = [];                  // the folder being worked in, and the list
 const editor = CodeMirror($('editor'), {
   mode: 'nihil', lineNumbers: true, indentUnit: 4, tabSize: 4, indentWithTabs: false,
   matchBrackets: true, autoCloseBrackets: true, gutters: ['errors', 'CodeMirror-linenumbers'],
@@ -191,9 +207,16 @@ editor.on('change', () => { $('current').classList.toggle('dirty', editor.getVal
 editor.on('cursorActivity', () => { const c = editor.getCursor(); $('cursorPos').textContent = `Ln ${c.line + 1}, Col ${c.ch + 1}`; });
 
 function status(text, cls = '') { const s = $('status'); s.textContent = text; s.className = cls; }
+// every call but the project list says which project it is about
 async function api(path, body) {
+  if (project && path.startsWith('/api/') && !path.startsWith('/api/projects')) {
+    if (body) body = { project, ...body };
+    else path += (path.includes('?') ? '&' : '?') + 'project=' + encodeURIComponent(project);
+  }
   const r = await fetch(path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
-  return r.json();
+  const j = await r.json().catch(() => ({ error: 'the server gave no answer' }));
+  if (!r.ok && j && typeof j === 'object') j.status = r.status;
+  return j;
 }
 
 // ---------------------------------------------------------------- terminal
@@ -301,13 +324,14 @@ let tableOpen = null;
 async function loadFiles() {
   const { files, tables } = await api('/api/files');
   const groups = {};
-  for (const f of files) { const d = f.slice(0, f.lastIndexOf('/')); (groups[d] = groups[d] || []).push(f); }
+  for (const f of files) { const d = f.includes('/') ? f.slice(0, f.lastIndexOf('/')) : '.'; (groups[d] = groups[d] || []).push(f); }
   const box = $('files'); box.innerHTML = '';
+  if (!files.length) box.innerHTML = '<div class="empty" style="padding:10px">No .nihil files in this project yet: click New.</div>';
   for (const [dir, list] of Object.entries(groups)) {
-    const h = document.createElement('h3'); h.textContent = dir; box.appendChild(h);
+    const h = document.createElement('h3'); h.textContent = dir === '.' ? 'project' : dir; box.appendChild(h);
     for (const f of list) {
       const el = document.createElement('div'); el.className = 'file' + (f === current ? ' active' : '');
-      el.textContent = f.slice(dir.length + 1); el.title = f; el.onclick = () => open(f); box.appendChild(el);
+      el.textContent = f.slice(f.lastIndexOf('/') + 1); el.title = f; el.onclick = () => open(f); box.appendChild(el);
     }
   }
   if (tables.length) {
@@ -321,30 +345,45 @@ async function loadFiles() {
   return files;
 }
 const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-async function showTable(path, quiet) {
-  const r = await api('/api/table?path=' + encodeURIComponent(path));
+// a table opens with its first 100 records; the buttons page through it (the server reads
+// only the lines shown, so a table of hundreds of MB opens at once)
+let tablePage = 100;
+async function showTable(path, quiet, from = 0) {
+  const r = await api('/api/table?path=' + encodeURIComponent(path) + '&from=' + from + '&limit=' + tablePage);
   const box = $('table');
   if (r.error) { box.innerHTML = `<div class="empty">${esc(r.error)}</div>`; return; }
   tableOpen = path;
   document.querySelectorAll('aside .file.table').forEach((e) => e.classList.toggle('active', e.title === path));
-  const count = `${r.total} record${r.total === 1 ? '' : 's'}${r.truncated ? ' (showing the first 2000)' : ''}`;
+  const shown = r.fields ? r.rows.length : r.raw.length;
+  const first = r.from, last = r.from + shown, lastPage = Math.max(0, Math.floor((r.total - 1) / r.limit) * r.limit);
+  const n = (x) => x.toLocaleString('en-US');
+  const count = r.total ? `records ${n(first + (shown ? 1 : 0))}–${n(last)} of ${n(r.total)}` : 'no records';
+  const pager = r.total > shown ? `<span class="pager">` +
+    `<button data-go="0" ${first === 0 ? 'disabled' : ''} title="first page">⏮</button>` +
+    `<button data-go="${Math.max(0, first - r.limit)}" ${first === 0 ? 'disabled' : ''} title="previous ${r.limit}">◀</button>` +
+    `<button data-go="${first + r.limit}" ${last >= r.total ? 'disabled' : ''} title="next ${r.limit}">▶</button>` +
+    `<button data-go="${lastPage}" ${last >= r.total ? 'disabled' : ''} title="last page">⏭</button></span>` : '';
+  const size = `<select id="tablePage" title="records per page">${[100, 1000].map((v) => `<option value="${v}" ${v === tablePage ? 'selected' : ''}>${v} per page</option>`).join('')}</select>`;
   let html;
   if (!r.fields) {
-    html = `<div class="head"><b>${esc(path)}</b><span>${count}</span><span>no data model in the programs has lines of ${r.width} bytes</span></div>` +
-      `<table>${r.raw.map((l, i) => `<tr><td class="i">${i}</td><td>${esc(l)}</td></tr>`).join('')}</table>`;
+    html = `<div class="head"><b>${esc(path)}</b><span>${count}</span>${pager}${size}<span>no data model in the programs has lines of ${r.width} bytes</span></div>` +
+      `<table>${r.raw.map((l, i) => `<tr><td class="i">${first + i}</td><td>${esc(l)}</td></tr>`).join('')}</table>`;
   } else {
     const head = r.fields.map((f) => `<th class="${f.key ? 'key' : ''}">${f.key ? '#' : ''}${esc(f.name)}<small>${f.type}${f.type === 'BOOL' ? '' : '(' + f.width + ')'}</small></th>`).join('');
     const body = r.rows.map((row, i) => row.bad !== undefined
-      ? `<tr class="bad"><td class="i">${i}</td><td colspan="${r.fields.length}">does not fit ${esc(r.model)}: ${esc(row.bad)}</td></tr>`
-      : `<tr><td class="i">${i}</td>${row.cells.map((c, j) => {
+      ? `<tr class="bad"><td class="i">${first + i}</td><td colspan="${r.fields.length}">does not fit ${esc(r.model)}: ${esc(row.bad)}</td></tr>`
+      : `<tr><td class="i">${first + i}</td>${row.cells.map((c, j) => {
           const t = r.fields[j].type;
           const cls = t === 'INT' || t === 'FLOAT' ? 'num' : t === 'BOOL' ? 'bool-' + c : '';
           return `<td class="${cls}">${esc(c)}</td>`; }).join('')}</tr>`).join('');
     const others = r.others.length ? `<span title="${esc(r.others.join(', '))}">also fits: ${r.others.length}</span>` : '';
-    html = `<div class="head"><b>${esc(path)}</b><span>${esc(r.model)} from ${esc(r.from)}</span><span>${count}</span><span>${r.width + 1} bytes per line</span>${others}</div>` +
+    html = `<div class="head"><b>${esc(path)}</b><span>${esc(r.model)} from ${esc(r.from_file)}</span><span>${count}</span>${pager}${size}` +
+      `<span>${r.width + 1} bytes per line · ${(r.bytes / 1048576).toFixed(1)} MB</span>${others}</div>` +
       `<table><tr><th></th>${head}</tr>${body}</table>`;
   }
   box.innerHTML = html;
+  box.querySelectorAll('.pager button').forEach((b) => b.onclick = () => showTable(path, true, +b.dataset.go));
+  $('tablePage').onchange = (e) => { tablePage = +e.target.value; showTable(path, true, Math.floor(first / tablePage) * tablePage); };
   if (!quiet) showTab('table');
 }
 async function open(path, line, col) {
@@ -352,10 +391,10 @@ async function open(path, line, col) {
     if (editable && current && editor.getValue() !== savedText && !confirm(`Discard the changes to ${current}?`)) return false;
     const r = await api('/api/file?path=' + encodeURIComponent(path));
     if (r.error) { status(r.error, 'bad'); return false; }
-    current = path; editable = r.editable; savedText = r.content;
+    current = path; editable = r.editable; savedText = r.content; savedHash = r.hash;
     editor.setValue(r.content); editor.clearHistory(); editor.setOption('readOnly', !editable);
     $('current').textContent = path + (editable ? '' : '  (read only)'); $('current').classList.remove('dirty');
-    try { localStorage.setItem('nihil-ide-file', path); } catch (e) {}
+    try { localStorage.setItem('nihil-ide-file:' + project, path); } catch (e) {}
     loadFiles();
   }
   if (line) { editor.setCursor({ line: line - 1, ch: Math.max(0, col - 1) }); editor.scrollIntoView(null, 120); }
@@ -365,12 +404,24 @@ async function open(path, line, col) {
 async function save() {
   if (!current || !editable) return true;
   const text = editor.getValue();
-  const r = await api('/api/file', { path: current, content: text });
+  let r = await api('/api/file', { path: current, content: text, base: savedHash });
+  if (r.conflict) {                                    // the file changed on disk since it was opened
+    if (!confirm(`${current} changed on disk since you opened it (another editor or program saved it).\n\n` +
+                 `OK: overwrite it with what is in the editor.\nCancel: keep the file on disk (open it again to see it).`)) {
+      status(`Not saved: ${current} changed on disk`, 'bad'); return false;
+    }
+    r = await api('/api/file', { path: current, content: text, force: true });
+  }
   if (r.error) { status(r.error, 'bad'); return false; }
-  savedText = text; $('current').classList.remove('dirty'); status('Saved ' + current);
+  savedText = text; savedHash = r.hash; $('current').classList.remove('dirty'); status('Saved ' + current);
   return true;
 }
-$('btnNew').onclick = () => { $('newDialog').showModal(); $('newName').select(); };
+$('btnNew').onclick = () => {
+  const inRepo = projects.length && project === projects[0].path;
+  $('newHint').textContent = inRepo ? 'New file (inside ide/workspace/ or examples/):' : 'New file (a path inside the project):';
+  $('newName').value = inRepo ? 'ide/workspace/untitled.nihil' : 'untitled.nihil';
+  $('newDialog').showModal(); $('newName').select();
+};
 $('newDialog').addEventListener('close', async () => {
   if ($('newDialog').returnValue !== 'ok') return;
   let p = $('newName').value.trim(); if (!p.endsWith('.nihil')) p += '.nihil';
@@ -427,23 +478,17 @@ async function run() {
   const live = setInterval(() => { if (stats.drawn > 1) status(`Running… ${stats.drawn} frames drawn, ${stats.skipped} skipped (${renderer}, buffer ${Math.round(playDelay)} ms)`); }, 500);
   const t0 = performance.now();
   try {
-    const resp = await fetch('/api/stream?id=' + r.run);
-    const reader = resp.body.getReader();
-    let buf = new Uint8Array(0), code = null;
-    const dec = new TextDecoder(), decErr = new TextDecoder();
+    // the output, asked for every 50 ms: what the program wrote since the last time, with the
+    // time it was read (the playout buffer keeps the pace); the exit code once it ended
+    let o = 0, e = 0, code = null;
     while (code === null) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      const nb = new Uint8Array(buf.length + value.length); nb.set(buf); nb.set(value, buf.length); buf = nb;
-      while (buf.length >= 9) {
-        const u32 = (i) => (buf[i] << 24 | buf[i + 1] << 16 | buf[i + 2] << 8 | buf[i + 3]) >>> 0;
-        const len = u32(1), ms = u32(5);
-        if (buf.length < 9 + len) break;
-        const kind = buf[0], data = buf.slice(9, 9 + len); buf = buf.slice(9 + len);
-        if (kind === 1) schedule(ms, dec.decode(data, { stream: true }));
-        else if (kind === 2) schedule(ms, '\x1b[31m' + decErr.decode(data, { stream: true }) + '\x1b[0m');
-        else code = parseInt(new TextDecoder().decode(data), 10);
-      }
+      const p = await api(`/api/output?id=${r.run}&out=${o}&err=${e}`);
+      if (p.error) throw new Error(p.error);
+      o += p.out_bytes; e += p.err_bytes;
+      if (p.out) schedule(p.ms, p.out);
+      if (p.err) schedule(p.ms, '\x1b[31m' + p.err + '\x1b[0m');
+      if (p.code !== null && !p.out && !p.err) code = p.code;
+      else if (!p.out && !p.err) await new Promise((ok) => setTimeout(ok, 50));
     }
     if (code < 0) { playQueue = []; } else { await drainPlayout(); }
     await flushOutput();
@@ -496,12 +541,50 @@ addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); save(); }
 });
 
-(async () => {
+// ---------------------------------------------------------------- projects
+async function loadProjects(want) {
+  const r = await api('/api/projects');
+  projects = r.projects || [];
+  const sel = $('project'); sel.innerHTML = '';
+  for (const p of projects) {
+    const o = document.createElement('option'); o.value = p.path; o.title = p.path;
+    o.textContent = p.name + (p.ok ? '' : ' (missing)'); sel.appendChild(o);
+  }
+  project = projects.some((p) => p.path === want) ? want : (projects[0] || {}).path;
+  sel.value = project;
+}
+async function switchProject(path, target) {
+  if (editable && current && editor.getValue() !== savedText && !confirm(`Discard the changes to ${current}?`)) { $('project').value = project; return; }
+  project = path; $('project').value = path;
+  try { localStorage.setItem('nihil-ide-project', project); } catch (e) {}
+  current = null; savedText = ''; savedHash = null; editor.setValue(''); clearMarks();
+  tableOpen = null; $('table').innerHTML = '<div class="empty">Click a table on the left to see its records.</div>';
   const files = await loadFiles();
-  let last = null; try { last = localStorage.getItem('nihil-ide-file'); } catch (e) {}
+  let last = null; try { last = localStorage.getItem('nihil-ide-file:' + project); } catch (e) {}
+  const first = files.includes(target) ? target : files.includes(last) ? last
+    : files.includes('ide/workspace/hello.nihil') ? 'ide/workspace/hello.nihil' : files[0];
+  if (first) await open(first);
+  else { $('current').textContent = ''; editor.setOption('readOnly', true); }
+  status('Project: ' + ((projects.find((p) => p.path === project) || {}).name || project));
+}
+$('project').onchange = (e) => switchProject(e.target.value);
+$('btnProject').onclick = () => {
+  $('projPath').value = project && projects.length && project !== projects[0].path ? project : '';
+  $('projCreate').checked = false; $('projDialog').showModal(); $('projPath').focus();
+};
+$('projDialog').addEventListener('close', async () => {
+  if ($('projDialog').returnValue !== 'ok') return;
+  const path = $('projPath').value.trim().replace(/\/+$/, '');
+  const r = await api('/api/projects', { path, create: $('projCreate').checked });
+  if (r.error) return status(r.error, 'bad');
+  await loadProjects(path); switchProject(path);
+});
+
+(async () => {
+  let saved = null; try { saved = localStorage.getItem('nihil-ide-project'); } catch (e) {}
+  await loadProjects(saved);
   const want = new URLSearchParams(location.hash.slice(1));    // #open=path, #run=path, #table=path.dat
-  const target = want.get('run') || want.get('open');
-  await open(files.includes(target) ? target : files.includes(last) ? last : (files.includes('ide/workspace/hello.nihil') ? 'ide/workspace/hello.nihil' : files[0]));
+  await switchProject(project, want.get('run') || want.get('open'));
   if (want.get('run')) run();
   if (want.get('table')) showTable(want.get('table'));
 })();

@@ -1,4 +1,4 @@
-# Nihil — Language Specification (v3.7)
+# Nihil — Language Specification (v3.8)
 
 > **Nihil**: an imperative, minimalist language compiled straight to x86_64 machine
 > code, with no libc, no linker and no VM. The name is Latin for
@@ -1138,7 +1138,7 @@ planograms is read and walked in about 0.1 s (about 90 MB/s).
 A name the type does not have is a compile error that lists the ones it has:
 
 ```text
-nihilc: f.nihil:2:7: STRING has no method 'size': it has find, contains, starts_with, ends_with, slice, split, replace, trim, upper, lower, repeat, int, float, json, …
+nihilc: f.nihil:2:7: STRING has no method 'length': it has find, contains, starts_with, ends_with, slice, split, replace, trim, upper, lower, repeat, int, float, json, …
 ```
 
 The library is written in Nihil, in the prelude (§18), as methods named
@@ -1224,6 +1224,55 @@ The runtime has five routines (`socket`/`bind`/`listen`, `accept4`, `read`,
 `sendto` with `MSG_NOSIGNAL`, `close`); HTTP is prelude code. There is no TLS:
 for the internet, put the server behind a proxy that has it.
 
+## 24. Directories and processes (stage 1)
+
+Paths are STRINGs, and a command is an ARRAY of STRING (the program and its
+arguments); the calls are library methods (§21), so no name is reserved. Like
+the rest of the library, a call that can fail gives an optional or a `BOOL`.
+
+```text
+"out/2026".make_dir();                           // makes it, and the folders above it
+names? = "data".list();                          // ARRAY of STRING?: sorted, without . and ..
+"data/sales.dat".is_file() { … }
+n? = "data/sales.dat".size();                    // INT?: bytes
+tail? = "run.log".read_from(1000);               // STRING?: from byte 1000 to the end
+page? = "data/sales.dat".read_from(80 * 100, 80 * 50);   // or at most n bytes
+
+code? = ["zstd", "-d", "-f", "big.dat.zst"].run();       // runs it and waits: its exit code
+p? = ["sort", "-u"].start("sorted.txt", "", "work");     // its output to sorted.txt; it runs inside "work"
+sorter = p || -1;
+sorter.write("b\na\nb\n");                        // its input
+sorter.close_input();
+>> sorter.wait();                                // 0
+```
+
+| Call | Result |
+|---|---|
+| `path.list()` | `ARRAY of STRING?`: the names in the directory, sorted, without `.` and `..`; `_` if it cannot be opened |
+| `path.is_dir()`, `path.is_file()` | `BOOL` |
+| `path.make_dir()` | `BOOL`: the directory exists at the end (the missing ones above it are made too) |
+| `path.remove()` | `BOOL`: the file was removed |
+| `path.size()` | `INT?`: the size of the file in bytes |
+| `path.read_from(at)`, `path.read_from(at, n)` | `STRING?`: the bytes from position `at`, to the end or at most `n`; `""` if there are none there. To follow a file that grows, or read one part of a big one |
+| `cmd.start(out, err, dir)` | `INT?`: starts the program `cmd[0]` (looked up in `PATH` without a `/`) with the arguments `cmd[1 …]`; its output goes to the file `out` and its errors to `err` (`""` keeps this program's), and it runs in the directory `dir` (`""` keeps this one); `out` and `err` are opened here, relative to this program, before the child moves to `dir`; `_` if it could not start |
+| `cmd.run()` | `INT?`: starts it with this program's output, waits, and gives its exit code |
+| `p.write(text)` | `BOOL`: all of `text` went to the process's input (`false`: it closed it) |
+| `p.close_input()` | the process sees the end of its input |
+| `p.done()` | `INT?`: the exit code if it has finished (given once), `_` while it runs |
+| `p.wait()` | `INT`: waits for it to finish; its exit code (`-1` if it was already seen) |
+| `p.kill()` | `BOOL`: the process was told to stop at once |
+
+An exit code is the program's own, or `128 +` the signal that ended it (`137`
+for `kill`). The process's input is a pipe; a child that closes it does not stop
+this program. Nothing else leaks into the child: every other file it would
+inherit is closed first.
+
+**Implementation.** The runtime has one routine, `rt_syscall` (the kernel call
+with up to six arguments, for the prelude only); `openat`, `getdents64`,
+`newfstatat`, `mkdir`, `unlinkat`, `pread64`, `pipe2`, `fork`, `dup2`,
+`chdir`, `close_range`, `execve`, `wait4` and `kill` are prelude code on top of
+it. The IDE server (`ide/server.nihil`) is written with them and §23.
+
 ## Appendix A — What changed since v1.0, and why
 
 | Change | Reason |
@@ -1265,6 +1314,7 @@ for the internet, put the server behind a proxy that has it.
 | **v1.9:** saved registers learned between passes | The prologue comes before the body; using the count from the previous pass avoids saving registers for nothing |
 | **v2.1:** `... ms;` waits | Animations need a fixed speed; a busy loop depends on the machine. The ellipsis reads as a pause and cannot start any valid expression |
 | **v2.2:** renamed from Ket to Nihil | Latin for *nothing*: no keywords, and `_` for the missing value |
+| **v3.8:** directories and processes: `path.list()`, `is_dir`, `is_file`, `make_dir`, `remove`, `size`, `read_from`; `cmd.start(out, err, dir)`, `run`; `p.write`, `close_input`, `done`, `wait`, `kill` | Tools around the language (the IDE, data collection) needed to list folders and run programs. One kernel-call routine in the runtime and the rest in the prelude keeps the assembly small and the library testable; the IDE server moved from Python to Nihil |
 | **v3.7:** `contains`, `starts_with`, `ends_with` on STRING, ARRAY and MAP (the old `has`, `starts`, `ends` kept as synonyms); `upper`/`lower` change the Latin-1 letters too; the network gives `_` or `false` instead of `-errno`; faster reading: text → FLOAT by Clinger's fast path, native copies and JSON scanning, `@` of files with no size (`/proc`, pipes) | Names that other languages' libraries use, one way to report a failure across the library (optionals, not error codes), and upper case that works for Portuguese, Spanish, French and German text. Reading tables of decimals went from 14 to about 100 MB/s and JSON from 23 to 90 MB/s: the exact big-integer conversion stays for the rare numbers with more than 15 digits or a power of ten beyond 22 |
 | **v3.6:** a TCP server and HTTP: `port.listen()`, `accept`, `receive`, `respond`, `http_path`, `http_param` | Serving analyses as JSON from one place, instead of one generated page per analysis. Calls on INT keep the language free of reserved words, as the library does |
 | **v3.5:** JSON as text: `s.json(key)`, `json_items`, `json_keys`, `json_values`, `json_text`, `json_quote` | Importing and serving data needs JSON. Keeping each value as its text needs no dynamic type: the compiler still knows every type, and the existing `.int()`/`.float()` convert numbers |

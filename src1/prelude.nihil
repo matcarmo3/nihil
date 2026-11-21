@@ -1851,3 +1851,265 @@ __nihil_s_url_decode(s = "") {
     }
     : __nihil_sub(__r, 0, __n);
 }
+
+// ---- directories and processes (SPEC §24) --------------------------------------------
+// On top of __nihil_syscall([n, a1 … a6]) (rt_syscall): the kernel calls are made here, in
+// Nihil. Paths go to the kernel with a 0 at the end (s + "\0"), kept in a local so the
+// collector sees them while the call runs.
+
+// the bytes 0 … 3 of b (little endian), for what the kernel writes into a buffer
+__nihil_u32_at(b = "", i = 0) {
+    : b[i] + b[i + 1] * 256 + b[i + 2] * 65536 + b[i + 3] * 16777216;
+}
+
+// path.list() → ARRAY of STRING?: the names in the directory, sorted, without . and ..;
+// _ if it cannot be opened
+__nihil_s_list(s = "") {
+    __p = s + "\0";
+    __fd = __nihil_syscall([257, -100, __nihil_addr(__p), 0x90000]);     // openat(O_DIRECTORY | O_CLOEXEC)
+    __fd < 0 { : _; }
+    __buf = __nihil_bytes(32768);
+    __names = ["" ; 64];
+    __n = 0;
+    __going = true;
+    * __going {
+        __got = __nihil_syscall([217, __fd, __nihil_addr(__buf), 32768]);   // getdents64
+        __got <= 0 { __going = false; } || {
+            __o = 0;
+            * __o < __got {
+                __len = __buf[__o + 16] + __buf[__o + 17] * 256;
+                __a = __o + 19;
+                __e = __a;
+                * __buf[__e] != 0 { __e = __e + 1; }
+                __nm = __nihil_sub(__buf, __a, __e);
+                __nm != "." && __nm != ".." {
+                    __n == #__names {
+                        __more = ["" ; __n * 2];
+                        __k = 0;
+                        * __k < __n { __more[__k] = __names[__k]; __k = __k + 1; }
+                        __names = __more;
+                    }
+                    __names[__n] = __nm;
+                    __n = __n + 1;
+                }
+                __o = __o + __len;
+            }
+        }
+    }
+    __nihil_syscall([3, __fd]);
+    __r = ["" ; __n];
+    __k = 0;
+    * __k < __n { __r[__k] = __names[__k]; __k = __k + 1; }
+    : __nihil_as_sort(__r);
+}
+
+// the type bits of what is at path (0 if nothing is there)
+__nihil_mode(s = "") {
+    __p = s + "\0";
+    __b = __nihil_bytes(144);                                            // struct stat
+    __nihil_syscall([262, -100, __nihil_addr(__p), __nihil_addr(__b), 0]) < 0 { : 0; }   // newfstatat
+    : __nihil_u32_at(__b, 24) & 0xF000;
+}
+
+__nihil_s_is_dir(s = "") {
+    : __nihil_mode(s) == 0x4000;
+}
+
+__nihil_s_is_file(s = "") {
+    : __nihil_mode(s) == 0x8000;
+}
+
+// path.make_dir() → BOOL: the directory exists at the end (the missing ones above are made too)
+__nihil_s_make_dir(s = "") {
+    __i = 1;
+    * __i <= #s {
+        __i == #s || s[__i] == '/' {
+            __p = __nihil_sub(s, 0, __i) + "\0";
+            __nihil_syscall([83, __nihil_addr(__p), 493]);                  // mkdir(…, 0755)
+        }
+        __i = __i + 1;
+    }
+    : __nihil_s_is_dir(s);
+}
+
+// path.remove() → BOOL: the file was removed
+__nihil_s_remove(s = "") {
+    __p = s + "\0";
+    : __nihil_syscall([263, -100, __nihil_addr(__p), 0]) == 0;          // unlinkat
+}
+
+// path.size() → INT?: the size of the file in bytes, or _ if there is none
+__nihil_s_size(s = "") {
+    __p = s + "\0";
+    __b = __nihil_bytes(144);                                            // struct stat
+    __nihil_syscall([262, -100, __nihil_addr(__p), __nihil_addr(__b), 0]) < 0 { : _; }
+    : __nihil_u32_at(__b, 48) + __nihil_u32_at(__b, 52) * 4294967296;    // st_size
+}
+
+// path.read_from(at), path.read_from(at, n) → STRING?: the bytes of the file from position
+// at, to the end or at most n ("" if there are none there); _ if it cannot be opened. For
+// following a file that keeps growing, or reading one part of a big one.
+__nihil_s_read_from(s = "", at = 0, most = -1) {
+    __p = s + "\0";
+    __fd = __nihil_syscall([257, -100, __nihil_addr(__p), 0x80000]);   // openat(O_RDONLY | O_CLOEXEC)
+    __fd < 0 { : _; }
+    __size = __nihil_syscall([8, __fd, 0, 2]);                           // lseek(SEEK_END)
+    __n = __size - at;
+    most >= 0 && __n > most { __n = most; }
+    __n <= 0 || at < 0 { __nihil_syscall([3, __fd]); : ""; }
+    __buf = __nihil_bytes(__n);
+    __got = __nihil_syscall([17, __fd, __nihil_addr(__buf), __n, at]);   // pread64
+    __nihil_syscall([3, __fd]);
+    __got < 0 { : _; }
+    __got < __n { : __nihil_sub(__buf, 0, __got); }
+    : __buf;
+}
+
+// the environment of this program ("NAME=value" each), as the kernel gave it
+__nihil_environ() {
+    __t? = @? "/proc/self/environ";
+    __parts = __nihil_s_split(__t || "", "\0");
+    __n = 0;
+    __k = 0;
+    * __k < #__parts { #__parts[__k] > 0 { __n = __n + 1; } __k = __k + 1; }
+    __r = ["" ; __n];
+    __n = 0;
+    __k = 0;
+    * __k < #__parts { #__parts[__k] > 0 { __r[__n] = __parts[__k]; __n = __n + 1; } __k = __k + 1; }
+    : __r;
+}
+
+// a program name without "/" → its path in PATH ("" if not found)
+__nihil_find_program(name = "", env = [""]) {
+    __path = "/usr/local/bin:/usr/bin:/bin";
+    __k = 0;
+    * __k < #env { __nihil_s_starts(env[__k], "PATH=") { __path = __nihil_sub(env[__k], 5, #env[__k]); } __k = __k + 1; }
+    __dirs = __nihil_s_split(__path, ":");
+    __k = 0;
+    * __k < #__dirs {
+        __c = __dirs[__k] + "/" + name;
+        __cz = __c + "\0";
+        #__dirs[__k] > 0 && __nihil_syscall([21, __nihil_addr(__cz), 1]) == 0 { : __c; }    // access(X_OK)
+        __k = __k + 1;
+    }
+    : "";
+}
+
+// opens a file for a child's output (created or emptied); -1 for "" (keep this program's)
+__nihil_open_out(path = "") {
+    #path == 0 { : -1; }
+    __p = path + "\0";
+    : __nihil_syscall([257, -100, __nihil_addr(__p), 0x80241, 420]);   // O_WRONLY|O_CREAT|O_TRUNC|O_CLOEXEC, 0644
+}
+
+// cmd.start(out, err, dir) → INT?: runs the program cmd[0] with the arguments cmd[1 …],
+// its output to the file out and its errors to the file err ("" keeps this program's), in
+// the directory dir ("" keeps this one). Its input is a pipe: p.write(t), p.close_input().
+// The INT names the process (pid × 65536 + the pipe); _ if it could not start.
+__nihil_as_start(cmd = [""], out = "", err = "", dir = "") {
+    #cmd == 0 { : _; }
+    __env = __nihil_environ();
+    __prog = cmd[0];
+    !__nihil_s_has(__prog, "/") { __prog = __nihil_find_program(__prog, __env); }
+    #__prog == 0 { : _; }
+    __progz = __prog + "\0";
+    __args = ["" ; #cmd];
+    __argv = [0 ; #cmd + 1];
+    __k = 0;
+    * __k < #cmd { __args[__k] = cmd[__k] + "\0"; __argv[__k] = __nihil_addr(__args[__k]); __k = __k + 1; }
+    __envz = ["" ; #__env];
+    __envp = [0 ; #__env + 1];
+    __k = 0;
+    * __k < #__env { __envz[__k] = __env[__k] + "\0"; __envp[__k] = __nihil_addr(__envz[__k]); __k = __k + 1; }
+    __dirz = dir + "\0";
+    __ofd = __nihil_open_out(out);
+    #out > 0 && __ofd < 0 { : _; }
+    __efd = __ofd;
+    err != out { __efd = __nihil_open_out(err); }
+    #err > 0 && __efd < 0 { __ofd >= 0 { __nihil_syscall([3, __ofd]); } : _; }
+    __pb = __nihil_bytes(8);
+    __nihil_syscall([293, __nihil_addr(__pb), 0x80000]) < 0 { : _; }     // pipe2(O_CLOEXEC)
+    __rd = __nihil_u32_at(__pb, 0);
+    __wr = __nihil_u32_at(__pb, 4);
+    __dfl = [0, 0, 0, 0];                                                 // sigaction: SIG_DFL
+    __ign = [1, 0, 0, 0];                                                 // SIG_IGN
+    ... 0;                                                                // the output so far goes out first
+    __pid = __nihil_syscall([57]);                                        // fork
+    __pid == 0 {
+        __nihil_syscall([33, __rd, 0]);                                   // dup2: the pipe is its input
+        __ofd >= 0 { __nihil_syscall([33, __ofd, 1]); }
+        __efd >= 0 { __nihil_syscall([33, __efd, 2]); }
+        #dir > 0 && __nihil_syscall([80, __nihil_addr(__dirz)]) < 0 { __nihil_syscall([231, 127]); }   // chdir
+        __nihil_syscall([13, 13, __nihil_addr(__dfl), 0, 8]);             // SIGPIPE back to the default
+        __nihil_syscall([436, 3, 4294967295, 0]);                         // close_range: nothing else leaks
+        __nihil_syscall([59, __nihil_addr(__progz), __nihil_addr(__argv), __nihil_addr(__envp)]);    // execve
+        __nihil_syscall([231, 127]);                                      // exit_group(127): could not run it
+    }
+    __nihil_syscall([3, __rd]);
+    __ofd >= 0 { __nihil_syscall([3, __ofd]); }
+    __efd >= 0 && __efd != __ofd { __nihil_syscall([3, __efd]); }
+    __pid < 0 { __nihil_syscall([3, __wr]); : _; }
+    __nihil_syscall([13, 13, __nihil_addr(__ign), 0, 8]);                 // a child that closes its input must not stop us
+    : __pid * 65536 + __wr;
+}
+
+// cmd.run() → INT?: runs it with this program's output and waits; its exit code (_ if it
+// could not start)
+__nihil_as_run(cmd = [""]) {
+    __p? = __nihil_as_start(cmd, "", "", "");
+    __p == _ { : _; }
+    __pp = __p || 0;
+    __nihil_i_close_input(__pp);
+    : __nihil_i_wait(__pp);
+}
+
+// p.write(text) → BOOL: all of text went to the process's input (false: it closed it)
+__nihil_i_write(p = 0, t = "") {
+    __fd = p % 65536;
+    __base = __nihil_addr(t);
+    __o = 0;
+    * __o < #t {
+        __r = __nihil_syscall([1, __fd, __base + __o, #t - __o]);
+        __r == -4 { __r = 0; }                                            // EINTR: again
+        __r < 0 { : false; }
+        __o = __o + __r;
+    }
+    : true;
+}
+
+// p.close_input(): the process sees the end of its input
+__nihil_i_close_input(p = 0) {
+    __nihil_syscall([3, p % 65536]);
+}
+
+// the exit code from a wait4 status: the code, or 128 + the signal that ended it
+__nihil_exit_code(st = 0) {
+    st & 0x7F == 0 { : (st >> 8) & 0xFF; }
+    : 128 + (st & 0x7F);
+}
+
+// p.done() → INT?: the exit code if the process has finished (given once), _ while it runs
+__nihil_i_done(p = 0) {
+    __b = __nihil_bytes(8);
+    __r = __nihil_syscall([61, p / 65536, __nihil_addr(__b), 1, 0]);    // wait4(WNOHANG)
+    __r != p / 65536 { : _; }
+    : __nihil_exit_code(__nihil_u32_at(__b, 0));
+}
+
+// p.wait() → INT: waits for the process to finish; its exit code (-1 if it was already seen)
+__nihil_i_wait(p = 0) {
+    __b = __nihil_bytes(8);
+    __out? = 0;
+    __out = _;
+    * __out == _ {
+        __r = __nihil_syscall([61, p / 65536, __nihil_addr(__b), 0, 0]);
+        __r == p / 65536 { __out = __nihil_exit_code(__nihil_u32_at(__b, 0)); }
+        || __r != -4 { __out = -1; }
+    }
+    : __out || -1;
+}
+
+// p.kill() → BOOL: the process was told to stop at once (SIGKILL)
+__nihil_i_kill(p = 0) {
+    : __nihil_syscall([62, p / 65536, 9]) == 0;
+}

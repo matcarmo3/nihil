@@ -57,6 +57,13 @@ lib_target(t = 0, s = 0, n = 0) {
         name_is(s, n, "http_param") { : "__nihil_s_http_param"; }
         name_is(s, n, "http_body") { : "__nihil_s_http_body"; }
         name_is(s, n, "url_decode") { : "__nihil_s_url_decode"; }
+        name_is(s, n, "list") { : "__nihil_s_list"; }              // paths (SPEC §24)
+        name_is(s, n, "is_dir") { : "__nihil_s_is_dir"; }
+        name_is(s, n, "is_file") { : "__nihil_s_is_file"; }
+        name_is(s, n, "make_dir") { : "__nihil_s_make_dir"; }
+        name_is(s, n, "remove") { : "__nihil_s_remove"; }
+        name_is(s, n, "read_from") { : "__nihil_s_read_from"; }
+        name_is(s, n, "size") { : "__nihil_s_size"; }
         : "";
     }
     t == TYPE_INT {                      // a port or a connection (SPEC §23)
@@ -67,6 +74,11 @@ lib_target(t = 0, s = 0, n = 0) {
         name_is(s, n, "send") { : "__nihil_i_send"; }
         name_is(s, n, "respond") { : "__nihil_i_respond"; }
         name_is(s, n, "close") { : "__nihil_i_close"; }
+        name_is(s, n, "write") { : "__nihil_i_write"; }            // a process (SPEC §24)
+        name_is(s, n, "close_input") { : "__nihil_i_close_input"; }
+        name_is(s, n, "done") { : "__nihil_i_done"; }
+        name_is(s, n, "wait") { : "__nihil_i_wait"; }
+        name_is(s, n, "kill") { : "__nihil_i_kill"; }
         : "";
     }
     t == TYPE_ARR | TYPE_INT {
@@ -98,6 +110,8 @@ lib_target(t = 0, s = 0, n = 0) {
         name_is(s, n, "has") { : "__nihil_as_has"; }        // older name, kept as a synonym
         name_is(s, n, "reverse") { : "__nihil_as_reverse"; }
         name_is(s, n, "join") { : "__nihil_as_join"; }
+        name_is(s, n, "start") { : "__nihil_as_start"; }          // a command (SPEC §24)
+        name_is(s, n, "run") { : "__nihil_as_run"; }
         : "";
     }
     : "";
@@ -109,13 +123,13 @@ lib_missing(t = 0, s = 0, n = 0) {
     t == TYPE_STR {
         put_str(" has no method '");
         put_source(s, n);
-        put_str("': it has find, contains, starts_with, ends_with, slice, split, replace, trim, upper, lower, repeat, int, float, json, json_items, json_keys, json_values, json_text, json_quote, http_method, http_path, http_param, http_body and url_decode");
+        put_str("': it has find, contains, starts_with, ends_with, slice, split, replace, trim, upper, lower, repeat, int, float, json, json_items, json_keys, json_values, json_text, json_quote, http_method, http_path, http_param, http_body, url_decode, list, is_dir, is_file, make_dir, remove, read_from and size");
         error_end();
     }
     t == TYPE_INT {
         put_str(" has no method '");
         put_source(s, n);
-        put_str("': it has listen, listen_all, accept, receive, send, respond and close (a port or a connection)");
+        put_str("': it has listen, listen_all, accept, receive, send, respond and close (a port or a connection), write, close_input, done, wait and kill (a process)");
         error_end();
     }
     t == TYPE_ARR | TYPE_INT || t == TYPE_ARR | TYPE_FLOAT {
@@ -127,7 +141,7 @@ lib_missing(t = 0, s = 0, n = 0) {
     t == TYPE_ARR | TYPE_STR {
         put_str(" has no method '");
         put_source(s, n);
-        put_str("': it has sort, find, contains, reverse and join");
+        put_str("': it has sort, find, contains, reverse, join, start and run");
         error_end();
     }
     put_str(" has no methods (the library works on STRING and on ARRAY of INT, FLOAT or STRING)");

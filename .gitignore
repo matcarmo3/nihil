@@ -5,3 +5,4 @@ __pycache__/
 ide/workspace/*.dat
 ide/workspace/*.txt
 *.nihil-idx
+ide/projects.txt

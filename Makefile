@@ -73,7 +73,13 @@ gcstress:
 	cp -r src src1 tests Makefile nihilc1.sh build/stress/
 	$(MAKE) -C build/stress NASMFLAGS="$(NASMFLAGS) -DGC_STRESS" test1 fixedpoint floatcheck
 
+# the IDE server, written in Nihil (SPEC §24): ./build/ide-server, then http://127.0.0.1:8730
+ide: build/ide-server
+
+build/ide-server: build/nihilc1 ide/server.nihil
+	./nihilc1.sh ide/server.nihil $@
+
 clean:
 	rm -rf build
 
-.PHONY: all test test1 test1-O0 compare fixedpoint floatcheck gcstress clean
+.PHONY: all test test1 test1-O0 compare fixedpoint floatcheck gcstress ide clean

@@ -1,0 +1,27 @@
+// directories and processes (SPEC §24)
+base = "build/dirs_test";
+>> $(base + "/a/b").make_dir() + " " + $(base + "/a").is_dir() + " " + $(base + "/a").is_file() + "\n";
+@>> base + "/a/notes.txt", "line one\n";
+@+>> base + "/a/notes.txt", "line two\n";
+names? = (base + "/a").list();
+>> (names || ["?"]).join(",") + "\n";
+>> $((base + "/missing").list() == _) + "\n";
+>> ((base + "/a/notes.txt").read_from(9) || "_") + "|" + ((base + "/a/notes.txt").read_from(99) || "_") + "|\n";
+>> $((base + "/a/notes.txt").size() || -1) + " " + ((base + "/a/notes.txt").read_from(5, 3) || "_") + " " + $((base + "/nothing").size() == _) + "\n";
+// a program with its output in a file, from another directory
+p? = ["sh", "-c", "pwd; echo error >&2; exit 3"].start(base + "/out.txt", base + "/err.txt", base + "/a");
+proc = p || 0;
+>> $proc.wait() + " " + $(@ (base + "/out.txt")).ends_with("/a\n") + " " + @ (base + "/err.txt");
+// its input: write, then close
+c? = ["cat"].start(base + "/cat.txt", "", "");
+cat = c || 0;
+>> $cat.write("abc ") + " " + $cat.write("def\n") + "\n";
+cat.close_input();
+>> $cat.wait() + " " + @ (base + "/cat.txt");
+// done() while it runs, then kill
+s? = ["sleep", "10"].start("", "", "");
+sl = s || 0;
+>> $(sl.done() == _) + " " + $sl.kill() + " " + $sl.wait() + "\n";
+// a program that does not exist, and run()
+>> $(["no-such-program-here"].start("", "", "") == _) + " " + $((["true"].run() || -9)) + " " + $((["false"].run() || -9)) + "\n";
+>> $(base + "/a/notes.txt").remove() + " " + $(base + "/a/notes.txt").is_file() + "\n";

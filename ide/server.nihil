@@ -1,0 +1,672 @@
+// =============================================================================
+// ide/server.nihil — the Nihil IDE server, written in Nihil (it replaces server.py).
+//
+//   make ide        (builds build/ide-server)      then   ./build/ide-server
+//
+// Open http://127.0.0.1:8730 (through an SSH tunnel from another machine). The server
+// keeps a list of projects (folders), lists their programs and tables, saves files,
+// compiles them with nihilc1 and runs them in the project's folder; the page polls
+// the output. It runs whatever code it is given: it only listens on 127.0.0.1.
+// =============================================================================
+
+PORT = 8730;
+MAX_RUN_MS = 600000;            // a program is stopped after 10 minutes
+ABANDONED_MS = 30000;           // … or when the page has not asked for its output for 30 s
+SKIP = ["build", "node_modules", "__pycache__", "venv", "gerado_antes"];
+
+ROOT = "";                      // the Nihil repository (the folder the server starts in)
+HOME = "";
+
+// ---- small helpers --------------------------------------------------------------------
+now_ms() {
+    up = (@ "/proc/uptime").split(" ");
+    : #((up[0].float() || 0.0) * 1000.0 + 0.5);
+}
+
+q(s = "") {
+    : s.json_quote();
+}
+
+// FNV-1a (32 bits) of the bytes: the page sends the one of the text it loaded, so a file
+// changed on disk since then is not overwritten without asking
+fnv(s = "") {
+    h = 2166136261;
+    i = 0;
+    * i < #s { h = ((h ^ s[i]) * 16777619) & 0xFFFFFFFF; i = i + 1; }
+    : h;
+}
+
+// the length of t without an incomplete UTF-8 character at its end (output read while the
+// program writes it may stop in the middle of one)
+utf8_whole(t = "") {
+    n = #t;
+    k = n - 1;
+    back = 0;
+    * k >= 0 && back < 4 && (t[k] & 0xC0) == 0x80 { k = k - 1; back = back + 1; }
+    k < 0 { : n; }
+    c = t[k];
+    need = 1;
+    (c & 0xE0) == 0xC0 { need = 2; }
+    (c & 0xF0) == 0xE0 { need = 3; }
+    (c & 0xF8) == 0xF0 { need = 4; }
+    n - k < need { : k; }
+    : n;
+}
+
+// a relative path the page may use: no "..", not absolute, not empty
+safe_rel(p = "") {
+    #p == 0 || p.starts_with("/") { : false; }
+    parts = p.split("/");
+    i = 0;
+    * i < #parts { parts[i] == ".." || parts[i] == "" { : false; } i = i + 1; }
+    : true;
+}
+
+base_name(p = "") {
+    parts = p.split("/");
+    : parts[#parts - 1];
+}
+
+// ---- projects -----------------------------------------------------------------------------
+PROJECTS_FILE = "";
+
+projects() {
+    t? = @? PROJECTS_FILE;
+    lines = (t || "").split("\n");
+    out = [ROOT];
+    i = 0;
+    * i < #lines {
+        l = lines[i].trim();
+        #l > 0 && l != ROOT && !out.contains(l) { out = out + [l]; }
+        i = i + 1;
+    }
+    : out;
+}
+
+projects_json() {
+    ps = projects();
+    parts = ["" ; #ps];
+    i = 0;
+    * i < #ps {
+        name = base_name(ps[i]);
+        ps[i] == ROOT { name = "nihil (the language)"; }
+        parts[i] = "{\"name\": " + q(name) + ", \"path\": " + q(ps[i]) + ", \"ok\": " + $ps[i].is_dir() + "}";
+        i = i + 1;
+    }
+    : "{\"projects\": [" + parts.join(", ") + "]}";
+}
+
+save_projects(ps = [""]) {
+    extra = ["" ; 0];
+    i = 0;
+    * i < #ps { ps[i] != ROOT { extra = extra + [ps[i]]; } i = i + 1; }
+    @>> PROJECTS_FILE, extra.join("\n") + "\n";
+}
+
+// the project a request names (one of the list), or ""
+project_of(p = "") {
+    ps = projects();
+    ps.contains(p) { : p; }
+    : "";
+}
+
+// ---- files of a project -------------------------------------------------------------------
+FILES = ["" ; 0];
+TABLES = ["" ; 0];
+
+// the folders that are listed and can be saved: the whole project, or for the language
+// repository only the workspace and the examples (its sources are not edited from here)
+roots_of(project = "") {
+    project == ROOT { : ["ide/workspace", "examples"]; }
+    : [""];
+}
+
+editable(project = "", rel = "") {
+    !safe_rel(rel) || !rel.ends_with(".nihil") || rel.starts_with("build/") { : false; }
+    project != ROOT { : true; }
+    : rel.starts_with("ide/workspace/") || rel.starts_with("examples/");
+}
+
+walk(project = "", rel = "", depth = 0) {
+    depth > 6 || #FILES + #TABLES > 5000 { :; }
+    dir = project;
+    #rel > 0 { dir = project + "/" + rel; }
+    names? = dir.list();
+    ns = names || ["" ; 0];
+    i = 0;
+    * i < #ns {
+        n = ns[i];
+        r = n;
+        #rel > 0 { r = rel + "/" + n; }
+        !n.starts_with(".") && !SKIP.contains(n) {
+            (project + "/" + r).is_dir() { walk(project, r, depth + 1); }
+            || n.ends_with(".nihil") { FILES = FILES + [r]; }
+            || n.ends_with(".dat") { TABLES = TABLES + [r]; }
+        }
+        i = i + 1;
+    }
+}
+
+files_json(project = "") {
+    FILES = ["" ; 0];
+    TABLES = ["" ; 0];
+    rs = roots_of(project);
+    i = 0;
+    * i < #rs { walk(project, rs[i], 0); i = i + 1; }
+    f = ["" ; #FILES];
+    i = 0;
+    * i < #FILES { f[i] = q(FILES[i]); i = i + 1; }
+    t = ["" ; #TABLES];
+    i = 0;
+    * i < #TABLES { t[i] = q(TABLES[i]); i = i + 1; }
+    : "{\"files\": [" + f.join(", ") + "], \"tables\": [" + t.join(", ") + "]}";
+}
+
+// ---- tables: the data model that fits a .dat file ---------------------------------------------
+// A model is "NAME = @[field: TYPE(width); …];" in a program of the project. The one chosen
+// has the width of the file's lines, preferring a program that names the file.
+M_NAME = ["" ; 0];          // every model found: name, file, fields (as JSON), width, the text
+M_FILE = ["" ; 0];
+M_FIELDS = ["" ; 0];        // "name|TYPE|width|key;…"
+M_WIDTH = [0 ; 0];
+M_TEXT = ["" ; 0];
+
+ident_char(c = 0) {
+    : c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_';
+}
+
+// the text without // comments
+no_comments(t = "") {
+    ls = t.split("\n");
+    i = 0;
+    * i < #ls { c? = ls[i].find("//"); c != _ { ls[i] = ls[i].slice(0, c || 0); } i = i + 1; }
+    : ls.join("\n");
+}
+
+// "#key: INT(5)" → "key|INT|5|1"; "" if it is not a field
+field_spec(part = "") {
+    p = part.trim();
+    key = "0";
+    p.starts_with("#") { key = "1"; p = p.slice(1).trim(); }
+    colon? = p.find(":");
+    colon == _ { : ""; }
+    name = p.slice(0, colon || 0).trim();
+    rest = p.slice((colon || 0) + 1).trim();
+    #name == 0 { : ""; }
+    i = 0;
+    * i < #name { !ident_char(name[i]) { : ""; } i = i + 1; }
+    typ = rest;
+    width = 0;
+    paren? = rest.find("(");
+    paren != _ {
+        typ = rest.slice(0, paren || 0).trim();
+        close? = rest.find(")");
+        close == _ { : ""; }
+        width = rest.slice((paren || 0) + 1, close || 0).trim().int() || 0;
+    }
+    typ != "INT" && typ != "STRING" && typ != "FLOAT" && typ != "BOOL" { : ""; }
+    typ == "BOOL" { width = 1; }
+    : name + "|" + typ + "|" + $width + "|" + key;
+}
+
+find_models(project = "") {
+    M_NAME = ["" ; 0]; M_FILE = ["" ; 0]; M_FIELDS = ["" ; 0]; M_WIDTH = [0 ; 0]; M_TEXT = ["" ; 0];
+    FILES = ["" ; 0];
+    TABLES = ["" ; 0];
+    rs = roots_of(project);
+    i = 0;
+    * i < #rs { walk(project, rs[i], 0); i = i + 1; }
+    fi = 0;
+    * fi < #FILES {
+        text? = @? (project + "/" + FILES[fi]);
+        clean = no_comments(text || "");
+        at = 0;
+        going = true;
+        * going {
+            m? = clean.find("@[", at);
+            m == _ { going = false; } || {
+                mp = m || 0;
+                // backwards: "=" and the name, at the start of a line
+                k = mp - 1;
+                * k >= 0 && (clean[k] == ' ' || clean[k] == 9) { k = k - 1; }
+                ok = k >= 0 && clean[k] == '=';
+                k = k - 1;
+                * ok && k >= 0 && (clean[k] == ' ' || clean[k] == 9) { k = k - 1; }
+                e = k + 1;
+                * ok && k >= 0 && ident_char(clean[k]) { k = k - 1; }
+                name = clean.slice(k + 1, e);
+                ok = ok && #name > 0;
+                j = k;
+                * ok && j >= 0 && (clean[j] == ' ' || clean[j] == 9) { j = j - 1; }
+                ok = ok && (j < 0 || clean[j] == 10);
+                close? = clean.find("]", mp);
+                ok && close != _ {
+                    cp = close || 0;
+                    after = cp + 1;
+                    * after < #clean && (clean[after] == ' ' || clean[after] == 9 || clean[after] == 10) { after = after + 1; }
+                    after < #clean && clean[after] == ';' {
+                        parts = clean.slice(mp + 2, cp).split(";");
+                        specs = ["" ; 0];
+                        width = 0;
+                        good = true;
+                        pi = 0;
+                        * pi < #parts {
+                            #parts[pi].trim() > 0 {
+                                sp = field_spec(parts[pi]);
+                                #sp == 0 { good = false; } || {
+                                    specs = specs + [sp];
+                                    width = width + (sp.split("|")[2].int() || 0);
+                                }
+                            }
+                            pi = pi + 1;
+                        }
+                        good && #specs > 0 {
+                            M_NAME = M_NAME + [name]; M_FILE = M_FILE + [FILES[fi]]; M_FIELDS = M_FIELDS + [specs.join(";")];
+                            M_WIDTH = M_WIDTH + [width]; M_TEXT = M_TEXT + [text || ""];
+                        }
+                    }
+                }
+                at = mp + 2;
+            }
+        }
+        fi = fi + 1;
+    }
+}
+
+// a page of a table: rows from … from + limit - 1. Only that part of the file is read: a
+// table has lines of one width, so line i starts at i × (width + 1) and the count comes
+// from the size. Big tables (hundreds of MB) open as fast as small ones.
+table_json(project = "", rel = "", from = 0, limit = 100) {
+    !safe_rel(rel) || !rel.ends_with(".dat") { : ""; }
+    full = project + "/" + rel;
+    sz? = full.size();
+    sz == _ { : ""; }
+    size = sz || 0;
+    limit < 1 { limit = 1; }
+    limit > 1000 { limit = 1000; }
+    from < 0 { from = 0; }
+    first = (full.read_from(0, 65536) || "");
+    nl? = first.find("\n");
+    width = -1;
+    nl != _ { width = nl || 0; } || size > 0 && size <= 65536 { width = size; }
+    find_models(project);
+    base = base_name(rel);
+    chosen = -1;
+    i = 0;
+    * i < #M_NAME {
+        width < 0 || M_WIDTH[i] == width {
+            chosen < 0 { chosen = i; } || !M_TEXT[chosen].contains(base) && M_TEXT[i].contains(base) { chosen = i; }
+        }
+        i = i + 1;
+    }
+    others = ["" ; 0];
+    i = 0;
+    * i < #M_NAME {
+        i != chosen && (width < 0 || M_WIDTH[i] == width) && (chosen < 0 || M_FIELDS[i] != M_FIELDS[chosen] || M_NAME[i] != M_NAME[chosen]) {
+            o = q(M_NAME[i] + " (" + M_FILE[i] + ")");
+            !others.contains(o) { others = others + [o]; }
+        }
+        i = i + 1;
+    }
+    // the count: whole lines of width + 1 bytes (the last one may lack its "\n")
+    total = 0;
+    width > 0 { total = (size + 1) / (width + 1); }
+    lines = ["" ; 0];
+    chosen >= 0 && width > 0 {
+        from >= total && total > 0 { from = ((total - 1) / limit) * limit; }
+        part = full.read_from(from * (width + 1), limit * (width + 1)) || "";
+        lines = part.split("\n");
+    } || {                                          // no model fits: the lines as they are
+        text = (full.read_from(0, 4194304) || "");
+        all = text.split("\n");
+        n = #all;
+        n > 0 && all[n - 1] == "" { n = n - 1; }
+        total = n;
+        from >= total && total > 0 { from = ((total - 1) / limit) * limit; }
+        k = from;
+        * k < n && k < from + limit { lines = lines + [all[k]]; k = k + 1; }
+    }
+    n = #lines;
+    n > 0 && lines[n - 1] == "" { n = n - 1; }
+    n > limit { n = limit; }
+    head = "{\"path\": " + q(rel) + ", \"bytes\": " + $size + ", \"total\": " + $total + ", \"width\": " + $width
+           + ", \"from\": " + $from + ", \"limit\": " + $limit + ", \"others\": [" + others.sort().join(", ") + "]";
+    chosen < 0 || width <= 0 {
+        raw = ["" ; n];
+        i = 0;
+        * i < n { raw[i] = q(lines[i]); i = i + 1; }
+        : head + ", \"raw\": [" + raw.join(", ") + "]}";
+    }
+    specs = M_FIELDS[chosen].split(";");
+    fields = ["" ; #specs];
+    types = ["" ; #specs];
+    widths = [0 ; #specs];
+    i = 0;
+    * i < #specs {
+        f = specs[i].split("|");
+        types[i] = f[1];
+        widths[i] = f[2].int() || 0;
+        fields[i] = "{\"name\": " + q(f[0]) + ", \"type\": " + q(f[1]) + ", \"key\": " + $(f[3] == "1") + ", \"width\": " + f[2] + "}";
+        i = i + 1;
+    }
+    rows = ["" ; n];
+    r = 0;
+    * r < n {
+        l = lines[r];
+        #l != M_WIDTH[chosen] { rows[r] = "{\"bad\": " + q(l) + "}"; }
+        || {
+            cells = ["" ; #specs];
+            pos = 0;
+            c = 0;
+            * c < #specs {
+                cell = l.slice(pos, pos + widths[c]);
+                pos = pos + widths[c];
+                types[c] == "STRING" {
+                    e = #cell;
+                    * e > 0 && cell[e - 1] == ' ' { e = e - 1; }
+                    cell = cell.slice(0, e);
+                } || { cell = cell.trim(); }
+                cells[c] = q(cell);
+                c = c + 1;
+            }
+            rows[r] = "{\"cells\": [" + cells.join(", ") + "]}";
+        }
+        r = r + 1;
+    }
+    : head + ", \"model\": " + q(M_NAME[chosen]) + ", \"from_file\": " + q(M_FILE[chosen]) + ", \"fields\": ["
+      + fields.join(", ") + "], \"rows\": [" + rows.join(", ") + "]}";
+}
+
+// ---- compiling ------------------------------------------------------------------------
+// "nihilc: f.nihil:3:7: message" → the parts; a line without a position keeps the file
+error_json(rel = "", l = "") {
+    t = l;
+    t.starts_with("nihilc: ") { t = t.slice(8); }
+    i = 0;
+    * i < #t {
+        t[i] == ':' {
+            j = i + 1;
+            * j < #t && t[j] >= '0' && t[j] <= '9' { j = j + 1; }
+            j > i + 1 && j < #t && t[j] == ':' {
+                k = j + 1;
+                * k < #t && t[k] >= '0' && t[k] <= '9' { k = k + 1; }
+                k > j + 1 && k + 1 < #t && t[k] == ':' && t[k + 1] == ' ' {
+                    : "{\"file\": " + q(t.slice(0, i)) + ", \"line\": " + t.slice(i + 1, j) + ", \"col\": " + t.slice(j + 1, k)
+                      + ", \"message\": " + q(t.slice(k + 2)) + "}";
+                }
+            }
+        }
+        i = i + 1;
+    }
+    : "{\"file\": " + q(rel) + ", \"line\": 0, \"col\": 0, \"message\": " + q(t) + "}";
+}
+
+COMPILE_MS = 0;
+COMPILE_ERRORS = "";        // a JSON array
+
+// compiles project/rel into bin; true if it worked
+compile(project = "", rel = "", bin = "", optimize = true, base = "") {
+    t0 = now_ms();
+    cmd = [ROOT + "/nihilc1.sh", rel, bin];
+    !optimize { cmd = ["env", "NIHIL_O0=1"] + cmd; }
+    p? = cmd.start(base + ".cout", base + ".cerr", project);
+    code = -1;
+    p != _ { pr = p || 0; pr.close_input(); code = pr.wait(); }
+    COMPILE_MS = now_ms() - t0;
+    errs? = @? (base + ".cerr");
+    ls = (errs || "").split("\n");
+    parts = ["" ; 0];
+    i = 0;
+    * i < #ls { #ls[i].trim() > 0 { parts = parts + [error_json(rel, ls[i])]; } i = i + 1; }
+    p == _ { parts = parts + [error_json(rel, "could not start the compiler")]; }
+    COMPILE_ERRORS = "[" + parts.join(", ") + "]";
+    (base + ".cout").remove();
+    (base + ".cerr").remove();
+    : code == 0;
+}
+
+// ---- running ------------------------------------------------------------------------------
+NEXT_RUN = 1;
+RUN_PROC = {0: 0 ; 64};         // run → the process
+RUN_BASE = {0: "" ; 64};        // run → /tmp/nihil-ide-N (.bin .out .err)
+RUN_T0 = {0: 0 ; 64};
+RUN_SEEN = {0: 0 ; 64};         // the last time the page asked for its output
+RUN_CODE = {0: 0 ; 64};         // the exit code, once it finished
+RUN_STOPPED = {0: false ; 64};
+
+finish_run(id = 0) {
+    b = RUN_BASE[id] || "";
+    (b + ".bin").remove(); (b + ".out").remove(); (b + ".err").remove();
+    RUN_PROC[id] = _; RUN_BASE[id] = _; RUN_T0[id] = _; RUN_SEEN[id] = _; RUN_CODE[id] = _; RUN_STOPPED[id] = _;
+}
+
+// programs past their time, or whose page went away, are stopped
+watch_runs() {
+    t = now_ms();
+    ids = RUN_PROC.keys();
+    i = 0;
+    * i < #ids {
+        id = ids[i];
+        RUN_CODE.contains(id) == false {
+            t - (RUN_T0[id] || t) > MAX_RUN_MS || t - (RUN_SEEN[id] || t) > ABANDONED_MS {
+                (RUN_PROC[id] || 0).kill();
+                RUN_STOPPED[id] = true;
+            }
+        }
+        t - (RUN_SEEN[id] || t) > ABANDONED_MS * 4 { (RUN_PROC[id] || 0).kill(); (RUN_PROC[id] || 0).done(); finish_run(id); }
+        i = i + 1;
+    }
+}
+
+run_json(project = "", body = "", asm = false) {
+    rel = (body.json("path") || "\"\"").json_text() || "";
+    optimize = (body.json("optimize") || "true") != "false";
+    !safe_rel(rel) || !(project + "/" + rel).is_file() { : "{\"ok\": false, \"errors\": [" + error_json(rel, "cannot compile " + rel) + "]}"; }
+    id = NEXT_RUN;
+    NEXT_RUN = NEXT_RUN + 1;
+    base = "/tmp/nihil-ide-" + $id;
+    bin = base + ".bin";
+    !compile(project, rel, bin, optimize, base) {
+        bin.remove();
+        : "{\"ok\": false, \"errors\": " + COMPILE_ERRORS + ", \"compile_ms\": " + $COMPILE_MS + "}";
+    }
+    size = #((bin.read_from(0)) || "");
+    asm {
+        p? = ["env", "LC_ALL=C", "objdump", "-D", "-b", "binary", "-mi386:x86-64", "-M", "intel", "--adjust-vma=0x400000",
+              "--start-address=0x4000b0", bin].start(base + ".asm", "", "");
+        p != _ { pr = p || 0; pr.close_input(); pr.wait(); }
+        dump? = @? (base + ".asm");
+        ls = (dump || "").split("\n");
+        keep = ["" ; 0];
+        i = 0;
+        * i < #ls {
+            l = ls[i];
+            k = 0;
+            * k < #l && l[k] == ' ' { k = k + 1; }
+            j = k;
+            * j < #l && (l[j] >= '0' && l[j] <= '9' || l[j] >= 'a' && l[j] <= 'f') { j = j + 1; }
+            k > 0 && j > k && j < #l && l[j] == ':' { keep = keep + [l]; }
+            i = i + 1;
+        }
+        (base + ".asm").remove();
+        bin.remove();
+        : "{\"ok\": true, \"asm\": " + q(keep.join("\n")) + ", \"size\": " + $size + ", \"compile_ms\": " + $COMPILE_MS + "}";
+    }
+    p? = [bin].start(base + ".out", base + ".err", project);
+    p == _ { bin.remove(); : "{\"ok\": false, \"errors\": [" + error_json(rel, "could not start the program") + "]}"; }
+    RUN_PROC[id] = p || 0;
+    RUN_BASE[id] = base;
+    RUN_T0[id] = now_ms();
+    RUN_SEEN[id] = now_ms();
+    : "{\"ok\": true, \"errors\": " + COMPILE_ERRORS + ", \"compile_ms\": " + $COMPILE_MS + ", \"size\": " + $size + ", \"run\": " + $id + "}";
+}
+
+// what the program wrote since the offsets the page has, and its exit code once it ended
+output_json(req = "") {
+    id = (req.http_param("id") || "0").int() || 0;
+    RUN_PROC.contains(id) == false { : ""; }
+    RUN_SEEN[id] = now_ms();
+    code = "null";
+    !RUN_CODE.contains(id) {
+        d? = (RUN_PROC[id] || 0).done();
+        d != _ { RUN_CODE[id] = d || 0; }
+    }
+    RUN_CODE.contains(id) {                     // ended: its files are complete
+        code = $(RUN_CODE[id] || 0);
+        RUN_STOPPED[id] || false { code = "-1"; }
+    }
+    b = RUN_BASE[id] || "";
+    out = (b + ".out").read_from((req.http_param("out") || "0").int() || 0) || "";
+    err = (b + ".err").read_from((req.http_param("err") || "0").int() || 0) || "";
+    out = out.slice(0, utf8_whole(out));
+    err = err.slice(0, utf8_whole(err));
+    j = "{\"out\": " + q(out) + ", \"err\": " + q(err) + ", \"out_bytes\": " + $#out + ", \"err_bytes\": " + $#err
+        + ", \"ms\": " + $(now_ms() - (RUN_T0[id] || 0)) + ", \"code\": " + code + "}";
+    code != "null" && #out == 0 && #err == 0 { finish_run(id); }
+    : j;
+}
+
+// ---- HTTP -------------------------------------------------------------------------------
+send_static(c = 0, name = "") {
+    ok = #name > 0 && !name.contains("..") && !name.contains("/");
+    t? = "";
+    ok { t = @? (ROOT + "/ide/static/" + name); }
+    !ok || t == _ { c.respond(404, "application/json", "{\"error\": \"not found\"}"); :; }
+    kind = "application/octet-stream";
+    name.ends_with(".html") { kind = "text/html; charset=utf-8"; }
+    name.ends_with(".js") { kind = "text/javascript; charset=utf-8"; }
+    name.ends_with(".css") { kind = "text/css; charset=utf-8"; }
+    name.ends_with(".png") { kind = "image/png"; }
+    c.respond(200, kind, t || "");
+}
+
+handle(c = 0, req = "") {
+    watch_runs();
+    method = req.http_method();
+    path = req.http_path();
+    body = req.http_body();
+    path == "/" || path == "/index.html" { send_static(c, "index.html"); :; }
+    path.starts_with("/static/") { send_static(c, path.slice(8)); :; }
+    path == "/api/projects" && method == "GET" { c.respond(200, "application/json", projects_json()); :; }
+    path == "/api/projects" {
+        p = ((body.json("path") || "\"\"").json_text() || "").trim();
+        * #p > 1 && p.ends_with("/") { p = p.slice(0, #p - 1); }
+        !p.starts_with(HOME + "/") || p.contains("/../") || p.ends_with("/..") {
+            c.respond(400, "application/json", "{\"error\": " + q("a project is a folder inside " + HOME) + "}"); :;
+        }
+        (body.json("create") || "false") == "true" { p.make_dir(); }
+        !p.is_dir() { c.respond(400, "application/json", "{\"error\": " + q("no folder " + p) + "}"); :; }
+        ps = projects();
+        !ps.contains(p) { save_projects(ps + [p]); }
+        c.respond(200, "application/json", projects_json());
+        :;
+    }
+    path == "/api/projects/remove" {
+        p = (body.json("path") || "\"\"").json_text() || "";
+        ps = projects();
+        keep = ["" ; 0];
+        i = 0;
+        * i < #ps { ps[i] != p { keep = keep + [ps[i]]; } i = i + 1; }
+        save_projects(keep);
+        c.respond(200, "application/json", projects_json());
+        :;
+    }
+    // the rest works inside a project
+    project = project_of(req.http_param("project") || "");
+    method == "POST" && #project == 0 { project = project_of((body.json("project") || "\"\"").json_text() || ""); }
+    path.starts_with("/api/") && #project == 0 && path != "/api/output" && path != "/api/stdin" && path != "/api/stop" {
+        c.respond(400, "application/json", "{\"error\": \"open a project first\"}"); :;
+    }
+    path == "/api/files" { c.respond(200, "application/json", files_json(project)); :; }
+    path == "/api/table" {
+        t = table_json(project, req.http_param("path") || "", (req.http_param("from") || "0").int() || 0,
+                       (req.http_param("limit") || "100").int() || 100);
+        #t == 0 { c.respond(404, "application/json", "{\"error\": \"table not found\"}"); :; }
+        c.respond(200, "application/json", t);
+        :;
+    }
+    path == "/api/file" && method == "GET" {
+        rel = req.http_param("path") || "";
+        t? = "";
+        safe_rel(rel) { t = @? (project + "/" + rel); } || { t = _; }
+        t == _ { c.respond(404, "application/json", "{\"error\": \"file not found\"}"); :; }
+        c.respond(200, "application/json", "{\"path\": " + q(rel) + ", \"content\": " + q(t || "") + ", \"editable\": "
+            + $editable(project, rel) + ", \"hash\": " + $fnv(t || "") + "}");
+        :;
+    }
+    path == "/api/file" {
+        rel = (body.json("path") || "\"\"").json_text() || "";
+        !editable(project, rel) {
+            msg = "files can only be saved as .nihil inside the project";
+            project == ROOT { msg = "in the language repository, files are saved as .nihil in ide/workspace or examples"; }
+            c.respond(400, "application/json", "{\"error\": " + q(msg) + "}"); :;
+        }
+        full = project + "/" + rel;
+        content = (body.json("content") || "\"\"").json_text() || "";
+        base? = body.json("base");
+        force = (body.json("force") || "false") == "true";
+        old? = @? full;
+        !force && base != _ && old != _ && ((base || "").int() || -1) != fnv(old || "") {
+            c.respond(409, "application/json", "{\"conflict\": true, \"error\": " + q(rel + " changed on disk since it was opened") + "}"); :;
+        }
+        last = 0;
+        i = 0;
+        * i < #full { full[i] == '/' { last = i; } i = i + 1; }
+        full.slice(0, last).make_dir();
+        @>> full, content;
+        c.respond(200, "application/json", "{\"ok\": true, \"path\": " + q(rel) + ", \"hash\": " + $fnv(content) + "}");
+        :;
+    }
+    path == "/api/run" || path == "/api/asm" { c.respond(200, "application/json", run_json(project, body, path == "/api/asm")); :; }
+    path == "/api/output" {
+        j = output_json(req);
+        #j == 0 { c.respond(404, "application/json", "{\"error\": \"no such run\"}"); :; }
+        c.respond(200, "application/json", j);
+        :;
+    }
+    path == "/api/stdin" {
+        id = ((body.json("id") || "0").int()) || 0;
+        RUN_PROC.contains(id) && !RUN_CODE.contains(id) {
+            data = (body.json("data") || "\"\"").json_text() || "";
+            #data > 0 { (RUN_PROC[id] || 0).write(data); }
+            (body.json("eof") || "false") == "true" { (RUN_PROC[id] || 0).close_input(); }
+        }
+        c.respond(200, "application/json", "{\"ok\": true}");
+        :;
+    }
+    path == "/api/stop" {
+        id = ((body.json("id") || "0").int()) || 0;
+        RUN_PROC.contains(id) && !RUN_CODE.contains(id) { (RUN_PROC[id] || 0).kill(); RUN_STOPPED[id] = true; }
+        c.respond(200, "application/json", "{\"ok\": true}");
+        :;
+    }
+    c.respond(404, "application/json", "{\"error\": \"not found\"}");
+}
+
+main() {
+    env = (@ "/proc/self/environ").split("\0");
+    i = 0;
+    * i < #env {
+        env[i].starts_with("PWD=") { ROOT = env[i].slice(4); }
+        env[i].starts_with("HOME=") { HOME = env[i].slice(5); }
+        env[i].starts_with("NIHIL_IDE_PORT=") { PORT = env[i].slice(15).int() || PORT; }
+        i = i + 1;
+    }
+    !(ROOT + "/nihilc1.sh").is_file() { !>> "nihil ide: start it in the Nihil repository (no nihilc1.sh in " + ROOT + ")\n"; :: 1; }
+    PROJECTS_FILE = ROOT + "/ide/projects.txt";
+    (ROOT + "/ide/workspace").make_dir();
+    s? = PORT.listen();
+    s == _ { !>> "nihil ide: port " + $PORT + " is taken\n"; :: 1; }
+    srv = s || -1;
+    >> "Nihil IDE on http://127.0.0.1:" + $PORT + "  (repository: " + ROOT + ")\n";
+    * true {
+        a? = srv.accept();
+        c = a || -1;
+        r? = "";
+        c >= 0 { r = c.receive(); }
+        c >= 0 && r == _ { c.close(); }
+        c >= 0 && r != _ { handle(c, r || ""); }
+    }
+}
+
+main();

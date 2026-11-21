@@ -125,11 +125,10 @@ program.
 
 ## The IDE
 
-`ide/` is a small web IDE written with the Python standard library, so there is
-nothing to install:
+`ide/` is a small web IDE whose server is written in Nihil (`ide/server.nihil`):
 
 ```sh
-python3 ide/server.py --host 127.0.0.1     # then open http://127.0.0.1:8730
+make ide && ./build/ide-server             # then open http://127.0.0.1:8730
 ```
 
 <p align="center"><img src="assets/ide.png" width="800" alt="The Nihil IDE: the editor with a program that queries a table, and the Table tab showing a file of records in columns"></p>
@@ -137,9 +136,14 @@ python3 ide/server.py --host 127.0.0.1     # then open http://127.0.0.1:8730
 It has an editor with Nihil highlighting and a color terminal for the
 program's output and input. Compile errors are marked in the code, and the
 generated machine code is one click away. The **Table** tab shows any `.dat`
-file in columns, using the data model that describes it. Files live in
-`ide/workspace/` and `examples/`. **The server runs any code it receives:** keep
-it on `127.0.0.1`, or use it only on a network you trust.
+file in columns, using the data model that describes it, a page at a time (the
+server reads only the lines shown, so tables of hundreds of MB open at once).
+**Projects:** any folder in your home directory can be opened as a project; its
+programs and tables are listed, and programs run inside it. The language
+repository itself is the first project (files in `ide/workspace/` and
+`examples/`). Saving a file that changed on disk since it was opened asks first.
+**The server runs any code it receives:** it listens only on `127.0.0.1`; reach
+it from another machine through an SSH tunnel.
 
 ## How it works
 
