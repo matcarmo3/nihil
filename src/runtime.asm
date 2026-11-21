@@ -66,6 +66,7 @@ t_sub:          jmp strict near rt_sub             ; RT_SUB
 t_put:          jmp strict near rt_put             ; RT_PUT
 t_rec_parse:    jmp strict near rt_rec_parse       ; RT_REC_PARSE
 t_lines:        jmp strict near rt_lines           ; RT_LINES
+t_net_connect:  jmp strict near rt_net_connect     ; RT_NET_CONNECT
 
 ; ---- arithmetic -------------------------------------------------------------
 ; Division truncated toward zero (as in C). MIN / -1 gives MIN (idiv
@@ -197,6 +198,54 @@ rt_net_listen:
     pop rbx
     ret
 
+; rt_net_connect: rax = IPv4 address (a << 24 | b << 16 | c << 8 | d), rcx = port
+;   → rax = a socket connected to it, or -errno (SPEC §23: the client side)
+rt_net_connect:
+    push rbx
+    push r12
+    sub rsp, 24
+    mov r12, rax                    ; address
+    mov rbx, rcx                    ; port
+    mov eax, 41                     ; socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0)
+    mov edi, 2
+    mov esi, 1 | 0x80000
+    xor edx, edx
+    syscall
+    test rax, rax
+    js .end
+    mov [rsp + 16], rax             ; the socket
+    mov word [rsp], 2               ; sockaddr_in: AF_INET,
+    mov eax, ebx
+    xchg al, ah                     ; the port in network order,
+    mov [rsp + 2], ax
+    mov eax, r12d
+    bswap eax                       ; the address in network order
+    mov [rsp + 4], eax
+    mov qword [rsp + 8], 0
+.again:
+    mov eax, 42                     ; connect(fd, &addr, 16)
+    mov rdi, [rsp + 16]
+    mov rsi, rsp
+    mov edx, 16
+    syscall
+    cmp rax, -4                     ; -EINTR: again
+    je .again
+    test rax, rax
+    js .fail
+    mov rax, [rsp + 16]
+    jmp .end
+.fail:
+    push rax
+    mov eax, 3                      ; close the socket
+    mov rdi, [rsp + 24]
+    syscall
+    pop rax
+.end:
+    add rsp, 24
+    pop r12
+    pop rbx
+    ret
+
 ; rt_net_accept: rax = listening socket → rax = the connection, or -errno. The pending
 ; output is written first, so what the program printed shows up while it waits.
 rt_net_accept:
@@ -212,6 +261,22 @@ rt_net_accept:
     syscall
     cmp rax, -4                     ; -EINTR: again
     je .again
+    test rax, rax
+    js .done
+    push rax                        ; a connection that sends nothing must not hold the server
+    sub rsp, 16                     ; (it serves one at a time): reads give up after 15 s
+    mov qword [rsp], 15             ; struct timeval: seconds,
+    mov qword [rsp + 8], 0          ; microseconds
+    mov rdi, rax
+    mov eax, 54                     ; setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, 16)
+    mov esi, 1
+    mov edx, 20
+    mov r10, rsp
+    mov r8d, 16
+    syscall
+    add rsp, 16
+    pop rax
+.done:
     pop rbx
     ret
 
@@ -929,8 +994,10 @@ rt_error:
 ; New memory is always zero: fresh pages come zeroed from the kernel, freed
 ; pages are given back with madvise(MADV_DONTNEED) (zero again when touched),
 ; and a reused small block is cleared before it is handed out. A large block
-; is scanned only where the kernel has memory for it (mincore): a big array
-; never written costs nothing, as before.
+; is scanned only on the pages that hold something (/proc/self/pagemap: present
+; or swapped): a big array never written costs nothing, as before. mincore is
+; not enough: it says 0 for a page in swap, and skipping that page freed the
+; blocks it pointed to. mincore stays the fallback when pagemap cannot be read.
 %define GC_PAGE_SHIFT 16
 %define GC_PAGE       (1 << GC_PAGE_SHIFT)
 %define GC_SMALL_MAX  32768
@@ -1271,35 +1338,15 @@ gc_init:
     pop rax
     ret
 
-; → rax = an address above every frame of the program's stack, or 0: the
-; file name the kernel put at the top of the stack (AT_EXECFN), from
-; prctl(PR_GET_AUXV); else the end of "[stack]" in /proc/self/maps
+; → rax = an address above every frame of the program's stack, or 0: the end of the mapping
+; of /proc/self/maps that holds the stack pointer. (AT_EXECFN, the file name the kernel puts at
+; the top of the stack, is not used: under Rosetta, which runs x86_64 programs on Apple silicon,
+; it points outside the program's stack.)
 gc_stack_top:
     push rbx
     push r12
-    sub rsp, 1024
-    mov eax, 157                    ; sys_prctl(PR_GET_AUXV, buffer, size)
-    mov edi, 0x41555856
-    mov rsi, rsp
-    mov edx, 1024
-    xor r10d, r10d
-    xor r8d, r8d
-    syscall
-    test rax, rax
-    jle .maps
-    mov rcx, rsp
-.aux:
-    mov rdx, [rcx]
-    test rdx, rdx                   ; AT_NULL
-    jz .maps
-    cmp rdx, 31                     ; AT_EXECFN
-    je .execfn
-    add rcx, 16
-    jmp .aux
-.execfn:
-    mov rax, [rcx + 8]
-    jmp .end
-.maps:
+    push r13
+    mov r13, rsp                    ; an address in the program's stack
     mov rsi, 1 << 20                ; the file, read into a temporary block
     call gc_mmap
     cmp rax, -4096
@@ -1334,46 +1381,53 @@ gc_stack_top:
     mov rdi, r12
     syscall
     pop rcx
-    xor eax, eax                    ; looking for "[stack]"
-    xor edx, edx                    ; start of the current line
-.scan:
-    lea rsi, [rax + 7]
-    cmp rsi, rcx
-    ja .not_found
-    cmp byte [rbx + rax], 10
-    jne .compare
-    lea rdx, [rax + 1]
-.compare:
-    cmp dword [rbx + rax], '[sta'
-    jne .next
-    cmp dword [rbx + rax + 3], 'ack]'
-    je .line
-.next:
-    inc rax
-    jmp .scan
-.line:                              ; "start-end …": the hexadecimal after '-'
+    xor edx, edx                    ; position: the start of a line "start-end perms …"
+.line:
+    cmp rdx, rcx
+    jae .not_found
+    call .hex                       ; rax = start
+    mov r10, rax
+    cmp rdx, rcx
+    jae .not_found
     cmp byte [rbx + rdx], '-'
-    je .hex
+    jne .skip
+    inc rdx
+    call .hex                       ; rax = end
+    cmp r13, r10
+    jb .skip
+    cmp r13, rax
+    jb .found                       ; start <= rsp < end: this mapping holds the stack
+.skip:                              ; to the next line
+    cmp rdx, rcx
+    jae .not_found
+    cmp byte [rbx + rdx], 10
+    je .next_line
+    inc rdx
+    jmp .skip
+.next_line:
     inc rdx
     jmp .line
-.hex:
-    inc rdx
+.hex:                               ; the hexadecimal at rdx → rax (rdx after it)
     xor eax, eax
 .digit:
-    movzx ecx, byte [rbx + rdx]
-    sub ecx, '0'
-    cmp ecx, 9
+    cmp rdx, rcx
+    jae .hex_end
+    movzx r8d, byte [rbx + rdx]
+    sub r8d, '0'
+    cmp r8d, 9
     jbe .add
-    sub ecx, 'a' - '0' - 10
-    cmp ecx, 10
-    jb .found
-    cmp ecx, 15
-    ja .found
+    sub r8d, 'a' - '0' - 10
+    cmp r8d, 10
+    jb .hex_end
+    cmp r8d, 15
+    ja .hex_end
 .add:
     shl rax, 4
-    add rax, rcx
+    add rax, r8
     inc rdx
     jmp .digit
+.hex_end:
+    ret
 .not_found:
     xor eax, eax
 .found:
@@ -1392,7 +1446,7 @@ gc_stack_top:
 .none:
     xor eax, eax
 .end:
-    add rsp, 1024
+    pop r13
     pop r12
     pop rbx
     ret
@@ -1415,6 +1469,16 @@ gc_collect:
     push r13
     push r14
     push r15
+    mov eax, 257                    ; sys_openat(AT_FDCWD, "/proc/self/pagemap", O_RDONLY | O_CLOEXEC)
+    mov rdi, -100
+    lea rsi, [rel s_pagemap]
+    mov edx, 0x80000
+    syscall
+    inc rax                         ; fd + 1; an error gives 0 or less
+    jg .pagemap
+    xor eax, eax
+.pagemap:
+    mov [GC_PAGEMAP], rax
     mov r14, [GC_HEAP_BASE]
     mov r13, [GC_BUMP]
     sub r13, r14                    ; bytes of the heap in use (pages handed out)
@@ -1443,6 +1507,14 @@ gc_collect:
     call gc_scan_resident
     jmp .drain
 .sweep:
+    mov rdi, [GC_PAGEMAP]
+    test rdi, rdi
+    jz .swept
+    dec rdi
+    mov eax, 3                      ; sys_close
+    syscall
+    mov qword [GC_PAGEMAP], 0
+.swept:
     call gc_sweep
     inc qword [GC_COUNT]
     mov qword [GC_ALLOCATED], 0
@@ -1533,14 +1605,71 @@ gc_scan:
     lea rsi, [rel s_without_memory]
     jmp rt_error
 
-; gc_scan of a large block [rsi, rdi), skipping the 4 KiB pages the kernel has
-; no memory for (never written: zero, so they hold no references)
+; gc_scan of a large block [rsi, rdi), skipping the 4 KiB pages that hold
+; nothing (never written: zero, so they hold no references). pagemap says it
+; page by page (bit 63 present, bit 62 swapped), read 1024 entries at a time
+; into the mincore buffer (16 KiB at least); mincore when pagemap is not open.
 gc_scan_resident:
     push rbx
     push rbp
     mov rbx, rsi
     and rbx, -4096                  ; first page
     mov rbp, rdi                    ; end
+    cmp qword [GC_PAGEMAP], 0
+    je .mincore
+.refill:
+    cmp rbx, rbp
+    jae .end
+    mov rdx, rbp
+    sub rdx, rbx
+    add rdx, 4095
+    shr rdx, 12                     ; pages left
+    cmp rdx, 1024
+    jbe .count
+    mov edx, 1024
+.count:
+    shl rdx, 3                      ; bytes of entries
+    mov r10, rbx
+    shr r10, 12 - 3                 ; the offset: page number × 8
+    mov rdi, [GC_PAGEMAP]
+    dec rdi
+    mov rsi, [GC_MINCORE]
+    mov eax, 17                     ; sys_pread64(fd, buffer, bytes, offset)
+    syscall
+    cmp rax, 8
+    jl .whole                       ; could not read it: the rest, all of it
+    shr rax, 3
+    mov r10, rax                    ; entries read
+    mov r11, [GC_MINCORE]
+.entry:
+    mov rax, [r11]
+    shr rax, 62                     ; present or swapped
+    jz .empty
+    mov rsi, rbx
+    lea rdi, [rbx + 4096]
+    cmp rdi, rbp
+    jbe .scan_page
+    mov rdi, rbp
+.scan_page:
+    push r10
+    push r11
+    call gc_scan
+    pop r11
+    pop r10
+.empty:
+    add rbx, 4096
+    add r11, 8
+    cmp rbx, rbp
+    jae .end
+    dec r10
+    jnz .entry
+    jmp .refill
+.whole:
+    mov rsi, rbx
+    mov rdi, rbp
+    call gc_scan
+    jmp .end
+.mincore:
     mov rsi, rdi
     sub rsi, rbx
     add rsi, 4095                   ; bytes, in whole pages
@@ -1912,6 +2041,16 @@ rt_read_file:
     mov rdi, rsp
     rep movsb
     mov byte [rdi], 0
+    mov rcx, [rax - 8]              ; a zero byte inside the path: the kernel would open
+    test rcx, rcx                   ; another file (the path cut at the zero)
+    jz .path_ok
+    push rax
+    mov rdi, rax
+    xor eax, eax
+    repne scasb
+    pop rax
+    je .fail
+.path_ok:
     mov eax, 257                    ; sys_openat
     mov rdi, -100                   ; AT_FDCWD
     mov rsi, rsp
@@ -2192,6 +2331,20 @@ rt_write_file:
     lea rdi, [rsp + WF_PATH]
     rep movsb
     mov byte [rdi], 0
+    mov rcx, rbx                    ; a zero byte inside the path (what was copied of it)
+    cmp rcx, WF_MAX_PATH
+    jbe .scan
+    mov ecx, WF_MAX_PATH
+.scan:
+    test rcx, rcx
+    jz .no_zero
+    lea rdi, [rsp + WF_PATH]
+    xor eax, eax
+    repne scasb
+    jne .no_zero
+    mov rax, -255                   ; not an errno: "the path has a zero byte"
+    jmp .report
+.no_zero:
     mov rax, -36                    ; ENAMETOOLONG
     cmp rbx, WF_MAX_PATH
     ja .report
@@ -2389,6 +2542,16 @@ rt_read_at:
     mov rdi, rsp
     rep movsb
     mov byte [rdi], 0
+    mov rcx, [rax - 8]              ; a zero byte inside the path: no such file
+    test rcx, rcx
+    jz .path_ok
+    push rax
+    mov rdi, rax
+    xor eax, eax
+    repne scasb
+    pop rax
+    je .no_file
+.path_ok:
     mov eax, 257                    ; sys_openat(AT_FDCWD, path, O_RDONLY)
     mov rdi, -100
     mov rsi, rsp
@@ -2515,6 +2678,7 @@ s_true:     db "true"
 s_absent:  db "_"
 s_false:    db "false"
 s_maps:       db "/proc/self/maps", 0
+s_pagemap:    db "/proc/self/pagemap", 0
 s_nihil:      db "nihil: "
 s_nihil_len   equ $ - s_nihil
 s_nl:       db 10
@@ -2552,6 +2716,7 @@ errno_reasons:
     REASON 30,  "read-only file system"
     REASON 36,  "the path is too long"
     REASON 122, "disk quota exceeded"
+    REASON 255, "the path has a zero byte"
     db 0
 
 ; ---- checking the table offsets (assembly fails if they differ) -----
@@ -2605,3 +2770,4 @@ ASSERT_AT t_sub,          RT_SUB
 ASSERT_AT t_put,          RT_PUT
 ASSERT_AT t_rec_parse,    RT_REC_PARSE
 ASSERT_AT t_lines,        RT_LINES
+ASSERT_AT t_net_connect,  RT_NET_CONNECT

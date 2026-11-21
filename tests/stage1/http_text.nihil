@@ -3,6 +3,11 @@ req = "POST /plan/293%2Fb?month=1&name=Caf%C3%A9+au+lait&empty=&flag HTTP/1.1\r\
 >> req.http_method() + "|" + req.http_path() + "|" + (req.http_param("month") || "_") + "|" + (req.http_param("name") || "_") + "\n";
 >> (req.http_param("empty") || "_") + "|" + (req.http_param("flag") || "_") + "|" + (req.http_param("missing") || "_") + "|" + req.http_body() + "\n";
 >> "a%20b+c%41%zz".url_decode() + "\n";
+>> (req.http_header("content-length") || "_") + "|" + (req.http_header("HOST") || "_") + "|" + (req.http_header("a") || "_") + "\n";
+>> "GET / HTTP/1.1\r\nHost: localhost:8730\r\n\r\n".http_host_is_local(); >> " ";
+>> "GET / HTTP/1.1\r\nhost: 127.0.0.1\r\n\r\n".http_host_is_local(); >> " ";
+>> "GET / HTTP/1.1\r\nHost: evil.example:8730\r\n\r\n".http_host_is_local(); >> " ";
+>> "GET / HTTP/1.1\r\n\r\n".http_host_is_local(); >> "\n";
 port? = 0.listen();                  // port 0: any free port
 >> port != _; >> "\n";
 open_port = port || -1;

@@ -1,0 +1,17 @@
+// a zero byte inside a path is refused: the kernel would stop at it and act on another file
+// ("/tmp/nihil_zero.txt\0.nihil" would be "/tmp/nihil_zero.txt")
+@>> "/tmp/nihil_zero.txt", "secret\n";
+p = "/tmp/nihil_zero.txt" + "\0" + ".nihil";
+a? = @? p;
+>> a; >> " ";
+b? = p.read_from(0);
+>> b; >> " ";
+c? = p.size();
+>> c; >> " ";
+>> p.is_file(); >> " ";
+d? = ("/tmp" + "\0" + "x").list();
+>> d == _; >> " ";
+>> ("/tmp/nihil_zero_dir" + "\0" + "x").make_dir(); >> " ";
+>> "/tmp/nihil_zero_dir".is_dir(); >> " ";
+>> "/tmp/nihil_zero.txt".size() || 0; >> "\n";
+"/tmp/nihil_zero.txt".remove();

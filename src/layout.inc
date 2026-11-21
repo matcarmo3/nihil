@@ -33,7 +33,8 @@
 %define GC_COUNT        (BASE_DATA + 0xB0)     ; collections so far
 %define GC_DIRTY        (BASE_DATA + 0xB8)     ; empty small pages kept for reuse (page numbers)
 %define GC_NDIRTY       (BASE_DATA + 0xC0)
-%define GC_MINCORE      (BASE_DATA + 0xC8)     ; buffer for mincore: one byte per 4 KiB
+%define GC_MINCORE      (BASE_DATA + 0xC8)     ; buffer for mincore (a byte per 4 KiB) or pagemap entries
+%define GC_PAGEMAP      (BASE_DATA + 0xD0)     ; /proc/self/pagemap's fd + 1 during a collection (0: none)
 %define GC_FREE         (BASE_DATA + 0x100)    ; 21 free lists, one per size class
 %define OUTPUT_BUF       (BASE_DATA + 0x1000)   ; standard output buffer
 %define OUTPUT_CAP       65536
@@ -91,4 +92,5 @@
 %define RT_PUT              225 ; rax = STRING r (new, being built), rcx = at, rdx = STRING t → t copied into r at; rax = at + #t
 %define RT_REC_PARSE        230 ; rax = text, rcx = where the line starts, rdx = schema → rax = the record (ARRAY address), or -1: let the prelude do it
 %define RT_LINES            235 ; rax = text, rcx = width → rax = how many lines, all of that width (-1 if one is not)
+%define RT_NET_CONNECT      240 ; rax = IPv4 address (a.b.c.d as a << 24 | … | d), rcx = port → rax = connected socket (or -errno)
 %define RT_SYSCALL          210 ; rax = ARRAY of INT [n, a1 … a6] (missing ones 0) → rax = what the kernel gave

@@ -7,8 +7,15 @@
 # stderr. This script saves the output and makes it executable.
 #   NIHILC1=path   chooses another stage 1 binary (e.g. build/nihilc2)
 #   NIHIL_O0=1     no optimizations (the same bytes as stage 0)
+# On macOS (Apple silicon) it builds a native executable with macos/nihil (docs/macos-arm64.md),
+# unless NIHILC1 names a compiler (then the Linux output, as on Linux).
 set -u
 dir=$(cd "$(dirname "$0")" && pwd)
+if [ "$(uname -s)" = Darwin ] && [ -z "${NIHILC1:-}" ] && [ -x "$dir/build/macos/nihilc1-native" ]; then
+    [ $# -ge 1 ] || { echo "nihilc: usage: nihilc <input.nihil> [output]" >&2; exit 1; }
+    [ -f "$1" ] && [ -r "$1" ] || { echo "nihilc: could not open $1" >&2; exit 1; }
+    exec "$dir/macos/nihil" "$1" "${2:-a.out}"
+fi
 bin=${NIHILC1:-$dir/build/nihilc1}
 [ $# -ge 1 ] || { echo "nihilc: usage: nihilc <input.nihil> [output]" >&2; exit 1; }
 src=$1

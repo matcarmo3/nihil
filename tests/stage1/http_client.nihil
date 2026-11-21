@@ -1,0 +1,62 @@
+// the client side of the network (SPEC §23): host.connect(port), url.http_get(),
+// url.http_post(type, body), resp.http_status(); a small Python server answers
+portfile = "/tmp/nihil_http_client.port";
+portfile.remove();
+server? = ["python3", "tests/data/http_test_server.py", portfile].start("", "", "");
+port = 0;
+tries = 0;
+* port == 0 && tries < 300 {
+    t? = @? portfile;
+    t != _ { port = (t || "").trim().int() || 0; }
+    port == 0 { ... 20; }
+    tries = tries + 1;
+}
+base = "http://127.0.0.1:" + $port;
+
+r? = (base + "/hello").http_get();
+a = r || "";
+>> (a.http_status() || 0); >> " " + a.http_body() + " | x-test: " + (a.http_header("x-test") || "_") + "\n";
+p? = (base + "/echo").http_post("application/json", "{\"a\": 1}");
+>> (p || "").http_body() + "\n";
+c? = (base + "/chunked").http_get();
+>> "chunked: " + (c || "").http_body() + "\n";
+big? = (base + "/big").http_get();
+bb = (big || "").http_body();
+>> "200 chunks of 1000: " + $#bb + " bytes, all x: " + $(bb == "x".repeat(200000)) + "\n";
+m? = (base + "/missing").http_get();
+>> (m || "").http_status() || 0; >> " " + (m || "").http_body() + "\n";
+l? = ("http://localhost:" + $port + "/hello").http_get();
+>> "localhost: " + $((l || "").http_status() || 0) + "\n";
+
+// a raw connection: send and receive as on the server side
+conn? = "127.0.0.1".connect(port);
+k = conn || -1;
+k.send("GET /hello HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+raw? = k.receive();
+k.close();
+>> "raw: " + $((raw || "").http_status() || 0) + " " + (raw || "").http_body() + "\n";
+
+// a body read as it arrives: http_open gives the connection after the headers; read() gives pieces
+st? = (base + "/stream").http_open("GET", "", "");
+sc = st || -1;
+pieces = 0;
+got = "";
+piece? = sc.read();
+* piece != _ { pieces = pieces + 1; got = got + (piece || ""); piece = sc.read(); }
+sc.close();
+>> "stream: " + got.replace("\n", "|") + " in " + $(pieces >= 2) + " several pieces\n";
+
+// what fails gives _
+s? = "https://127.0.0.1/".http_get();
+>> s == _; >> " ";
+gone? = ("http://127.0.0.1:" + $(port + 1) + "/").http_get();
+>> gone == _; >> " ";
+nobody? = "no-such-host.invalid".connect(80);
+>> nobody == _; >> " ";
+bad? = "http://127.0.0.1:x/".http_get();
+>> bad == _; >> "\n";
+
+pr = server || 0;
+pr.kill();
+pr.wait();
+portfile.remove();

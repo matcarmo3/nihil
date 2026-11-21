@@ -1249,15 +1249,63 @@ port = srv || -1;
 | `srv.accept()` | `INT?`: the next connection (waits until one arrives), or `_` if the port failed |
 | `c.receive()` | `STRING?`: the request, its headers and a body of `Content-Length` bytes; `_` if the client closed before sending anything |
 | `c.send(text)` | `BOOL`: all of `text` was sent (`false`: the client went away, which is not the end of the program) |
-| `c.respond(status, type, body)` | `BOOL`: an HTTP/1.1 response with `Content-Type`, `Content-Length`, `Connection: close` and `Access-Control-Allow-Origin: *`, then closes; `false` if the client went away |
+| `c.respond(status, type, body)` | `BOOL`: an HTTP/1.1 response with `Content-Type`, `Content-Length` and `Connection: close`, then closes; `false` if the client went away. No `Access-Control-Allow-Origin`: a page of another site must not read what a local server answers |
 | `c.close()` | closes the connection or the port |
 | `req.http_method()`, `req.http_path()` | `"GET"`; the path without the query, decoded (`"/plan/293"`) |
 | `req.http_param(name)` | `STRING?`: the value of `name` in the query, decoded, or `_` |
+| `req.http_header(name)` | `STRING?`: the value of a header (the name in any case, the value without the spaces around), or `_` |
+| `req.http_host_is_local()` | `BOOL`: the `Host` header names this machine (`localhost`, `127.0.0.1` or `[::1]`, any port) |
 | `req.http_body()`, `s.url_decode()` | what follows the headers; `%XX` and `+` decoded |
 
 The runtime has five routines (`socket`/`bind`/`listen`, `accept4`, `read`,
 `sendto` with `MSG_NOSIGNAL`, `close`); HTTP is prelude code. There is no TLS:
 for the internet, put the server behind a proxy that has it.
+
+**The client side.**
+
+```text
+r? = "http://127.0.0.1:11434/api/tags".http_get();          // the whole response, or _
+p? = "http://localhost:8740/plan/293".http_post("application/json", "{\"month\": 2}");
+status = (r || "").http_status() || 0;                        // 200
+body = (r || "").http_body();                                 // what came after the headers
+c? = "127.0.0.1".connect(8740);                               // a raw connection: send, receive, close
+```
+
+| Call | Result |
+|---|---|
+| `host.connect(port)` | `INT?`: a connection to `host:port`, on which `send`, `receive` and `close` work; `_` if the host is unknown or does not answer. The host is an IPv4 address (`"10.0.0.5"`), `"localhost"` or a name in `/etc/hosts` (no DNS yet) |
+| `url.http_get()`, `url.http_post(type, body)`, `url.http_request(method, type, body)` | `STRING?`: the whole response (status line, headers, a blank line, the body: put back together when it came in chunks), or `_` if the URL is not `http://…` or the server does not answer. The request says `Connection: close`, and the answer is read until the server closes |
+| `resp.http_status()` | `INT?`: the status of a response (`"HTTP/1.1 404 Not Found"` → `404`) |
+| `url.http_open(method, type, body)` | `INT?`: sends the request (HTTP/1.0, so the body comes without chunks) and reads only the response's headers; the connection is left where the body starts |
+| `c.read()` | `STRING?`: the next piece the other side sent (what arrived, up to 64 KiB; it waits for one), or `_` when it closed |
+
+A body read as it arrives (a model writing its answer word by word):
+
+```text
+c? = "http://localhost:11434/api/chat".http_open("POST", "application/json", request);
+conn = c || -1;
+piece? = conn.read();
+* piece != _ { >> piece || ""; piece = conn.read(); }
+conn.close();
+```
+
+`resp.http_header(name)` and `resp.http_body()` read a response as they read a request. There is
+no TLS: `https://…` gives `_` (a local proxy can add it). The runtime has one more routine,
+`rt_net_connect` (`socket`, `connect`); finding the address and HTTP are prelude code.
+
+`accept` gives every connection a read deadline of 15 s: one that opens and sends nothing
+(browsers open connections ahead of time) delays the next request at most that long, instead of
+holding a server that serves one request at a time. `receive` reads into a buffer that doubles.
+
+**A server for one machine.** `listen()` takes only connections from the machine itself, but
+the browser on it (or on another machine, through an SSH tunnel) reaches the port too, and so
+does every page open in that browser. A server that answers only its own pages should:
+- refuse a request whose `Host` is not local (`req.http_host_is_local()`): a site whose name is
+  made to point at 127.0.0.1 (DNS rebinding) sends its own name there;
+- for anything that changes or runs something, ask for a secret its own page carries (the IDE
+  draws one at every start and checks the `X-Nihil-Token` header of every `/api/` call).
+
+A page of another site cannot read the secret, because no answer allows another origin.
 
 ## 24. Directories and processes (stage 1)
 
@@ -1463,6 +1511,9 @@ branch per tool, reading its parameters with the JSON library.
 | **v1.9:** saved registers learned between passes | The prologue comes before the body; using the count from the previous pass avoids saving registers for nothing |
 | **v2.1:** `... ms;` waits | Animations need a fixed speed; a busy loop depends on the machine. The ellipsis reads as a pause and cannot start any valid expression |
 | **v2.2:** renamed from Ket to Nihil | Latin for *nothing*: no keywords, and `_` for the missing value |
+| **v3.12:** `c.read()`, `url.http_open(method, type, body)` | Showing an answer while it is written: a local model takes a minute for a long answer, and the screen should not stay still. The headers are read one byte at a time, so nothing of the body is taken before the program reads it |
+| **v3.11:** the client side of the network: `host.connect(port)`, `url.http_get()`, `http_post`, `http_request`, `resp.http_status()` | A program can now ask other servers (an LLM served by Ollama, another planogram server) instead of only answering. The first use is an agent in Nihil that talks to a local model and calls the planogram's tools in the same process |
+| **v3.10:** `req.http_header(name)`, `req.http_host_is_local()`; `respond` no longer sends `Access-Control-Allow-Origin: *`; the IDE checks the host and a secret token, refuses hidden folders as projects, control bytes in paths, and serves only `.nihil` files; a path with a zero byte inside is refused everywhere (`@`, `@?`, `@>>`, `read_at`, the directory functions, `cmd.start`); accepted connections have a read deadline of 15 s; the IDE's programs run in `build/runs`, at most 8 at a time | A security review found that any page open in the browser could use the IDE through the SSH tunnel (read keys, write and run a program) and read the planogram's data: the `*` let other sites read the answers, and nothing checked who was asking. A server for one machine now answers only to it and to its own page |
 | **v3.9:** methods of a model: `MODEL.name(self = MODEL(), …) { … }`, called as `record.name(…)` | Programs organized around their data (a planogram, its shelves and items) read better when the operations live with the model. The `.` already called the library on a value; extending it to the program's own models needs no keyword and no runtime dispatch. Inheritance is left out: composition covers it and keeps the language small |
 | **v3.8:** directories and processes: `path.list()`, `is_dir`, `is_file`, `make_dir`, `remove`, `size`, `read_from`; `cmd.start(out, err, dir)`, `run`; `p.write`, `close_input`, `done`, `wait`, `kill` | Tools around the language (the IDE, data collection) needed to list folders and run programs. One kernel-call routine in the runtime and the rest in the prelude keeps the assembly small and the library testable; the IDE server moved from Python to Nihil |
 | **v3.7:** `contains`, `starts_with`, `ends_with` on STRING, ARRAY and MAP (the old `has`, `starts`, `ends` kept as synonyms); `upper`/`lower` change the Latin-1 letters too; the network gives `_` or `false` instead of `-errno`; faster reading: text → FLOAT by Clinger's fast path, native copies and JSON scanning, `@` of files with no size (`/proc`, pipes) | Names that other languages' libraries use, one way to report a failure across the library (optionals, not error codes), and upper case that works for Portuguese, Spanish, French and German text. Reading tables of decimals went from 14 to about 100 MB/s and JSON from 23 to 90 MB/s: the exact big-integer conversion stays for the rare numbers with more than 15 digits or a power of ten beyond 22 |

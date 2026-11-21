@@ -277,6 +277,7 @@ const_close() {
 
 // appends the constants after the code (aligned to 8) and resolves the fixups
 emit_constantes() {
+    code_end = size_code;
     * size_code & 7 != 0 { emit(0xCC); }
     base = size_code;
     size_code + size_const > SIZE_CODE { error_code_large(); }

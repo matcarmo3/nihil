@@ -1,0 +1,17 @@
+#!/bin/bash
+# nihil PROGRAM.nihil [OUT] — compiles a Nihil program into a native macOS (Apple silicon) executable,
+# with no VM: the compiler (itself translated to ARM64) emits its x86-64 code and the map,
+# macos/translate.py turns that into ARM64 assembly, clang links it with arm64/rt.c
+#   NIHIL_O0=1   no optimizations
+set -e
+here=$(cd "$(dirname "$0")/.." && pwd)
+src=$1; out=${2:-${1%.nihil}}
+[ -n "$src" ] || { echo "usage: nihil PROGRAM.nihil [OUT]" >&2; exit 2; }
+abs=$(cd "$(dirname "$src")" && pwd)/$(basename "$src")
+w=$(mktemp -d); trap 'rm -rf "$w"' EXIT
+option=""; [ "${NIHIL_O0:-0}" = 1 ] && option="-O0 "
+printf '%s\n' "$option-map $abs" | "$here/build/macos/nihilc1-native" > "$w/p.x86" 2> "$w/p.map" || { grep -v '^nihil-map' "$w/p.map" >&2; exit 1; }
+grep -v '^nihil-map' "$w/p.map" >&2 || true
+python3 "$here/macos/translate.py" "$w/p.x86" "$w/p.map" "$w/p.s" 2> "$w/t.err" || { cat "$w/t.err" >&2; exit 1; }
+[ -f "$here/build/macos/rt.o" ] && [ "$here/build/macos/rt.o" -nt "$here/arm64/rt.c" ] || clang -O2 -arch arm64 -Wno-unused-result -c "$here/arm64/rt.c" -o "$here/build/macos/rt.o"
+clang -arch arm64 -o "$out" "$w/p.s" "$here/build/macos/rt.o"
