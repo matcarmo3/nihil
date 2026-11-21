@@ -45,6 +45,36 @@ label.opt { display: flex; gap: 5px; align-items: center; color: var(--dim); mar
 select { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px;
   padding: 5px 8px; font: inherit; max-width: 240px; cursor: pointer; }
 #current { color: var(--dim); font-family: ui-monospace, monospace; }
+/* the Claude panel (right) */
+#chatResize { cursor: col-resize; background: var(--line); opacity: .5; }
+#chatResize:hover { background: var(--dim); }
+#chat { display: grid; grid-template-rows: auto auto 1fr auto; background: var(--panel); min-height: 0; min-width: 0; }
+#chat[hidden], #chatResize[hidden] { display: none; }
+#chat .chat-head { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--line); }
+#chat .chat-head b { color: var(--accent); }
+#chat .chat-ctx { padding: 4px 10px; color: var(--dim); font-size: 12px; display: flex; flex-wrap: wrap; gap: 4px 10px;
+  border-bottom: 1px solid var(--line); }
+#chat .chat-ctx label { display: inline-flex; gap: 3px; align-items: center; cursor: pointer; }
+#chatLog { overflow: auto; padding: 8px 10px; min-height: 0; }
+#chatLog .empty { color: var(--dim); padding: 8px 0; }
+.msg { margin: 8px 0; line-height: 1.45; overflow-wrap: anywhere; }
+.msg.user { background: var(--sel); border-radius: 8px; padding: 6px 9px; white-space: pre-wrap; }
+.msg.error { color: var(--err); white-space: pre-wrap; }
+.msg .meta { color: var(--dim); font-size: 11px; margin-top: 4px; }
+.msg pre { background: #101116; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; overflow: auto;
+  font: 12px/1.4 ui-monospace, Menlo, monospace; white-space: pre; }
+.msg code { font: 12px ui-monospace, Menlo, monospace; background: #101116; padding: 0 3px; border-radius: 3px; }
+.msg pre code { background: none; padding: 0; }
+.tool { color: var(--dim); font: 12px ui-monospace, Menlo, monospace; margin: 3px 0; }
+.tool .path { color: var(--text); cursor: pointer; }
+.tool .path:hover { text-decoration: underline; }
+.tool pre.diff { margin: 3px 0 6px; padding: 4px 6px; background: #101116; border-radius: 5px; overflow: auto; max-height: 220px; }
+.tool .del { color: var(--err); } .tool .add { color: var(--ok); }
+.denied { color: var(--err); font-size: 12px; }
+.chat-input { border-top: 1px solid var(--line); padding: 8px 10px; display: grid; grid-template-columns: 1fr auto; gap: 6px; }
+.chat-input textarea { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px;
+  padding: 6px 8px; font: inherit; resize: vertical; min-height: 44px; }
+.chat-input .chat-buttons { display: flex; flex-direction: column; gap: 4px; }
 #current.dirty::after { content: " ●"; color: var(--accent); }
 main { display: grid; grid-template-columns: 240px 5px 1fr; min-height: 0; }
 aside { background: var(--panel); display: grid; grid-template-rows: 3fr 6px 2fr; min-height: 0; overflow: hidden; }
@@ -149,6 +179,7 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
     <button id="btnStop" disabled title="Stop the program">■ Stop</button>
     <button id="btnAsm" title="Show the generated machine code">Assembly</button>
     <label class="opt" title="Compile with the M9 optimizations (off = NIHIL_O0=1)"><input type="checkbox" id="optimize" checked> optimize</label>
+    <button id="btnClaude" title="Claude Code: a chat about this project, with what is open in the IDE">✦ Claude</button>
     <div class="spacer"></div>
     <div id="current"></div>
   </header>
@@ -175,6 +206,22 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
         <div class="pane" id="table"><div class="empty">Click a table on the left to see its records.</div></div>
       </div>
     </div>
+    <div id="chatResize" hidden title="Drag to resize the Claude panel"></div>
+    <section id="chat" hidden>
+      <div class="chat-head"><b>✦ Claude</b><span id="chatState" class="tool"></span><div class="spacer"></div>
+        <label class="opt" title="Claude may change and create files inside this project (it never runs commands)"><input type="checkbox" id="chatEdits"> may edit</label>
+        <button id="chatNew" title="Forget this conversation and start a new one">New</button></div>
+      <div class="chat-ctx" title="What goes with each message">send along:
+        <label><input type="checkbox" id="ctxSel" checked>selection</label>
+        <label><input type="checkbox" id="ctxFile" checked>active file</label>
+        <label><input type="checkbox" id="ctxTabs" checked>tabs</label>
+        <label><input type="checkbox" id="ctxErr" checked>errors</label></div>
+      <div id="chatLog"><div class="empty">Ask about the code: "explain the selection", "why does this not compile?", "write a program that…". Claude reads the project and the language's SPEC; with "may edit" it can also change files.</div></div>
+      <div class="chat-input">
+        <textarea id="chatText" rows="3" placeholder="Message (Enter sends, Shift+Enter: new line)"></textarea>
+        <div class="chat-buttons"><button id="chatSend" class="primary">Send</button><button id="chatStop" disabled title="Stop Claude">■ Stop</button></div>
+      </div>
+    </section>
   </main>
   <footer><span id="status">Ready</span><div class="spacer"></div><span id="cursorPos"></span></footer>
 </div>
@@ -601,7 +648,9 @@ $('btnSave').onclick = save;
 // ---------------------------------------------------------------- problems
 function clearMarks() { for (const m of marks) m.clear(); marks = []; editor.clearGutter('errors');
   editor.eachLine((l) => editor.removeLineClass(l, 'background', 'err-line')); }
+let lastErrors = [];                                // for the Claude panel
 function showProblems(errors) {
+  lastErrors = errors;
   clearMarks();
   const box = $('problems'); box.innerHTML = '';
   $('probCount').hidden = !errors.length; $('probCount').textContent = errors.length;
@@ -698,7 +747,13 @@ document.querySelectorAll('.tab').forEach((t) => t.onclick = () => showTab(t.dat
 // and the database take (the bar between them); both are remembered
 const remember = (k, v) => { try { localStorage.setItem(k, String(v)); } catch (e) {} };
 const recall = (k) => { try { return parseFloat(localStorage.getItem(k)); } catch (e) { return NaN; } };
-function setSideWidth(w) { document.querySelector('main').style.gridTemplateColumns = `${w}px 5px 1fr`; }
+let sideW = 240, chatW = 400, chatOpen = false;
+function layout() {
+  document.querySelector('main').style.gridTemplateColumns = `${sideW}px 5px 1fr` + (chatOpen ? ` 5px ${chatW}px` : '');
+  $('chat').hidden = $('chatResize').hidden = !chatOpen;
+  editor.refresh(); fitTerm();
+}
+function setSideWidth(w) { sideW = w; layout(); }
 function setSideRows(f) { $('side').style.gridTemplateRows = `${f}fr 6px ${1 - f}fr`; }
 { const w = recall('nihil-ide-side-width'), f = recall('nihil-ide-side-rows');
   if (w >= 140) setSideWidth(w); if (f > 0 && f < 1) setSideRows(f); }
@@ -730,6 +785,183 @@ addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); save(); }
 });
 
+// ---------------------------------------------------------------- Claude
+// The message goes to the server (/api/claude), which runs `claude -p` in the project; its answer,
+// one JSON event per line, is read with /api/output as it is written.
+let chatSession = '', chatRun = null;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+function chatKey() { return 'nihil-ide-claude:' + project; }
+function loadChat() {
+  try { chatSession = localStorage.getItem(chatKey()) || ''; } catch (e) { chatSession = ''; }
+  try { $('chatEdits').checked = localStorage.getItem(chatKey() + ':edits') === '1'; } catch (e) {}
+  $('chatState').textContent = chatSession ? 'conversation ' + chatSession.slice(0, 8) : '';
+}
+function setSession(id) {
+  chatSession = id || '';
+  try { localStorage.setItem(chatKey(), chatSession); } catch (e) {}
+  $('chatState').textContent = chatSession ? 'conversation ' + chatSession.slice(0, 8) : '';
+}
+function toggleChat(on) {
+  chatOpen = on === undefined ? !chatOpen : on;
+  try { localStorage.setItem('nihil-ide-chat-open', chatOpen ? '1' : '0'); } catch (e) {}
+  layout(); if (chatOpen) $('chatText').focus();
+}
+{ const w = recall('nihil-ide-chat-width'); if (w >= 260) chatW = w;
+  let o = null; try { o = localStorage.getItem('nihil-ide-chat-open'); } catch (e) {}
+  chatOpen = o === '1'; layout(); }
+$('btnClaude').onclick = () => toggleChat();
+$('chatResize').onmousedown = (e) => {
+  e.preventDefault();
+  const right = document.querySelector('main').getBoundingClientRect().right;
+  const move = (ev) => { chatW = Math.min(900, Math.max(260, right - ev.clientX)); remember('nihil-ide-chat-width', chatW); layout(); };
+  const up = () => { removeEventListener('mousemove', move); removeEventListener('mouseup', up); };
+  addEventListener('mousemove', move); addEventListener('mouseup', up);
+};
+$('chatEdits').onchange = () => { try { localStorage.setItem(chatKey() + ':edits', $('chatEdits').checked ? '1' : '0'); } catch (e) {} };
+$('chatNew').onclick = () => { if (chatRun) return; setSession(''); $('chatLog').innerHTML = ''; $('chatText').focus(); };
+$('chatText').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); chatSend(); } });
+$('chatSend').onclick = () => chatSend();
+$('chatStop').onclick = async () => { if (chatRun) await api('/api/stop', { id: chatRun }); };
+
+// what is open in the IDE, for the message
+function ideContext() {
+  const parts = ['Project: ' + project];
+  const fence = (t) => '```nihil\n' + t + (t.endsWith('\n') ? '' : '\n') + '```';
+  if ($('ctxFile').checked && current) {
+    const c = editor.getCursor();
+    parts.push(`Active file: ${current} (cursor at line ${c.line + 1}, column ${c.ch + 1})`);
+    const t = tabs.find((x) => x.path === current);
+    if (t && t.dirty) parts.push('The active file has unsaved changes; the text in the editor is:\n' + fence(editor.getValue()));
+  }
+  if ($('ctxSel').checked && current && editor.somethingSelected()) {
+    const s = editor.listSelections()[0];
+    const a = Math.min(s.anchor.line, s.head.line) + 1, b = Math.max(s.anchor.line, s.head.line) + 1;
+    parts.push(`Selected in ${current}, line${a === b ? ' ' + a : 's ' + a + '–' + b}:\n` + fence(editor.getSelection()));
+  }
+  if ($('ctxTabs').checked && tabs.length) parts.push('Open tabs: ' + tabs.map((t) => t.path + (t.dirty ? ' (unsaved)' : '')).join(', '));
+  if ($('ctxErr').checked && lastErrors.length)
+    parts.push('Last compile errors:\n' + lastErrors.map((e) => (e.line ? `${e.file}:${e.line}:${e.col}: ` : '') + e.message).join('\n'));
+  return '<ide>\n' + parts.join('\n') + '\n</ide>';
+}
+
+// a little Markdown: code blocks, `code`, **bold**, line breaks
+function md(t) {
+  const out = [];
+  const pieces = t.split('```');
+  pieces.forEach((p, i) => {
+    if (i % 2) { const nl = p.indexOf('\n'); out.push('<pre><code>' + esc(nl >= 0 ? p.slice(nl + 1) : p).replace(/\n$/, '') + '</code></pre>'); return; }
+    out.push(esc(p).replace(/`([^`\n]+)`/g, '<code>$1</code>').replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>').replace(/\n/g, '<br>'));
+  });
+  return out.join('');
+}
+function chatAdd(cls, html) {
+  const log = $('chatLog'); const e = log.querySelector('.empty'); if (e) e.remove();
+  const el = document.createElement('div'); el.className = 'msg ' + cls; el.innerHTML = html; log.appendChild(el);
+  log.scrollTop = log.scrollHeight; return el;
+}
+const relPath = (p) => p && project && p.startsWith(project + '/') ? p.slice(project.length + 1) : p || '';
+function toolLine(box, b) {
+  const inp = b.input || {}, el = document.createElement('div'); el.className = 'tool';
+  const verb = { Read: 'read', Edit: 'edited', Write: 'wrote', Grep: 'searched', Glob: 'listed' }[b.name] || b.name;
+  const target = inp.file_path ? relPath(inp.file_path) : inp.pattern || '';
+  el.innerHTML = `${esc(verb)} <span class="path"></span>`;
+  el.querySelector('.path').textContent = target;
+  if (inp.file_path && target.endsWith('.nihil') && !target.startsWith('/')) el.querySelector('.path').onclick = () => open(target);
+  if (b.name === 'Edit' && (inp.old_string || inp.new_string)) {
+    const d = document.createElement('pre'); d.className = 'diff';
+    const lines = (inp.old_string || '').split('\n').map((l) => '<span class="del">- ' + esc(l) + '</span>')
+      .concat((inp.new_string || '').split('\n').map((l) => '<span class="add">+ ' + esc(l) + '</span>'));
+    d.innerHTML = lines.slice(0, 60).join('\n') + (lines.length > 60 ? '\n…' : ''); el.appendChild(d);
+  }
+  if (b.name === 'Write' && inp.content) el.append(` (${inp.content.split('\n').length} lines)`);
+  box.appendChild(el); $('chatLog').scrollTop = $('chatLog').scrollHeight;
+}
+// a tab Claude changed: its new text from the disk (unless it has unsaved changes here)
+async function reloadTab(t) {
+  if (t.dirty) { status(`Claude changed ${t.path}, which has unsaved changes here: they were kept (save to overwrite, or close and reopen)`, 'bad'); return; }
+  const r = await api('/api/file?path=' + encodeURIComponent(t.path));
+  if (r.error) return;
+  t.saved = r.content; t.hash = r.hash;
+  if (t.path === current) { savedText = r.content; savedHash = r.hash; }
+  const c = t.path === current ? editor.getCursor() : null;
+  t.doc.setValue(r.content); t.dirty = false;
+  if (c) editor.setCursor(c);
+  renderTabs();
+}
+function setChatBusy(on) { $('chatSend').disabled = on; $('chatStop').disabled = !on; $('chatNew').disabled = on; }
+
+async function chatSend() {
+  const text = $('chatText').value.trim();
+  if (!text || chatRun) return;
+  $('chatText').value = '';
+  chatAdd('user', esc(text));
+  const r = await api('/api/claude', { message: text, context: ideContext(), session: chatSession, edits: $('chatEdits').checked });
+  if (!r.ok) { chatAdd('error', esc(r.error || 'could not start Claude')); return; }
+  chatRun = r.run; setChatBusy(true);
+  const box = chatAdd('assistant', '');
+  let textEl = null, raw = '', out = 0, err = 0, buf = '', errText = '', result = null;
+  const edited = new Set();
+  const thinking = document.createElement('div'); thinking.className = 'tool'; thinking.textContent = 'thinking…'; box.appendChild(thinking);
+  const handle = (line) => {
+    let d; try { d = JSON.parse(line); } catch (e) { return; }
+    if (d.type === 'system' && d.subtype === 'init' && d.session_id) setSession(d.session_id);
+    if (d.type === 'stream_event') {
+      const ev = d.event || {};
+      if (ev.type === 'content_block_start' && ev.content_block && ev.content_block.type === 'text') {
+        textEl = document.createElement('div'); box.appendChild(textEl); raw = '';
+      }
+      if (ev.type === 'content_block_delta' && ev.delta && ev.delta.type === 'text_delta') {
+        if (!textEl) { textEl = document.createElement('div'); box.appendChild(textEl); raw = ''; }
+        raw += ev.delta.text; textEl.innerHTML = md(raw); thinking.remove();
+        $('chatLog').scrollTop = $('chatLog').scrollHeight;
+      }
+    }
+    if (d.type === 'assistant' && d.message) {
+      for (const b of d.message.content || []) {
+        if (b.type === 'tool_use') {
+          toolLine(box, b); thinking.remove();
+          if ((b.name === 'Edit' || b.name === 'Write') && b.input && b.input.file_path) edited.add(relPath(b.input.file_path));
+        }
+      }
+      textEl = null;
+    }
+    if (d.type === 'result') result = d;
+  };
+  for (;;) {
+    const o = await api(`/api/output?id=${chatRun}&out=${out}&err=${err}`);
+    if (o.error) break;
+    out += o.out_bytes; err += o.err_bytes; errText += o.err; buf += o.out;
+    let i; while ((i = buf.indexOf('\n')) >= 0) { handle(buf.slice(0, i)); buf = buf.slice(i + 1); }
+    if (o.code !== null && !o.out && !o.err) break;
+    await sleep(200);
+  }
+  if (buf.trim()) handle(buf);
+  thinking.remove();
+  if (result) {
+    if (result.session_id) setSession(result.session_id);
+    if (result.is_error) chatAdd('error', esc(result.result || result.subtype || 'Claude stopped with an error'));
+    const denied = result.permission_denials || [];
+    if (denied.length) {
+      const el = document.createElement('div'); el.className = 'denied';
+      el.textContent = 'not allowed: ' + denied.map((x) => x.tool_name + ' ' + relPath((x.tool_input || {}).file_path || (x.tool_input || {}).command || '')).join(', ')
+        + ($('chatEdits').checked ? '' : ' (check "may edit" to let Claude change files)');
+      box.appendChild(el);
+    }
+    const meta = document.createElement('div'); meta.className = 'meta';
+    meta.textContent = `${((result.duration_ms || 0) / 1000).toFixed(1)} s` + (result.total_cost_usd ? ` · US$ ${result.total_cost_usd.toFixed(3)}` : '');
+    box.appendChild(meta);
+  } else {
+    chatAdd('error', esc(errText.trim() || 'Claude stopped before answering'));
+  }
+  chatRun = null; setChatBusy(false);
+  if (edited.size) {
+    for (const p of edited) { const t = tabs.find((x) => x.path === p); if (t) await reloadTab(t); }
+    await loadFiles();
+    status('Claude changed: ' + [...edited].join(', '));
+  }
+  $('chatLog').scrollTop = $('chatLog').scrollHeight;
+}
+
 // ---------------------------------------------------------------- projects
 async function loadProjects(want) {
   const r = await api('/api/projects');
@@ -750,6 +982,7 @@ async function switchProject(path, target) {
   tabs = []; current = null; savedText = ''; savedHash = null;
   editor.swapDoc(CodeMirror.Doc('', 'nihil')); clearMarks(); renderTabs();
   selectedFolder = ''; loadCollapsed();
+  loadChat(); if (!chatRun) $('chatLog').innerHTML = '';
   tableOpen = null; $('table').innerHTML = '<div class="empty">Click a table on the left to see its records.</div>';
   const files = await loadFiles();
   let saved = null; try { saved = JSON.parse(localStorage.getItem('nihil-ide-tabs:' + project) || 'null'); } catch (e) {}

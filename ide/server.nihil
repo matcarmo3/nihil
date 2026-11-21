@@ -628,6 +628,73 @@ output_json(req = "") {
     : j;
 }
 
+// ---- Claude Code (the chat panel) ---------------------------------------------------------
+// The panel's message runs `claude -p` (Claude Code without its screen) in the project's folder,
+// like a program: its answer, one JSON event per line (stream-json), goes to build/runs/N.out
+// and the page reads it with /api/output as it is written, and stops it with /api/stop. The page
+// sends what is open in the IDE (the active file, the selection, the tabs, the errors) after the
+// message. Claude may read the project, the language's SPEC and examples; with "edits" it may also
+// change files inside the project; it runs no commands (the IDE compiles and runs).
+
+// a session id from the page: letters, digits and "-" only (it goes on a command line)
+session_ok(s = "") {
+    #s == 0 || #s > 64 { : false; }
+    i = 0;
+    * i < #s {
+        ch = s[i];
+        !((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '-') { : false; }
+        i = i + 1;
+    }
+    : true;
+}
+
+claude_prompt(project = "") {
+    : "You are working inside the Nihil IDE, in the project folder " + project + ". Nihil is a small programming language "
+      + "without keywords (symbols only); its specification is " + ROOT + "/SPEC.md and there are examples in " + ROOT
+      + "/examples: read the parts of the SPEC you need before you write or explain Nihil code, and do not assume it works "
+      + "like another language. The user's message may be followed by an <ide> block with what is open in the IDE: the "
+      + "active file and the cursor, the selected text, the open tabs, unsaved text and the last compile errors; \"this\" "
+      + "or \"here\" means the selection, or else the active file. You cannot run commands: the IDE compiles and runs the "
+      + "programs (the user presses Run). Change files only inside the project folder, and only when asked. Answer in "
+      + "the language the user writes in, briefly.";
+}
+
+claude_json(project = "", body = "") {
+    msg = (body.json("message") || "\"\"").json_text() || "";
+    ctx = (body.json("context") || "\"\"").json_text() || "";
+    session = (body.json("session") || "\"\"").json_text() || "";
+    edits = (body.json("edits") || "false") == "true";
+    #msg.trim() == 0 { : "{\"ok\": false, \"error\": \"write a message\"}"; }
+    running = 0;
+    ids = RUN_PROC.keys();
+    k = 0;
+    * k < #ids { RUN_CODE.contains(ids[k]) == false { running = running + 1; } k = k + 1; }
+    running >= MAX_RUNS { : "{\"ok\": false, \"error\": " + q($MAX_RUNS + " programs are running: stop one first") + "}"; }
+    id = NEXT_RUN;
+    NEXT_RUN = NEXT_RUN + 1;
+    base = RUNS_DIR + "/" + $id;
+    // reading and searching inside the project are allowed by default; outside it, only the SPEC and examples
+    tools = ["Read(./**)", "Read(/" + ROOT + "/SPEC.md)", "Read(/" + ROOT + "/examples/**)"];
+    edits { tools = tools + ["Edit(./**)", "Write(./**)"]; }
+    cmd = ["claude", "-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
+           "--permission-mode", "default", "--append-system-prompt", claude_prompt(project)];
+    session_ok(session) { cmd = cmd + ["--resume", session]; }
+    // no commands (not even the read-only ones Claude Code allows by default) and no web
+    cmd = cmd + ["--disallowedTools", "Bash", "WebFetch", "WebSearch", "--allowedTools"] + tools;
+    p? = cmd.start(base + ".out", base + ".err", project);
+    p == _ { : "{\"ok\": false, \"error\": " + q("could not start claude: is Claude Code installed, and on the PATH of the IDE's server?") + "}"; }
+    pr = p || 0;
+    text = msg;
+    #ctx > 0 { text = text + "\n\n" + ctx; }
+    pr.write(text);
+    pr.close_input();
+    RUN_PROC[id] = pr;
+    RUN_BASE[id] = base;
+    RUN_T0[id] = now_ms();
+    RUN_SEEN[id] = now_ms();
+    : "{\"ok\": true, \"run\": " + $id + "}";
+}
+
 // ---- HTTP -------------------------------------------------------------------------------
 send_static(c = 0, name = "") {
     ok = #name > 0 && !name.contains("..") && !name.contains("/");
@@ -736,6 +803,7 @@ handle(c = 0, req = "") {
         c.respond(200, "application/json", "{\"ok\": true, \"path\": " + q(rel) + "}");
         :;
     }
+    path == "/api/claude" { c.respond(200, "application/json", claude_json(project, body)); :; }
     path == "/api/run" || path == "/api/asm" { c.respond(200, "application/json", run_json(project, body, path == "/api/asm")); :; }
     path == "/api/output" {
         j = output_json(req);
