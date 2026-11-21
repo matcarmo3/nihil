@@ -1249,15 +1249,27 @@ port = srv || -1;
 | `srv.accept()` | `INT?`: the next connection (waits until one arrives), or `_` if the port failed |
 | `c.receive()` | `STRING?`: the request, its headers and a body of `Content-Length` bytes; `_` if the client closed before sending anything |
 | `c.send(text)` | `BOOL`: all of `text` was sent (`false`: the client went away, which is not the end of the program) |
-| `c.respond(status, type, body)` | `BOOL`: an HTTP/1.1 response with `Content-Type`, `Content-Length`, `Connection: close` and `Access-Control-Allow-Origin: *`, then closes; `false` if the client went away |
+| `c.respond(status, type, body)` | `BOOL`: an HTTP/1.1 response with `Content-Type`, `Content-Length` and `Connection: close`, then closes; `false` if the client went away. No `Access-Control-Allow-Origin`: a page of another site must not read what a local server answers |
 | `c.close()` | closes the connection or the port |
 | `req.http_method()`, `req.http_path()` | `"GET"`; the path without the query, decoded (`"/plan/293"`) |
 | `req.http_param(name)` | `STRING?`: the value of `name` in the query, decoded, or `_` |
+| `req.http_header(name)` | `STRING?`: the value of a header (the name in any case, the value without the spaces around), or `_` |
+| `req.http_host_is_local()` | `BOOL`: the `Host` header names this machine (`localhost`, `127.0.0.1` or `[::1]`, any port) |
 | `req.http_body()`, `s.url_decode()` | what follows the headers; `%XX` and `+` decoded |
 
 The runtime has five routines (`socket`/`bind`/`listen`, `accept4`, `read`,
 `sendto` with `MSG_NOSIGNAL`, `close`); HTTP is prelude code. There is no TLS:
 for the internet, put the server behind a proxy that has it.
+
+**A server for one machine.** `listen()` takes only connections from the machine itself, but
+the browser on it (or on another machine, through an SSH tunnel) reaches the port too, and so
+does every page open in that browser. A server that answers only its own pages should:
+- refuse a request whose `Host` is not local (`req.http_host_is_local()`): a site whose name is
+  made to point at 127.0.0.1 (DNS rebinding) sends its own name there;
+- for anything that changes or runs something, ask for a secret its own page carries (the IDE
+  draws one at every start and checks the `X-Nihil-Token` header of every `/api/` call).
+
+A page of another site cannot read the secret, because no answer allows another origin.
 
 ## 24. Directories and processes (stage 1)
 
@@ -1349,6 +1361,7 @@ it. The IDE server (`ide/server.nihil`) is written with them and §23.
 | **v1.9:** saved registers learned between passes | The prologue comes before the body; using the count from the previous pass avoids saving registers for nothing |
 | **v2.1:** `... ms;` waits | Animations need a fixed speed; a busy loop depends on the machine. The ellipsis reads as a pause and cannot start any valid expression |
 | **v2.2:** renamed from Ket to Nihil | Latin for *nothing*: no keywords, and `_` for the missing value |
+| **v3.10:** `req.http_header(name)`, `req.http_host_is_local()`; `respond` no longer sends `Access-Control-Allow-Origin: *`; the IDE checks the host and a secret token, refuses hidden folders as projects, control bytes in paths, and serves only `.nihil` files | A security review found that any page open in the browser could use the IDE through the SSH tunnel (read keys, write and run a program) and read the planogram's data: the `*` let other sites read the answers, and nothing checked who was asking. A server for one machine now answers only to it and to its own page |
 | **v3.9:** methods of a model: `MODEL.name(self = MODEL(), …) { … }`, called as `record.name(…)` | Programs organized around their data (a planogram, its shelves and items) read better when the operations live with the model. The `.` already called the library on a value; extending it to the program's own models needs no keyword and no runtime dispatch. Inheritance is left out: composition covers it and keeps the language small |
 | **v3.8:** directories and processes: `path.list()`, `is_dir`, `is_file`, `make_dir`, `remove`, `size`, `read_from`; `cmd.start(out, err, dir)`, `run`; `p.write`, `close_input`, `done`, `wait`, `kill` | Tools around the language (the IDE, data collection) needed to list folders and run programs. One kernel-call routine in the runtime and the rest in the prelude keeps the assembly small and the library testable; the IDE server moved from Python to Nihil |
 | **v3.7:** `contains`, `starts_with`, `ends_with` on STRING, ARRAY and MAP (the old `has`, `starts`, `ends` kept as synonyms); `upper`/`lower` change the Latin-1 letters too; the network gives `_` or `false` instead of `-errno`; faster reading: text → FLOAT by Clinger's fast path, native copies and JSON scanning, `@` of files with no size (`/proc`, pipes) | Names that other languages' libraries use, one way to report a failure across the library (optionals, not error codes), and upper case that works for Portuguese, Spanish, French and German text. Reading tables of decimals went from 14 to about 100 MB/s and JSON from 23 to 90 MB/s: the exact big-integer conversion stays for the rare numbers with more than 15 digits or a power of ten beyond 22 |

@@ -55,6 +55,8 @@ lib_target(t = 0, s = 0, n = 0) {
         name_is(s, n, "http_method") { : "__nihil_s_http_method"; }
         name_is(s, n, "http_path") { : "__nihil_s_http_path"; }
         name_is(s, n, "http_param") { : "__nihil_s_http_param"; }
+        name_is(s, n, "http_header") { : "__nihil_s_http_header"; }
+        name_is(s, n, "http_host_is_local") { : "__nihil_s_http_host_is_local"; }
         name_is(s, n, "http_body") { : "__nihil_s_http_body"; }
         name_is(s, n, "url_decode") { : "__nihil_s_url_decode"; }
         name_is(s, n, "list") { : "__nihil_s_list"; }              // paths (SPEC §24)
@@ -123,7 +125,7 @@ lib_missing(t = 0, s = 0, n = 0) {
     t == TYPE_STR {
         put_str(" has no method '");
         put_source(s, n);
-        put_str("': it has find, contains, starts_with, ends_with, slice, split, replace, trim, upper, lower, repeat, int, float, json, json_items, json_keys, json_values, json_text, json_quote, http_method, http_path, http_param, http_body, url_decode, list, is_dir, is_file, make_dir, remove, read_from and size");
+        put_str("': it has find, contains, starts_with, ends_with, slice, split, replace, trim, upper, lower, repeat, int, float, json, json_items, json_keys, json_values, json_text, json_quote, http_method, http_path, http_param, http_header, http_host_is_local, http_body, url_decode, list, is_dir, is_file, make_dir, remove, read_from and size");
         error_end();
     }
     t == TYPE_INT {

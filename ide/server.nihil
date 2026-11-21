@@ -16,6 +16,9 @@ SKIP = ["build", "node_modules", "__pycache__", "venv", "gerado_antes"];
 
 ROOT = "";                      // the Nihil repository (the folder the server starts in)
 HOME = "";
+// a secret drawn at every start: the page carries it and sends it with every /api/ call, so a
+// page of another site (which cannot read this page) cannot use the API
+TOKEN = "";
 
 // ---- small helpers --------------------------------------------------------------------
 now_ms() {
@@ -53,9 +56,12 @@ utf8_whole(t = "") {
     : n;
 }
 
-// a relative path the page may use: no "..", not absolute, not empty
+// a relative path the page may use: no "..", not absolute, not empty, no control bytes (a
+// zero byte would cut the path the kernel sees: "notes.txt\0.nihil" would open notes.txt)
 safe_rel(p = "") {
     #p == 0 || p.starts_with("/") { : false; }
+    i = 0;
+    * i < #p { p[i] < 32 { : false; } i = i + 1; }
     parts = p.split("/");
     i = 0;
     * i < #parts { parts[i] == ".." || parts[i] == "" { : false; } i = i + 1; }
@@ -621,11 +627,16 @@ send_static(c = 0, name = "") {
     name.ends_with(".js") { kind = "text/javascript; charset=utf-8"; }
     name.ends_with(".css") { kind = "text/css; charset=utf-8"; }
     name.ends_with(".png") { kind = "image/png"; }
+    name == "index.html" { t = (t || "").replace("{{NIHIL_TOKEN}}", TOKEN); }
     c.respond(200, kind, t || "");
 }
 
 handle(c = 0, req = "") {
     watch_runs();
+    !req.http_host_is_local() { c.respond(403, "application/json", "{\"error\": \"this server answers only to localhost\"}"); :; }
+    req.http_path().starts_with("/api/") && (req.http_header("x-nihil-token") || "") != TOKEN {
+        c.respond(403, "application/json", "{\"error\": \"reload the page (the server was restarted)\"}"); :;
+    }
     method = req.http_method();
     path = req.http_path();
     body = req.http_body();
@@ -635,8 +646,8 @@ handle(c = 0, req = "") {
     path == "/api/projects" {
         p = ((body.json("path") || "\"\"").json_text() || "").trim();
         * #p > 1 && p.ends_with("/") { p = p.slice(0, #p - 1); }
-        !p.starts_with(HOME + "/") || p.contains("/../") || p.ends_with("/..") {
-            c.respond(400, "application/json", "{\"error\": " + q("a project is a folder inside " + HOME) + "}"); :;
+        !p.starts_with(HOME + "/") || p.contains("/.") || !safe_rel(p.slice(1)) {
+            c.respond(400, "application/json", "{\"error\": " + q("a project is a folder inside " + HOME + ", not a hidden one") + "}"); :;
         }
         (body.json("create") || "false") == "true" { p.make_dir(); }
         !p.is_dir() { c.respond(400, "application/json", "{\"error\": " + q("no folder " + p) + "}"); :; }
@@ -672,7 +683,7 @@ handle(c = 0, req = "") {
     path == "/api/file" && method == "GET" {
         rel = req.http_param("path") || "";
         t? = "";
-        safe_rel(rel) { t = @? (project + "/" + rel); } || { t = _; }
+        safe_rel(rel) && rel.ends_with(".nihil") { t = @? (project + "/" + rel); } || { t = _; }
         t == _ { c.respond(404, "application/json", "{\"error\": \"file not found\"}"); :; }
         c.respond(200, "application/json", "{\"path\": " + q(rel) + ", \"content\": " + q(t || "") + ", \"editable\": "
             + $editable(project, rel) + ", \"hash\": " + $fnv(t || "") + "}");
@@ -750,6 +761,7 @@ main() {
     }
     !(ROOT + "/nihilc1.sh").is_file() { !>> "nihil ide: start it in the Nihil repository (no nihilc1.sh in " + ROOT + ")\n"; :: 1; }
     PROJECTS_FILE = ROOT + "/ide/projects.txt";
+    TOKEN = ((@ "/proc/sys/kernel/random/uuid") + (@ "/proc/sys/kernel/random/uuid")).replace("\n", "").replace("-", "");
     (ROOT + "/ide/workspace").make_dir();
     s? = PORT.listen();
     s == _ { !>> "nihil ide: port " + $PORT + " is taken\n"; :: 1; }

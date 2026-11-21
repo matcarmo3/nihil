@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="nihil-token" content="{{NIHIL_TOKEN}}">
 <title>Nihil IDE</title>
 <link rel="icon" type="image/png" href="/static/favicon.png">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
@@ -252,7 +253,10 @@ async function api(path, body) {
     if (body) body = { project, ...body };
     else path += (path.includes('?') ? '&' : '?') + 'project=' + encodeURIComponent(project);
   }
-  const r = await fetch(path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
+  // the server's secret (in this page only): every call carries it
+  const token = document.querySelector('meta[name="nihil-token"]').content;
+  const r = await fetch(path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Nihil-Token': token }, body: JSON.stringify(body) }
+                                   : { headers: { 'X-Nihil-Token': token } });
   const j = await r.json().catch(() => ({ error: 'the server gave no answer' }));
   if (!r.ok && j && typeof j === 'object') j.status = r.status;
   return j;

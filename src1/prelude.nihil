@@ -1764,17 +1764,20 @@ __nihil_http_reason(status = 0) {
     status == 200 { : "OK"; }
     status == 204 { : "No Content"; }
     status == 400 { : "Bad Request"; }
+    status == 403 { : "Forbidden"; }
     status == 404 { : "Not Found"; }
     status == 405 { : "Method Not Allowed"; }
+    status == 409 { : "Conflict"; }
     status == 500 { : "Internal Server Error"; }
     : "Status";
 }
 
 // c.respond(status, content type, body) → BOOL: the whole HTTP response, then closes;
-// false if the client went away
+// false if the client went away. No Access-Control-Allow-Origin: a page of another site must
+// not read what a local server answers (the browser reaches it through an SSH tunnel too)
 __nihil_i_respond(fd = 0, status = 200, content_type = "", body = "") {
     __ok = __nihil_fd_send(fd, "HTTP/1.1 " + $status + " " + __nihil_http_reason(status) + "\r\nContent-Type: " + content_type
-        + "\r\nContent-Length: " + $#body + "\r\nConnection: close\r\nAccess-Control-Allow-Origin: *\r\n\r\n" + body) == 0;
+        + "\r\nContent-Length: " + $#body + "\r\nConnection: close\r\n\r\n" + body) == 0;
     __nihil_fd_close(fd);
     : __ok;
 }
@@ -1822,6 +1825,31 @@ __nihil_s_http_param(s = "", name = "") {
         __i = __i + 1;
     }
     : _;
+}
+
+// s.http_header(name) → STRING?: the value of a header of the request (the name in any case,
+// the value without the spaces around), or _
+__nihil_s_http_header(s = "", name = "") {
+    __end? = s.find("\r\n\r\n");
+    __lines = s.slice(0, __end || #s).split("\r\n");
+    __want = name.lower();
+    __i = 1;                                        // line 0 is the request line
+    * __i < #__lines {
+        __c? = __lines[__i].find(":");
+        __c != _ && __lines[__i].slice(0, __c || 0).trim().lower() == __want { : __lines[__i].slice((__c || 0) + 1).trim(); }
+        __i = __i + 1;
+    }
+    : _;
+}
+
+// s.http_host_is_local() → BOOL: the request names this machine (localhost or 127.0.0.1, any
+// port). A server for one machine refuses the others: a site whose name is made to point at
+// 127.0.0.1 (DNS rebinding) sends its own name here
+__nihil_s_http_host_is_local(s = "") {
+    __h = (__nihil_s_http_header(s, "host") || "").lower();
+    __c? = __h.find(":");
+    __n = __h.slice(0, __c || #__h);
+    : __n == "localhost" || __n == "127.0.0.1" || __n == "[::1]";
 }
 
 // s.http_body() → what comes after the headers
