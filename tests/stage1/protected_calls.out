@@ -1,0 +1,12 @@
+2
+_ | index 5 out of bounds (size 3)
+_ | division by zero
+25 | []
+_ | division by zero
+start | _
+_ | could not read '/no/such/file'
+anog
+25000 failed, 75000 worked
+-2 | []
+2
+after: division by zero

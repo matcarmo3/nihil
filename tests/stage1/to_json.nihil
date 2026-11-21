@@ -1,0 +1,17 @@
+// x.to_json() (SPEC §26): any value as JSON text
+ITEM = @[name: STRING(20); width: FLOAT(8); fronts: INT(4); box: BOOL];
+>> 42.to_json() + " " + (-7).to_json() + " " + 2.5.to_json() + " " + 1.0.to_json() + " " + 0.1.to_json() + "\n";
+>> true.to_json() + " " + false.to_json() + "\n";
+>> "aspas \" barra \\ linha\nfim é".to_json() + "\n";
+n? = 3;
+>> n.to_json() + " ";
+n = _;
+>> n.to_json() + "\n";
+>> [1, 2, 3].to_json() + " " + ["a", "b"].to_json() + " " + [0.5, 2.0].to_json() + " " + [0 ; 0].to_json() + "\n";
+soap = ITEM("soap", 12.5, 2, false);
+>> soap.to_json() + "\n";
+>> [soap, ITEM("CX box", 30.0, 1, true)].to_json() + "\n";
+age = {"carla": 41, "ana": 30, "bob": 25};
+>> age.to_json() + "\n";                     // keys sorted
+by_store = {3: 1.5, 1: 2.0};
+>> by_store.to_json() + "\n";                // INT keys as text, sorted by number

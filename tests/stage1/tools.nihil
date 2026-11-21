@@ -1,0 +1,26 @@
+// tools("prefix") and call_tool("prefix", name, arguments) (SPEC §27): the methods whose names
+// start with the prefix, as tools for agents (MCP), and calling one by name
+SHELF = @[module: INT(3); width: FLOAT(8)];
+
+// the area of a rectangle,
+// in square units
+tool_area(width = 0.0, height = 0.0) { : width * height; }
+
+// greets someone
+tool_hello(name = "world", loud = false) {
+    loud { : "HELLO, " + name.upper() + "!"; }
+    : "hello, " + name;
+}
+
+// a shelf
+tool_shelf(module = 1) { : SHELF(module, 338.0); }
+
+helper(x = 0) { : x; }                 // not a tool: another prefix
+
+>> tools("tool_") + "\n";
+>> call_tool("tool_", "area", "{\"width\": 2.5, \"height\": 4}") || "?"; >> "\n";
+>> call_tool("tool_", "hello", "{}") || "?"; >> "\n";
+>> call_tool("tool_", "hello", "{\"name\": \"Nihil\", \"loud\": true}") || "?"; >> "\n";
+>> call_tool("tool_", "shelf", "{\"module\": \"3\"}") || "?"; >> "\n";   // a number given as text
+u? = call_tool("tool_", "nope", "{}");
+>> u; >> "\n";

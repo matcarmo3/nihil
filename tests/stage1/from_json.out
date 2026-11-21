@@ -1,0 +1,6 @@
+rice 21.5 3 false
+oil 0.0 0 false
+beans 18.0 4
+2 y 2
+true
+_ | field 'fronts' of ITEM is not an INT in the JSON: "many"

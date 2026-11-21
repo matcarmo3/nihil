@@ -1308,6 +1308,120 @@ with up to six arguments, for the prelude only); `openat`, `getdents64`,
 `chdir`, `close_range`, `execve`, `wait4` and `kill` are prelude code on top of
 it. The IDE server (`ide/server.nihil`) is written with them and §23.
 
+## 25. Protected calls (v4.0)
+
+> v4.0, being implemented: `tests/stage1/protected_calls.nihil` and the
+> `tests/stage1/errors/protected_*` tests define the behaviour.
+
+A `?` before a call makes a runtime error inside it a missing value instead of the end of the
+program. A server (an MCP server, an HTTP API) keeps running when one request fails.
+
+```text
+r? = ?proposal(plan, month);          // T?: the result, or _ when a runtime error happened inside
+r == _ { >> "failed: " + ?! + "\n"; } // ?! : the text of that error
+?save(report);                        // a command: the error, if any, is only in ?!
+```
+
+- `?` goes before a call: a method, a method of a model or a library call
+  (`?s.slice(a, b)`). Before anything else it is a compile error ("'?' goes before a call").
+- The result is `T?` for a call of type `T` (still `T?` when `T` is already optional). It is
+  assigned like any optional: `y = ?f();` with a plain `y` is the usual error ("'y' is not
+  optional and cannot receive INT?").
+- **Caught:** every runtime error of §8.3 raised anywhere inside the call, however deep: index
+  out of bounds, division by zero, invalid input, `could not read`, `could not write`, a method
+  without a value, a table error. **Not caught:** `out of memory` (the heap may be inconsistent)
+  and `:: n` (the program ending on purpose).
+- `?!` is a STRING: the message of the error the last protected call caught (as it would have
+  been written after `nihil: `), or `""` when that call ended normally. Nested protections
+  work: the innermost one catches, and an outer call that then ends normally leaves `?!` empty.
+- What was written before the error stays written: the output buffer is not touched.
+- A protected call costs a few instructions when nothing fails, and the stack does not grow
+  when it is used in a loop.
+
+**Implementation.** A stack of protections in the runtime: the stack pointer, the frame
+pointer and the address to resume at, 3 words each, 64 levels deep. The compiler emits a push
+before the call and a pop after it; `rt_error` and the routines that end with a runtime error
+look at the stack first: with a protection active, they copy the message to `?!`'s buffer,
+restore the stack and the frame and resume with `_`. The collector scans whatever stack it
+finds, so nothing else changes.
+
+## 26. JSON out and in (v4.0)
+
+> v4.0, being implemented: `tests/stage1/to_json.nihil` and `from_json.nihil`.
+
+```text
+>> plan.to_json();                       // a record: {"id": 293, "store": 1, "name": "REFRIGERANTES", …}
+>> plans.to_json();                      // an ARRAY: [{…}, {…}]
+>> totals.to_json();                     // a MAP: {"1": 12.5, "2": 3.0}
+p = PLANOGRAM.from_json(text);           // a record from a JSON object
+ps = PLANOGRAM.from_json_items(text);    // an ARRAY of records from a JSON array of objects
+```
+
+- `x.to_json()` works on every type and gives a STRING:
+  - INT: its digits;
+  - FLOAT: the text `>>` writes (§6.1.1), with `inf`, `-inf` and `nan` as `null`;
+  - BOOL: `true` or `false`;
+  - STRING: quoted and escaped, like `json_quote()`;
+  - an optional: `null` for `_`;
+  - an ARRAY: `[a, b]`;
+  - a record: an object with the model's field names in declaration order;
+  - a MAP: an object with the keys as text, **sorted** (INT keys by number, STRING keys by
+    bytes), so that the text is the same every time.
+  
+  The separators are `", "` and `": "`, as Python's `json.dumps` writes them.
+- `MODEL.from_json(text)` reads a JSON object into a new record, field by field by name:
+  - a missing field keeps its default (`0`, `0.0`, `false`, `""`), and keys the model does
+    not have are ignored;
+  - a number is accepted for a FLOAT field (`18` → `18.0`), and a text holding a number for
+    an INT or FLOAT field (`"4"` → `4`);
+  - any other mismatch is a runtime error, which `?` catches:
+    `field 'fronts' of ITEM is not an INT in the JSON: "many"`.
+- `MODEL.from_json_items(text)` does the same for each object of a JSON array.
+
+**Implementation.** Prelude code over the model's list of fields, which the compiler already
+passes to the table reader: `__nihil_r_to_json(schema, names, record)` and
+`__nihil_r_from_json`; `to_json` of the other types is prelude code by type.
+
+## 27. Tools from methods (v4.0)
+
+> v4.0, being implemented: `tests/stage1/tools.nihil` and the `tests/stage1/errors/tools_*` tests.
+
+The methods whose names start with a prefix can be listed and called by name, for an MCP
+server (§23, `lib/mcp.nihil`): their parameters already have names, types (from the
+defaults) and defaults, and the comment above them describes them.
+
+```text
+// the proposed fronts of a planogram for a month
+tool_proposal(plan = 0, month = 12) { … }
+
+>> tools("tool_");                                   // the tools, as the JSON array MCP's tools/list wants
+r? = ?call_tool("tool_", name, arguments);           // calls one by name with a JSON object of arguments
+```
+
+- `tools(prefix)` is a STRING made at compile time. `prefix` is a literal text (anything else
+  is a compile error). For each method whose name starts with it, in the order of the source,
+  it holds an object with:
+  - `name`: the method's name without the prefix;
+  - `description`: the `//` lines right above the method, joined with spaces;
+  - `inputSchema`: an object with one property per parameter, with `"type"` from the default
+    (INT `integer`, FLOAT `number`, BOOL `boolean`, STRING `string`) and `"default"`.
+  
+  A parameter of another type is a compile error that names the parameter and the method.
+- `call_tool(prefix, name, arguments)` gives `STRING?`. It calls the method named
+  `prefix + name`, reading each parameter from the JSON object `arguments` by name (a missing
+  one takes its default; a number given as text is accepted). Its result:
+  - a STRING result as it is;
+  - any other value `.to_json()`;
+  - `""` for a command;
+  - `_` when there is no such tool.
+  
+  A runtime error inside the method is not caught unless the call is protected
+  (`?call_tool(…)`).
+
+**Implementation.** The compiler knows every method when it reaches the end of the source:
+`tools(prefix)` becomes a constant text, and `call_tool(prefix, …)` a generated method with one
+branch per tool, reading its parameters with the JSON library.
+
 ## Appendix A — What changed since v1.0, and why
 
 | Change | Reason |

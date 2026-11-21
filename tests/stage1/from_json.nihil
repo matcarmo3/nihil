@@ -1,0 +1,14 @@
+// MODEL.from_json(text), MODEL.from_json_items(text) (SPEC §26): records from JSON, by field name
+ITEM = @[name: STRING(20); width: FLOAT(8); fronts: INT(4); box: BOOL];
+a = ITEM.from_json("{\"fronts\": 3, \"name\": \"rice\", \"width\": 21.5, \"box\": false, \"extra\": [1, 2]}");
+>> a.name + " " + $a.width + " " + $a.fronts + " " + $a.box + "\n";
+b = ITEM.from_json("{\"name\": \"oil\"}");                     // missing fields keep the defaults
+>> b.name + " " + $b.width + " " + $b.fronts + " " + $b.box + "\n";
+c = ITEM.from_json("{\"name\": \"beans\", \"width\": 18, \"fronts\": \"4\"}");   // 18 → 18.0; "4" → 4
+>> c.name + " " + $c.width + " " + $c.fronts + "\n";
+list = ITEM.from_json_items("[{\"name\": \"x\", \"fronts\": 1}, {\"name\": \"y\", \"fronts\": 2}]");
+>> $#list + " " + list[1].name + " " + $list[1].fronts + "\n";
+>> ITEM.from_json(a.to_json()).to_json() == a.to_json(); >> "\n";   // back and forth
+bad(t = "") { : ITEM.from_json(t).fronts; }
+r? = ?bad("{\"fronts\": \"many\"}");
+>> r; >> " | " + ?! + "\n";

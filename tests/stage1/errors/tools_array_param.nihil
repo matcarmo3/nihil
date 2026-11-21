@@ -1,0 +1,3 @@
+// a tool's parameters are INT, FLOAT, BOOL or STRING
+tool_sum(xs = [0]) { : 0; }
+>> tools("tool_");

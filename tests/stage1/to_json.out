@@ -1,0 +1,9 @@
+42 -7 2.5 1.0 0.1
+true false
+"aspas \" barra \\ linha\nfim é"
+3 null
+[1, 2, 3] ["a", "b"] [0.5, 2.0] []
+{"name": "soap", "width": 12.5, "fronts": 2, "box": false}
+[{"name": "soap", "width": 12.5, "fronts": 2, "box": false}, {"name": "CX box", "width": 30.0, "fronts": 1, "box": true}]
+{"ana": 30, "bob": 25, "carla": 41}
+{"1": 2.0, "3": 1.5}
