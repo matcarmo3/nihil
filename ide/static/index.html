@@ -48,7 +48,7 @@ select { background: var(--panel2); color: var(--text); border: 1px solid var(--
 /* the Claude panel (right) */
 #chatResize { cursor: col-resize; background: var(--line); opacity: .5; }
 #chatResize:hover { background: var(--dim); }
-#chat { display: grid; grid-template-rows: auto auto auto 1fr auto; background: var(--panel); min-height: 0; min-width: 0; }
+#chat { display: grid; grid-template-rows: auto auto auto auto 1fr auto; background: var(--panel); min-height: 0; min-width: 0; }
 #chat[hidden], #chatResize[hidden] { display: none; }
 #chat .chat-head { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--line); }
 #chat .chat-head b { color: var(--accent); }
@@ -84,11 +84,20 @@ select { background: var(--panel2); color: var(--text); border: 1px solid var(--
   animation: pulse 1.2s ease-in-out infinite; }
 #activity .done { color: var(--dim); }
 @keyframes pulse { 50% { opacity: .25; } }
-#activity .bar { display: inline-block; width: 70px; height: 7px; background: var(--panel2); border-radius: 4px; overflow: hidden;
-  vertical-align: middle; margin-right: 5px; }
-#activity .bar i { display: block; height: 100%; background: var(--ok); }
-#activity .bar i.warn { background: #e0b341; } #activity .bar i.full { background: var(--err); }
-#activity .warn-text { color: #e0b341; } #activity .full-text { color: var(--err); }
+/* the plan's usage: its own strip under the panel's title */
+#usage { padding: 7px 10px 6px; border-bottom: 1px solid var(--line); font-size: 12px; }
+#usage .meters { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+#usage .meter .top { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; }
+#usage .meter .name { color: var(--dim); }
+#usage .meter .pct { font-weight: 600; font-variant-numeric: tabular-nums; }
+#usage .bar { height: 6px; background: var(--panel2); border-radius: 3px; overflow: hidden; margin: 3px 0 2px; }
+#usage .bar i { display: block; height: 100%; background: var(--ok); border-radius: 3px; }
+#usage .bar i.warn { background: #e0b341; } #usage .bar i.full { background: var(--err); }
+#usage .pct.warn { color: #e0b341; } #usage .pct.full { color: var(--err); }
+#usage .renew { color: var(--dim); font-size: 11px; }
+#usage .foot { color: var(--dim); font-size: 11px; margin-top: 4px; display: flex; justify-content: space-between; gap: 8px; }
+#usage .foot .alert { color: var(--err); }
+#usage .none { color: var(--dim); font-size: 11px; }
 /* tabs Claude read (◦), edited (✎) or is working in now (pulsing) */
 .etab.claude-read::before { content: "◦ "; color: var(--accent); }
 .etab.claude-edit::before { content: "✎ "; color: var(--accent); }
@@ -233,6 +242,7 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
       <div class="chat-head"><b>✦ Claude</b><span id="chatState" class="tool"></span><div class="spacer"></div>
         <label class="opt" title="Claude may change and create files inside this project (it never runs commands)"><input type="checkbox" id="chatEdits"> may edit</label>
         <button id="chatNew" title="Forget this conversation and start a new one">New</button></div>
+      <div id="usage" title="The plan's usage, from Claude's last answer (seeing it costs nothing)"></div>
       <div class="chat-ctx" title="What goes with each message">send along:
         <label><input type="checkbox" id="ctxSel" checked>selection</label>
         <label><input type="checkbox" id="ctxFile" checked>active file</label>
@@ -856,10 +866,9 @@ function renderActivity() {
   });
   if (chats.length) row('other chats', (v) => { v.textContent = chats.map((r) => `"${r.label}" (${fmtMs(r.ms)})`).join(', '); });
   row('shells', (v) => { v.textContent = 'none: the panel runs no commands (Bash is blocked), so there are no shells or monitors'; });
-  usageRows(row);
+  renderUsage();
   const live = (chatRun ? 1 : 0) + claudeAgents.filter((a) => a.state === 'running').length + progs.length;
-  const u = loadUsage(), hi = u && u.info && Object.values(u.info.unifiedWindows || {}).reduce((m, x) => Math.max(m, x.utilization || 0), 0);
-  $('actSummary').textContent = (live ? `· ${live} working` : '') + (hi >= 0.8 ? ` · usage ${Math.round(hi * 100)}%` : '');
+  $('actSummary').textContent = live ? `· ${live} working` : '';
 }
 // the plan's usage: every answer carries a rate_limit_event (the 5-hour and the 7-day windows,
 // how much of each is used and when it renews); the last one is kept, so seeing it costs nothing
@@ -879,27 +888,35 @@ const until = (t) => { const m = Math.max(0, Math.round((t * 1000 - Date.now()) 
 const when = (t) => { const d = new Date(t * 1000), now = new Date();
   const hm = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
   return d.toDateString() === now.toDateString() ? 'today ' + hm : d.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' }) + ' ' + hm; };
-function usageRows(row) {
+function renderUsage() {
+  const box = $('usage'); if (!box) return;
   const u = loadUsage();
-  if (!u || !u.info) { row('usage', (v) => { v.textContent = 'shown after the first answer'; }); return; }
+  if (!u || !u.info) { box.innerHTML = '<div class="none">Usage of the plan: shown after Claude\'s first answer.</div>'; return; }
   const w = u.info.unifiedWindows || {};
-  const one = (name, x) => {
-    if (!x) return;
-    row(name, (v) => {
-      const pct = Math.round((x.utilization || 0) * 100);
-      const bar = document.createElement('span'); bar.className = 'bar'; const fill = document.createElement('i');
-      fill.style.width = Math.min(100, pct) + '%'; fill.className = pct >= 100 || x.status === 'rejected' ? 'full' : pct >= 80 ? 'warn' : '';
-      bar.appendChild(fill); v.appendChild(bar);
-      const t = document.createElement('span'); t.className = fill.className ? fill.className + '-text' : '';
-      t.textContent = `${pct}% · renews ${when(x.resetsAt)} (in ${until(x.resetsAt)})` + (x.status === 'rejected' ? ' — limit reached' : '');
-      v.appendChild(t);
-    });
-  };
-  one('5 hours', w.five_hour); one('week', w.seven_day);
-  for (const k of Object.keys(w)) if (k !== 'five_hour' && k !== 'seven_day') one(k.replace(/_/g, ' '), w[k]);
+  const wins = [['5 hours', w.five_hour], ['week', w.seven_day]]
+    .concat(Object.keys(w).filter((k) => k !== 'five_hour' && k !== 'seven_day').map((k) => [k.replace(/_/g, ' '), w[k]]))
+    .filter(([, x]) => x);
+  box.innerHTML = '';
+  const meters = document.createElement('div'); meters.className = 'meters';
+  for (const [name, x] of wins) {
+    const pct = Math.round((x.utilization || 0) * 100);
+    const cls = pct >= 100 || x.status === 'rejected' ? 'full' : pct >= 80 ? 'warn' : '';
+    const m = document.createElement('div'); m.className = 'meter';
+    m.innerHTML = `<div class="top"><span class="name"></span><span class="pct ${cls}"></span></div><div class="bar"><i class="${cls}"></i></div><div class="renew"></div>`;
+    m.querySelector('.name').textContent = name;
+    m.querySelector('.pct').textContent = pct + '%';
+    m.querySelector('.bar i').style.width = Math.min(100, pct) + '%';
+    m.querySelector('.renew').textContent = (x.status === 'rejected' ? 'limit reached · ' : '') + `renews ${when(x.resetsAt)} · in ${until(x.resetsAt)}`;
+    meters.appendChild(m);
+  }
+  box.appendChild(meters);
   const age = Math.round((Date.now() - u.at) / 60000);
-  row('', (v) => { v.className = 'v done'; v.textContent = `as of ${age < 1 ? 'now' : age + ' min ago'}` + (u.info.overageStatus === 'rejected' ? ' · no extra usage (' + (u.info.overageDisabledReason || 'off').replace(/_/g, ' ') + ')' : '')
-    + (chatSession && sessionCost() ? ` · this conversation US$ ${sessionCost().toFixed(2)}` : ''); });
+  const foot = document.createElement('div'); foot.className = 'foot';
+  const left = document.createElement('span'); left.textContent = 'as of ' + (age < 1 ? 'now' : age < 60 ? age + ' min ago' : Math.floor(age / 60) + ' h ago');
+  const right = document.createElement('span');
+  if (u.info.overageStatus === 'rejected') { right.className = 'alert'; right.textContent = 'no extra usage (' + (u.info.overageDisabledReason || 'off').replace(/_/g, ' ') + ')'; }
+  if (chatSession && sessionCost()) right.textContent = (right.textContent ? right.textContent + ' · ' : '') + `conversation US$ ${sessionCost().toFixed(2)}`;
+  foot.append(left, right); box.appendChild(foot);
 }
 
 async function pollActivity() {
