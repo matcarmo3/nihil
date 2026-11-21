@@ -1276,6 +1276,18 @@ c? = "127.0.0.1".connect(8740);                               // a raw connectio
 | `host.connect(port)` | `INT?`: a connection to `host:port`, on which `send`, `receive` and `close` work; `_` if the host is unknown or does not answer. The host is an IPv4 address (`"10.0.0.5"`), `"localhost"` or a name in `/etc/hosts` (no DNS yet) |
 | `url.http_get()`, `url.http_post(type, body)`, `url.http_request(method, type, body)` | `STRING?`: the whole response (status line, headers, a blank line, the body: put back together when it came in chunks), or `_` if the URL is not `http://…` or the server does not answer. The request says `Connection: close`, and the answer is read until the server closes |
 | `resp.http_status()` | `INT?`: the status of a response (`"HTTP/1.1 404 Not Found"` → `404`) |
+| `url.http_open(method, type, body)` | `INT?`: sends the request (HTTP/1.0, so the body comes without chunks) and reads only the response's headers; the connection is left where the body starts |
+| `c.read()` | `STRING?`: the next piece the other side sent (what arrived, up to 64 KiB; it waits for one), or `_` when it closed |
+
+A body read as it arrives (a model writing its answer word by word):
+
+```text
+c? = "http://localhost:11434/api/chat".http_open("POST", "application/json", request);
+conn = c || -1;
+piece? = conn.read();
+* piece != _ { >> piece || ""; piece = conn.read(); }
+conn.close();
+```
 
 `resp.http_header(name)` and `resp.http_body()` read a response as they read a request. There is
 no TLS: `https://…` gives `_` (a local proxy can add it). The runtime has one more routine,
@@ -1385,6 +1397,7 @@ it. The IDE server (`ide/server.nihil`) is written with them and §23.
 | **v1.9:** saved registers learned between passes | The prologue comes before the body; using the count from the previous pass avoids saving registers for nothing |
 | **v2.1:** `... ms;` waits | Animations need a fixed speed; a busy loop depends on the machine. The ellipsis reads as a pause and cannot start any valid expression |
 | **v2.2:** renamed from Ket to Nihil | Latin for *nothing*: no keywords, and `_` for the missing value |
+| **v3.12:** `c.read()`, `url.http_open(method, type, body)` | Showing an answer while it is written: a local model takes a minute for a long answer, and the screen should not stay still. The headers are read one byte at a time, so nothing of the body is taken before the program reads it |
 | **v3.11:** the client side of the network: `host.connect(port)`, `url.http_get()`, `http_post`, `http_request`, `resp.http_status()` | A program can now ask other servers (an LLM served by Ollama, another planogram server) instead of only answering. The first use is an agent in Nihil that talks to a local model and calls the planogram's tools in the same process |
 | **v3.10:** `req.http_header(name)`, `req.http_host_is_local()`; `respond` no longer sends `Access-Control-Allow-Origin: *`; the IDE checks the host and a secret token, refuses hidden folders as projects, control bytes in paths, and serves only `.nihil` files; a path with a zero byte inside is refused everywhere (`@`, `@?`, `@>>`, `read_at`, the directory functions, `cmd.start`); accepted connections have a read deadline of 15 s; the IDE's programs run in `build/runs`, at most 8 at a time | A security review found that any page open in the browser could use the IDE through the SSH tunnel (read keys, write and run a program) and read the planogram's data: the `*` let other sites read the answers, and nothing checked who was asking. A server for one machine now answers only to it and to its own page |
 | **v3.9:** methods of a model: `MODEL.name(self = MODEL(), …) { … }`, called as `record.name(…)` | Programs organized around their data (a planogram, its shelves and items) read better when the operations live with the model. The `.` already called the library on a value; extending it to the program's own models needs no keyword and no runtime dispatch. Inheritance is left out: composition covers it and keeps the language small |

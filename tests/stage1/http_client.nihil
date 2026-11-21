@@ -36,6 +36,16 @@ raw? = k.receive();
 k.close();
 >> "raw: " + $((raw || "").http_status() || 0) + " " + (raw || "").http_body() + "\n";
 
+// a body read as it arrives: http_open gives the connection after the headers; read() gives pieces
+st? = (base + "/stream").http_open("GET", "", "");
+sc = st || -1;
+pieces = 0;
+got = "";
+piece? = sc.read();
+* piece != _ { pieces = pieces + 1; got = got + (piece || ""); piece = sc.read(); }
+sc.close();
+>> "stream: " + got.replace("\n", "|") + " in " + $(pieces >= 2) + " several pieces\n";
+
 // what fails gives _
 s? = "https://127.0.0.1/".http_get();
 >> s == _; >> " ";

@@ -25,6 +25,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             for p in parts: self.wfile.write(b"%x\r\n%s\r\n" % (len(p), p.encode()))
             self.wfile.write(b"0\r\n\r\n")
+        elif self.path == "/stream":
+            import time
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            for i in (1, 2, 3):
+                self.wfile.write(b"line %d\n" % i)
+                self.wfile.flush()
+                time.sleep(0.2)
+            self.close_connection = True
         else:
             self.answer(404, "nothing here")
     def do_POST(self):

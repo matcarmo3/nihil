@@ -5,4 +5,5 @@ chunked: one two three
 404 nothing here
 localhost: 200
 raw: 200 hello from the client test
+stream: line 1|line 2|line 3| in true several pieces
 true true true true
