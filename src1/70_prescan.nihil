@@ -177,6 +177,8 @@ register_method(ns = 0, nl = 0) {
         n_param >= MAX_PARAM { error("too many parameters in the program"); }
         p_type[n_param] = lit_type;
         p_default[n_param] = lit_value;
+        p_start[n_param] = pi;
+        p_len[n_param] = pl;
         n_param = n_param + 1;
         s_nparam[k] = s_nparam[k] + 1;
         next_token();

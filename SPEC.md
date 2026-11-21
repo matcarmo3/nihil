@@ -1,4 +1,4 @@
-# Nihil — Language Specification (v3.9)
+# Nihil — Language Specification (v4.0)
 
 > **Nihil**: an imperative, minimalist language compiled straight to x86_64 machine
 > code, with no libc, no linker and no VM. The name is Latin for
@@ -1358,8 +1358,8 @@ it. The IDE server (`ide/server.nihil`) is written with them and §23.
 
 ## 25. Protected calls (v4.0)
 
-> v4.0, being implemented: `tests/stage1/protected_calls.nihil` and the
-> `tests/stage1/errors/protected_*` tests define the behaviour.
+> v4.0: `tests/stage1/protected_calls.nihil` and the `tests/stage1/errors/protected_*` tests
+> define the behaviour.
 
 A `?` before a call makes a runtime error inside it a missing value instead of the end of the
 program. A server (an MCP server, an HTTP API) keeps running when one request fails.
@@ -1386,16 +1386,21 @@ r == _ { >> "failed: " + ?! + "\n"; } // ?! : the text of that error
 - A protected call costs a few instructions when nothing fails, and the stack does not grow
   when it is used in a loop.
 
-**Implementation.** A stack of protections in the runtime: the stack pointer, the frame
-pointer and the address to resume at, 3 words each, 64 levels deep. The compiler emits a push
-before the call and a pop after it; `rt_error` and the routines that end with a runtime error
-look at the stack first: with a protection active, they copy the message to `?!`'s buffer,
-restore the stack and the frame and resume with `_`. The collector scans whatever stack it
+**Implementation.** A stack of protections in the runtime, 64 levels deep: the stack pointer,
+the frame pointer, the address to resume at and the optimizer's registers (rbx, r12–r15: a
+local kept in one must not change when the call is abandoned), 8 words each. The compiler
+emits `RT_PROTECT` (with the resume address) before the call and `RT_UNPROTECT` after it.
+Every runtime error starts with `rt_err_begin` and ends with `rt_err_end`: with a protection
+active, what the error writes to the standard error goes to `?!`'s text (4000 bytes) instead,
+and `rt_err_end` restores the stack, the frame and the registers and resumes with `_`. The
+prelude's errors (table files, JSON, the input) go through `RT_FAIL`, so they are caught
+too. `out of memory` turns the protections off before it is written. On macOS the same is in
+`arm64/rt.c` (`err_begin`, `err_end`, `nh_resume`). The collector scans whatever stack it
 finds, so nothing else changes.
 
 ## 26. JSON out and in (v4.0)
 
-> v4.0, being implemented: `tests/stage1/to_json.nihil` and `from_json.nihil`.
+> v4.0: `tests/stage1/to_json.nihil` and `from_json.nihil`.
 
 ```text
 >> plan.to_json();                       // a record: {"id": 293, "store": 1, "name": "REFRIGERANTES", …}
@@ -1432,7 +1437,7 @@ passes to the table reader: `__nihil_r_to_json(schema, names, record)` and
 
 ## 27. Tools from methods (v4.0)
 
-> v4.0, being implemented: `tests/stage1/tools.nihil` and the `tests/stage1/errors/tools_*` tests.
+> v4.0: `tests/stage1/tools.nihil` and the `tests/stage1/errors/tools_*` tests.
 
 The methods whose names start with a prefix can be listed and called by name, for an MCP
 server (§23, `lib/mcp.nihil`): their parameters already have names, types (from the
@@ -1511,6 +1516,7 @@ branch per tool, reading its parameters with the JSON library.
 | **v1.9:** saved registers learned between passes | The prologue comes before the body; using the count from the previous pass avoids saving registers for nothing |
 | **v2.1:** `... ms;` waits | Animations need a fixed speed; a busy loop depends on the machine. The ellipsis reads as a pause and cannot start any valid expression |
 | **v2.2:** renamed from Ket to Nihil | Latin for *nothing*: no keywords, and `_` for the missing value |
+| **v4.0:** protected calls `?f()` and `?!`; `x.to_json()`, `MODEL.from_json(text)`, `MODEL.from_json_items(text)`; `tools("prefix")` and `call_tool("prefix", name, arguments)` | The planogram's MCP server showed what a server in Nihil lacks (docs/v4.0-mcp.md): one bad request ended the whole server, every answer was JSON assembled by hand, and every tool was declared twice (its method and its schema). A runtime error can now be a missing value, any value can be written as JSON and read back into a record, and the tools come from the methods themselves |
 | **v3.12:** `c.read()`, `url.http_open(method, type, body)` | Showing an answer while it is written: a local model takes a minute for a long answer, and the screen should not stay still. The headers are read one byte at a time, so nothing of the body is taken before the program reads it |
 | **v3.11:** the client side of the network: `host.connect(port)`, `url.http_get()`, `http_post`, `http_request`, `resp.http_status()` | A program can now ask other servers (an LLM served by Ollama, another planogram server) instead of only answering. The first use is an agent in Nihil that talks to a local model and calls the planogram's tools in the same process |
 | **v3.10:** `req.http_header(name)`, `req.http_host_is_local()`; `respond` no longer sends `Access-Control-Allow-Origin: *`; the IDE checks the host and a secret token, refuses hidden folders as projects, control bytes in paths, and serves only `.nihil` files; a path with a zero byte inside is refused everywhere (`@`, `@?`, `@>>`, `read_at`, the directory functions, `cmd.start`); accepted connections have a read deadline of 15 s; the IDE's programs run in `build/runs`, at most 8 at a time | A security review found that any page open in the browser could use the IDE through the SSH tunnel (read keys, write and run a program) and read the planogram's data: the `*` let other sites read the answers, and nothing checked who was asking. A server for one machine now answers only to it and to its own page |

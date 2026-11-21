@@ -33,8 +33,33 @@ typedef uint64_t u64;
 static unsigned char out_buf[65536];
 static i64 out_size;
 
+// ---- protected calls (SPEC §25) ---------------------------------------------------------
+// A runtime error starts with err_begin and ends with err_end. With no protection active they
+// write "nihil: …" and end the program with 2; inside a protected call (?f()) the text goes to
+// ?! and err_end resumes after the call (nh_resume, below), with the stacks and the registers
+// the translated program had there (macos/translate.py fills the frame).
+typedef struct { i64 emu_sp, fp, target, r19, r20, r21, r22, r23, sp; } prot_frame;
+static prot_frame prot[64];
+static i64 prot_depth;
+static int err_capture;
+static char err_buf[4000];
+static i64 err_len;
+_Noreturn void nh_resume(prot_frame *f);
+__asm__(
+    ".text\n.p2align 2\n.globl _nh_resume\n_nh_resume:\n"
+    "    ldr x16, [x0, #64]\n    mov sp, x16\n"
+    "    ldr x28, [x0]\n    ldr x29, [x0, #8]\n    ldr x17, [x0, #16]\n"
+    "    ldp x19, x20, [x0, #24]\n    ldp x21, x22, [x0, #40]\n    ldr x23, [x0, #56]\n"
+    "    mov x9, #0\n    mov x11, #0\n    br x17\n");
+
 static void write_all(int fd, const void *p, i64 n) {
     const char *s = p;
+    if (fd == 2 && err_capture) {                     // into ?!'s text
+        if (n > (i64)sizeof err_buf - err_len) n = (i64)sizeof err_buf - err_len;
+        memcpy(err_buf + err_len, s, (size_t)n);
+        err_len += n;
+        return;
+    }
     while (n > 0) {
         ssize_t w = write(fd, s, (size_t)n);
         if (w <= 0) return;
@@ -79,13 +104,44 @@ void nh_exit(i64 code) {
     _exit((int)code);
 }
 
-// a runtime error: "nihil: <reason>" on the standard error, exit code 2 (SPEC §8.3)
-void nh_error(const char *msg) {
+static void err_begin(void) {
+    if (prot_depth > 0) { err_len = 0; err_capture = 1; return; }
     nh_flush();
     write_all(2, "nihil: ", 7);
+}
+
+static _Noreturn void err_end(void) {
+    if (!err_capture) _exit(2);
+    err_capture = 0;
+    if (err_len > 0 && err_buf[err_len - 1] == '\n') err_len--;
+    prot_depth--;
+    nh_resume(&prot[prot_depth]);
+}
+
+// the translated program's RT_PROTECT: the next frame (filled by the glue)
+prot_frame *nh_protect_slot(void);
+void nh_unprotect(void) { prot_depth--; err_len = 0; }
+
+// a runtime error: "nihil: <reason>" on the standard error, exit code 2 (SPEC §8.3)
+void nh_error(const char *msg) {
+    if (strcmp(msg, "out of memory") == 0) prot_depth = 0;   // never caught: the heap may be inconsistent
+    err_begin();
     write_all(2, msg, (i64)strlen(msg));
     write_all(2, "\n", 1);
-    _exit(2);
+    err_end();
+}
+
+prot_frame *nh_protect_slot(void) {
+    if (prot_depth >= 64) nh_error("more than 64 protected calls inside each other");
+    return &prot[prot_depth++];
+}
+
+// a runtime error with a Nihil text as its message (the prelude's errors)
+void nh_fail(const char *t) {
+    err_begin();
+    write_all(2, t, ((const i64 *)t)[-1]);
+    write_all(2, "\n", 1);
+    err_end();
 }
 
 // an index out of bounds: the array (its length at -8) and the index
@@ -451,6 +507,15 @@ static char *new_text(i64 n) {
     return (char *)a;
 }
 
+// ?! → a new text: the message of the last caught runtime error ("" after a call that worked)
+char *nh_err_message(void) {
+    char *r = new_text(err_len);
+    memcpy(r, err_buf, (size_t)err_len);
+    ((i64 *)r)[-1] = err_len;
+    r[err_len] = 0;
+    return r;
+}
+
 i64 nh_text_equal(const char *a, const char *b) {
     i64 n = ((const i64 *)a)[-1];
     return n == ((const i64 *)b)[-1] && memcmp(a, b, (size_t)n) == 0;
@@ -553,9 +618,9 @@ static int c_path(const char *t, char *out, i64 cap) {
 static void put_err(const char *s) { write_all(2, s, (i64)strlen(s)); }
 
 static _Noreturn void fail_read(const char *path) {
-    nh_flush();
-    put_err("nihil: could not read '"); put_err(path); put_err("'\n");
-    _exit(2);
+    err_begin();
+    put_err("could not read '"); put_err(path); put_err("'\n");
+    err_end();
 }
 
 static const char *reason(int e) {
@@ -575,13 +640,13 @@ static const char *reason(int e) {
 }
 
 static _Noreturn void fail_write(const char *path, int e) {
-    nh_flush();
-    put_err("nihil: could not write '"); put_err(path); put_err("': ");
+    err_begin();
+    put_err("could not write '"); put_err(path); put_err("': ");
     const char *r = reason(e);
     if (r) put_err(r);
     else { char b[24]; int n = decimal(e, b + 24); put_err("error "); write_all(2, b + 24 - n, n); }
     put_err("\n");
-    _exit(2);
+    err_end();
 }
 
 // the data on the disk: macOS's fsync stops at the drive's cache, F_FULLFSYNC goes through it

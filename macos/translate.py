@@ -59,6 +59,8 @@ RT = {
     215: (['rax', 'rcx'], 'nh_json_end', ['rax']), 220: (['rax', 'rcx', 'rdx'], 'nh_sub', ['rax']),
     225: (['rax', 'rcx', 'rdx'], 'nh_put', ['rax']), 230: (['rax', 'rcx', 'rdx'], 'nh_rec_parse', ['rax']),
     235: (['rax', 'rcx'], 'nh_lines', ['rax']), 240: (['rax', 'rcx'], 'nh_net_connect', ['rax']),
+    245: (['rax'], 'nh_protect_slot', []), 250: ([], 'nh_unprotect', []),
+    255: ([], 'nh_err_message', ['rax']), 260: (['rax'], 'nh_fail', []),
 }
 
 
@@ -236,7 +238,13 @@ class Translator:
         target = branch_target(addr, raw)
 
         if mn == 'push':
-            if self.is_mem(ops[0]):
+            if re.fullmatch(r'-?0x[0-9a-f]+|-?\d+', ops[0]):      # push imm (sign-extended to 64 bits)
+                v = int(ops[0], 0)
+                if v > 0x7FFFFFFF:
+                    v -= 1 << 32
+                self.imm('x16', v)
+                self.push('x16')
+            elif self.is_mem(ops[0]):
                 self.load('x16', ops[0])
                 self.push('x16')
             else:
@@ -494,6 +502,16 @@ class Translator:
         self.emit(f'bl Lrt_{rt}')
 
     def glue(self, rt):
+        if rt == 245:                                 # RT_PROTECT: a frame to resume at (rt.c, nh_resume)
+            return ['Lrt_245:', '    sub x28, x28, #48',
+                    '    stp x9, x10, [x28]', '    stp x11, x12, [x28, #16]', '    stp x13, x30, [x28, #32]',
+                    '    adrp x16, _nh_emu_sp@PAGE', '    str x28, [x16, _nh_emu_sp@PAGEOFF]',
+                    '    bl _nh_protect_slot',
+                    '    ldp x9, x10, [x28]', '    ldp x11, x12, [x28, #16]', '    ldp x13, x30, [x28, #32]',
+                    '    add x28, x28, #48',
+                    '    str x28, [x0]', '    str x29, [x0, #8]', '    str x9, [x0, #16]',
+                    '    stp x19, x20, [x0, #24]', '    stp x21, x22, [x0, #40]', '    str x23, [x0, #56]',
+                    '    mov x16, sp', '    str x16, [x0, #64]', '    ret']
         ins, fn, outs = RT[rt]
         L = [f'Lrt_{rt}:', '    sub x28, x28, #48',
              '    stp x9, x10, [x28]', '    stp x11, x12, [x28, #16]', '    stp x13, x30, [x28, #32]',
@@ -525,6 +543,11 @@ class Translator:
                 targets.add(t)
                 if raw[0] == 0xE8:
                     entries.add(t)
+            m = re.match(r'lea\s+\w+,\s*\[rip\s*([+-])\s*(0x[0-9a-f]+)\]', text)
+            if m:                                     # a code address taken (where a protected call resumes)
+                a = addr + len(raw) + int(m.group(1) + m.group(2), 16)
+                if BASE + self.runtime_end <= a < BASE + self.code_end:
+                    targets.add(a)
         errors = []
         body = []
         for i, (addr, raw, text) in enumerate(insns):

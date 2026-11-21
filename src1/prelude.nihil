@@ -45,12 +45,7 @@ __nihil_read_line() {
 }
 
 __nihil_input_invalid(type = "", s = "") {
-    !>> "nihil: the input is not a valid ";
-    !>> type;
-    !>> ": '";
-    !>> s;
-    !>> "'\n";
-    :: 2;
+    __nihil_fail("the input is not a valid " + type + ": '" + s + "'");
 }
 
 __nihil_read_str() {
@@ -177,14 +172,12 @@ __nihil_type_name(t = 0) {
 
 // a value that does not fit its field, when writing
 __nihil_rec_bad(names = "", i = 0, model = "", what = "") {
-    !>> "nihil: field '" + __nihil_word(names, i) + "' of " + model + " " + what + "\n";
-    :: 2;
+    __nihil_fail("field '" + __nihil_word(names, i) + "' of " + model + " " + what);
 }
 
 // a line of a table file that does not match the model, when reading
 __nihil_table_bad(path = "", line = 0, what = "") {
-    !>> "nihil: '" + path + "', line " + __nihil_int_text(line) + ": " + what + "\n";
-    :: 2;
+    __nihil_fail("'" + path + "', line " + __nihil_int_text(line) + ": " + what);
 }
 
 // writes the fields of record r into out, from position at: numbers aligned
@@ -392,8 +385,7 @@ __nihil_rec_place(i = 0, path = "", r = 0, size = 0, schema = [0], names = "", m
         __last = "";
         __n > 0 { __last = ": 0 to " + __nihil_int_text(__n - 1) + ", or " + __nihil_int_text(__n) + " to add one"; }
         __n == 0 { __last = ": only 0, to add the first"; }
-        !>> "nihil: '" + path + "' has no record " + __nihil_int_text(i) + " to write (it has " + __nihil_int_text(__n) + __last + ")\n";
-        :: 2;
+        __nihil_fail("'" + path + "' has no record " + __nihil_int_text(i) + " to write (it has " + __nihil_int_text(__n) + __last + ")");
     }
     __text = __nihil_rec_text(r, schema, names, model);
     i == __n && size > 0 && size % (#__text) != 0 { : "\n" + __text; }
@@ -405,16 +397,14 @@ __nihil_rec_place(i = 0, path = "", r = 0, size = 0, schema = [0], names = "", m
 __nihil_rec_at(i = 0, path = "", chunk = 0, size = 0, schema = [0], names = "", model = "", opt = false) {
     chunk == 0 {
         opt { : 0; }
-        !>> "nihil: could not read '" + path + "'\n";
-        :: 2;
+        __nihil_fail("could not read '" + path + "'");
     }
     __n = __nihil_rec_count(path, size, schema, model);
     i < 0 || i >= __n {
         opt { : 0; }
         __last = "";
         __n > 0 { __last = ": 0 to " + __nihil_int_text(__n - 1); }
-        !>> "nihil: '" + path + "' has no record " + __nihil_int_text(i) + " (it has " + __nihil_int_text(__n) + __last + ")\n";
-        :: 2;
+        __nihil_fail("'" + path + "' has no record " + __nihil_int_text(i) + " (it has " + __nihil_int_text(__n) + __last + ")");
     }
     __text = __nihil_str_at(chunk);
     __w = __nihil_rec_width(schema);
@@ -592,8 +582,7 @@ __nihil_key_get(k = 0, path = "", schema = [0], names = "", model = "", kf = 0, 
     __size = __nihil_fsize(path);
     __size < 0 {
         opt { : 0; }
-        !>> "nihil: could not read '" + path + "'\n";
-        :: 2;
+        __nihil_fail("could not read '" + path + "'");
     }
     __ty = schema[1 + kf * 2];
     __key = __nihil_key_value(k, __ty);
@@ -602,8 +591,7 @@ __nihil_key_get(k = 0, path = "", schema = [0], names = "", model = "", kf = 0, 
         opt { : 0; }
         __q = __key;
         __ty == 3 { __q = "\"" + __key + "\""; }
-        !>> "nihil: '" + path + "' has no " + model + " with " + __nihil_word(names, kf) + " = " + __q + "\n";
-        :: 2;
+        __nihil_fail("'" + path + "' has no " + model + " with " + __nihil_word(names, kf) + " = " + __q);
     }
     __w = __nihil_rec_width(schema);
     __t = __nihil_str_at(__nihil_pread(path, __f[0] * (__w + 1), __w));
@@ -676,8 +664,7 @@ __nihil_key_delete(k = 0, path = "", schema = [0], names = "", model = "", kf = 
     __size = __nihil_fsize(path);
     __size < 0 {
         opt { :; }
-        !>> "nihil: could not read '" + path + "'\n";
-        :: 2;
+        __nihil_fail("could not read '" + path + "'");
     }
     __ty = schema[1 + kf * 2];
     __key = __nihil_key_value(k, __ty);
@@ -686,8 +673,7 @@ __nihil_key_delete(k = 0, path = "", schema = [0], names = "", model = "", kf = 
         opt { :; }
         __q = __key;
         __ty == 3 { __q = "\"" + __key + "\""; }
-        !>> "nihil: '" + path + "' has no " + model + " with " + __nihil_word(names, kf) + " = " + __q + " to delete\n";
-        :: 2;
+        __nihil_fail("'" + path + "' has no " + model + " with " + __nihil_word(names, kf) + " = " + __q + " to delete");
     }
     __size = __nihil_fsize(path);                   // a rebuild may have finished a deletion
     __n = __nihil_rec_count(path, __size, schema, model);
@@ -1467,6 +1453,215 @@ __nihil_map_keys(m = 0) {
 
 __nihil_map_values(m = 0) {
     : __nihil_map_list(m, 3);
+}
+
+// ---- JSON out and in (SPEC §26) -----------------------------------------------
+// A runtime error raised by the prelude: "nihil: " + what, and the program ends with 2
+// (a protected call, §25, catches it)
+__nihil_fail(what = "") {
+    __nihil_fail_rt(what);
+}
+
+// a FLOAT's bits as JSON: the text >> writes, null for inf and nan
+__nihil_json_float(b = 0) {
+    __ex = (b >> 52) & 0x7FF;
+    __ex == 0x7FF { : "null"; }
+    : __nihil_ft_text(b);
+}
+
+// a record as a JSON object, its fields in declaration order
+__nihil_json_record(r = 0, schema = [0], names = "") {
+    __slots = __nihil_arr_at(r);
+    __parts = ["" ; schema[0]];
+    __i = 0;
+    * __i < schema[0] {
+        __ty = schema[1 + __i * 2];
+        __v = __slots[__i];
+        __t = "";
+        __ty == 1 { __t = __nihil_int_text(__v); }
+        || __ty == 2 { __t = "false"; __v != 0 { __t = "true"; } }
+        || __ty == 3 { __t = __nihil_s_json_quote(__nihil_str_at(__v)); }
+        || { __t = __nihil_json_float(__v); }
+        __parts[__i] = __nihil_s_json_quote(__nihil_word(names, __i)) + ": " + __t;
+        __i = __i + 1;
+    }
+    : "{" + __nihil_as_join(__parts, ", ") + "}";
+}
+
+// x.to_json(): desc is x's type as a chain, outside in: 16 an ARRAY of; 8, k a MAP with keys
+// of kind k (1 INT, 3 STRING) to; then 1 INT, 2 BOOL, 3 STRING, 7 FLOAT or 64 a record of the
+// model whose schema and field names come along (a chain holds at most one model)
+__nihil_json_value(v = 0, desc = [0], at = 0, schema = [0], names = "") {
+    __k = desc[at];
+    __k == 1 { : __nihil_int_text(v); }
+    __k == 2 { v != 0 { : "true"; } : "false"; }
+    __k == 3 { : __nihil_s_json_quote(__nihil_str_at(v)); }
+    __k == 7 { : __nihil_json_float(v); }
+    __k == 64 { : __nihil_json_record(v, schema, names); }
+    __k == 16 {
+        __a = __nihil_arr_at(v);
+        __parts = ["" ; #__a];
+        __i = 0;
+        #__a { __parts[__i] = __nihil_json_value(__a[__i], desc, at + 1, schema, names); __i = __i + 1; }
+        : "[" + __nihil_as_join(__parts, ", ") + "]";
+    }
+    // a MAP, its keys sorted (INT keys by number, STRING keys by bytes), as text
+    __kind = desc[at + 1];
+    __keys = __nihil_arr_at(__nihil_map_keys(v));
+    __parts = ["" ; #__keys];
+    __i = 0;
+    __kind == 3 {
+        __ss = ["" ; #__keys];
+        #__keys { __ss[__i] = __nihil_str_at(__keys[__i]); __i = __i + 1; }
+        __ss = __nihil_as_sort(__ss);
+        __i = 0;
+        #__ss {
+            __val = __nihil_map_get(v, __nihil_addr(__ss[__i]), 3) || 0;
+            __parts[__i] = __nihil_s_json_quote(__ss[__i]) + ": " + __nihil_json_value(__val, desc, at + 2, schema, names);
+            __i = __i + 1;
+        }
+    } || {
+        __ks = __nihil_ai_sort(__keys);
+        #__ks {
+            __val = __nihil_map_get(v, __ks[__i], 1) || 0;
+            __parts[__i] = "\"" + __nihil_int_text(__ks[__i]) + "\": " + __nihil_json_value(__val, desc, at + 2, schema, names);
+            __i = __i + 1;
+        }
+    }
+    : "{" + __nihil_as_join(__parts, ", ") + "}";
+}
+
+__nihil_to_json(v = 0, present = 0, desc = [0], schema = [0], names = "") {
+    present == 0 { : "null"; }
+    : __nihil_json_value(v, desc, 0, schema, names);
+}
+
+// the JSON value t is not of the field's type
+__nihil_json_field_bad(names = "", i = 0, model = "", kind = "", t = "") {
+    __nihil_fail("field '" + __nihil_word(names, i) + "' of " + model + " is not " + kind + " in the JSON: " + __nihil_s_trim(t));
+}
+
+// MODEL.from_json(text): a new record, each field by name from the JSON object; a missing
+// field keeps its default, keys the model does not have are ignored
+__nihil_r_from_json(text = "", schema = [0], names = "", model = "") {
+    __t = __nihil_s_trim(text);
+    #__t == 0 || __t[0] != '{' { __nihil_fail(model + ".from_json: the text is not a JSON object"); }
+    __slots = [0 ; schema[0]];
+    __i = 0;
+    * __i < schema[0] {
+        __ty = schema[1 + __i * 2];
+        __ty == 3 { __slots[__i] = __nihil_addr(""); }
+        __j? = __nihil_s_json(__t, __nihil_word(names, __i));
+        __j != _ {
+            __v = __nihil_s_trim(__j || "");
+            __inner = __v;
+            #__v > 0 && __v[0] == '"' { __inner = __nihil_s_json_text(__v) || ""; }
+            __ty == 1 {
+                __n? = __nihil_s_int(__inner);
+                __n == _ { __nihil_json_field_bad(names, __i, model, "an INT", __v); }
+                __slots[__i] = __n || 0;
+            } || __ty == 7 {
+                __f? = __nihil_s_float(__inner);
+                __f == _ { __nihil_json_field_bad(names, __i, model, "a FLOAT", __v); }
+                __slots[__i] = __f || 0;
+            } || __ty == 2 {
+                __v == "true" { __slots[__i] = 1; }
+                || __v == "false" { __slots[__i] = 0; }
+                || { __nihil_json_field_bad(names, __i, model, "a BOOL", __v); }
+            } || {
+                #__v == 0 || __v[0] != '"' { __nihil_json_field_bad(names, __i, model, "a STRING", __v); }
+                __slots[__i] = __nihil_addr(__inner);
+            }
+        }
+        __i = __i + 1;
+    }
+    : __nihil_addr(__slots);
+}
+
+// MODEL.from_json_items(text): a record from each object of a JSON array
+__nihil_r_from_json_items(text = "", schema = [0], names = "", model = "") {
+    __items? = __nihil_s_json_items(text);
+    __items == _ { __nihil_fail(model + ".from_json_items: the text is not a JSON array"); }
+    __its = __items || [""];
+    __rows = [0 ; #__its];
+    __i = 0;
+    #__its { __rows[__i] = __nihil_r_from_json(__its[__i], schema, names, model); __i = __i + 1; }
+    : __nihil_addr(__rows);
+}
+
+// ---- tools from methods (SPEC §27) -------------------------------------------------
+// tools(): the FLOAT defaults come as byte 1 and 16 hex digits of the bits → their text
+__nihil_tools_fix(t = "") {
+    !__nihil_s_has(t, "\x01") { : t; }
+    __parts = __nihil_s_split(t, "\x01");
+    __r = __parts[0];
+    __i = 1;
+    * __i < #__parts {
+        __p = __parts[__i];
+        __b = 0;
+        __j = 0;
+        * __j < 16 {
+            __c = __p[__j];
+            __d = __c - '0';
+            __c >= 'a' { __d = __c - 'a' + 10; }
+            __b = (__b << 4) | __d;
+            __j = __j + 1;
+        }
+        __r = __r + __nihil_json_float(__b) + __nihil_sub(__p, 16, #__p);
+        __i = __i + 1;
+    }
+    : __r;
+}
+
+// call_tool(): the tool's index among the names (separated by spaces), or -1
+__nihil_tool_index(names = "", name = "") {
+    __ns = __nihil_s_split(names, " ");
+    __i = 0;
+    * __i < #__ns {
+        __ns[__i] == name { : __i; }
+        __i = __i + 1;
+    }
+    : -1;
+}
+
+// an argument of a tool from the JSON object args: its text (a text's contents), or _
+__nihil_tool_arg(args = "", key = "") {
+    __j? = __nihil_s_json(args, key);
+    __j == _ { : _; }
+    __v = __nihil_s_trim(__j || "");
+    #__v > 0 && __v[0] == '"' { : __nihil_s_json_text(__v); }
+    __v == "null" { : _; }
+    : __v;
+}
+
+__nihil_tool_int(args = "", key = "", d = 0) {
+    __v? = __nihil_tool_arg(args, key);
+    __v == _ { : d; }
+    __n? = __nihil_s_int(__v || "");
+    __n == _ { __nihil_fail("argument '" + key + "' is not an INT: " + (__v || "")); }
+    : __n || 0;
+}
+
+__nihil_tool_float(args = "", key = "", d = 0) {
+    __v? = __nihil_tool_arg(args, key);
+    __v == _ { : d; }
+    __f? = __nihil_s_float(__v || "");
+    __f == _ { __nihil_fail("argument '" + key + "' is not a FLOAT: " + (__v || "")); }
+    : __f || 0;
+}
+
+__nihil_tool_bool(args = "", key = "", d = 0) {
+    __v? = __nihil_tool_arg(args, key);
+    __v == _ { : d; }
+    (__v || "") == "true" { : 1; }
+    (__v || "") == "false" { : 0; }
+    __nihil_fail("argument '" + key + "' is not a BOOL: " + (__v || ""));
+    : 0;
+}
+
+__nihil_tool_str(args = "", key = "", d = "") {
+    __v? = __nihil_tool_arg(args, key);
+    : __v || d;
 }
 
 // ---- JSON as text (SPEC §21.2) ----------------------------------------------------

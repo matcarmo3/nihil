@@ -6,7 +6,7 @@
 init_expression(t = 0) {
     : t == T_INT || t == T_TRUE || t == T_FALSE || t == T_STR || t == T_UNDERSCORE
       || t == '(' || t == '[' || t == '-' || t == '!' || t == '~' || t == '#' || t == '$'
-      || t == T_FLOAT || t == '.';
+      || t == T_FLOAT || t == '.' || t == '?';
 }
 
 command() {

@@ -339,6 +339,49 @@ unary() {
     : postfix();
 }
 
+// ---- protected calls (SPEC §25) ----------------------------------------------------
+// tok = "?": ?! (the last caught error's text) or ?call(…). The runtime keeps where to resume
+// (the code right after the call) with the stack and the registers; a runtime error inside the
+// call goes back there with rax = rdx = 0 (_), and the call that ends normally empties ?!.
+protected_expr() {
+    peek_type() == '!' {
+        next_token();                    // "?" → "!"
+        next_token();
+        emit_call_rt(RT_ERR_TEXT);
+        : TYPE_STR;
+    }
+    pi = tok_start; pl = tok_len; pn = tok_line; pli = tok_lstart;
+    next_token();                        // "?" → the call
+    eb(0x48, 0x8D, 0x05);                // lea rax, [rip + resume]
+    resume_pos = size_code;
+    emit_d(0);
+    emit_call_rt(RT_PROTECT);
+    start = size_code;
+    t = postfix();
+    call_end != size_code || size_code == start {
+        restore_pos(pi, pl, pn, pli);
+        error("'?' goes before a call");
+    }
+    emit_call_rt(RT_UNPROTECT);
+    t != TYPE_NONE && t != TYPE_UNKNOWN && !is_opt(t) { eb(0xBA, 1, 0, 0, 0); }   // mov edx, 1
+    put_d(resume_pos, size_code - (resume_pos + 4));
+    last_target = size_code;             // the runtime lands here
+    call_end = size_code;                // may stand alone as a command, like a call
+    t == TYPE_NONE || t == TYPE_UNKNOWN { : t; }
+    : t | TYPE_OPT;
+}
+
+// __nihil_fail_rt(message): a runtime error (the prelude's errors), which ?f() catches
+fail_intrinsic() {
+    next_token();                        // name → "("
+    next_token();
+    expression();
+    emit_call_rt(RT_FAIL);
+    call_end = size_code;
+    expect(')', "')'");
+    : TYPE_NONE;
+}
+
 // postfix ::= primary ( "[" expression "]" | "." field )*
 postfix() {
     : postfix_rest(primary(), false);
@@ -394,6 +437,7 @@ index_step(t = 0) {
 
 primary() {
     t = tok_type;
+    t == '?' { : protected_expr(); }
     t == T_INT {
         emit_immediate(tok_value);
         next_token();
@@ -472,11 +516,15 @@ primary_name() {
         k < 0 && name_is(pi, pl, "__nihil_put_rt") { : copy_intrinsic(2); }
         k < 0 && name_is(pi, pl, "__nihil_bytes") { : bytes_intrinsic(1); }
         k < 0 && name_is(pi, pl, "__nihil_poke") { : bytes_intrinsic(2); }
+        k < 0 && name_is(pi, pl, "__nihil_fail_rt") { : fail_intrinsic(); }
+        k < 0 && name_is(pi, pl, "tools") { : tools_text(); }
+        k < 0 && name_is(pi, pl, "call_tool") { : call_tool_call(); }
         is_model(k) { : new_record(k); }
         : call_method(k);
     }
     is_model(k) {
         e == '@' || e == T_AT_OPT { : table_read(k); }
+        e == '.' { : model_from_json(k); }
         error_start();
         put_str("'");
         put_source(pi, pl);

@@ -157,6 +157,335 @@ lib_missing(t = 0, s = 0, n = 0) {
     error_end();
 }
 
+// x.to_json() (SPEC §26), x of type t in rax (and its presence in rdx, for T?): the prelude
+// gets the value, its presence, the type as a chain of INTs and the model, if the chain has one
+to_json_call(t = 0) {
+    next_token();                        // name → "("
+    next_token();
+    expect(')', "')': .to_json() takes nothing");
+    : emit_to_json(t);
+}
+
+// the value of type t in rax (rdx) → its JSON text in rax
+emit_to_json(t = 0) {
+    t == TYPE_UNKNOWN { : TYPE_STR; }
+    is_opt(t) { eb(0x50, 0x52); } || { eb(0x50, 0x6A, 1); }   // push rax ; push rdx (or push 1)
+    b = base_opt(t);
+    m = -1;
+    const_init();
+    n = 0;
+    going = true;
+    * going {
+        b & TYPE_ARR != 0 {
+            const_put_q(16); n = n + 1;
+            b = b & ~TYPE_ARR;
+        } || is_map(b) {
+            const_put_q(8); const_put_q(map_kind(b)); n = n + 2;
+            b = map_val(b);
+        } || is_rec(b) {
+            const_put_q(64); n = n + 1;
+            m = b >> 8;
+            going = false;
+        } || b == TYPE_INT || b == TYPE_BOOL || b == TYPE_STR || b == TYPE_FLOAT {
+            const_put_q(b); n = n + 1;
+            going = false;
+        } || {
+            error_start();
+            put_type(t);
+            put_str(" cannot be written as JSON");
+            error_end();
+        }
+    }
+    put_qword_cst(const_head, n);
+    d = const_head + 8;
+    push_const(d);
+    m >= 0 { push_const(m_schema[m]); push_const(m_names[m]); } || { push_const(d); push_const(d); }
+    call_prelude("__nihil_to_json", 40);
+    : TYPE_STR;
+}
+
+// ---- tools from methods (SPEC §27) ----------------------------------------------
+
+// a STRING constant's length (its bytes start at cst[v])
+cst_len(v = 0) {
+    n = 0;
+    i = 0;
+    8 { n = n | (cst[v - 8 + i] << (i * 8)); i = i + 1; }
+    : n;
+}
+
+// method k's name starts with the prefix (a constant at pv, n bytes) and is longer
+tool_named(k = 0, pv = 0, n = 0) {
+    s_flags[k] & FLAG_METHOD == 0 || s_len[k] <= n { : false; }
+    i = 0;
+    * i < n {
+        source[s_ofs[k] + i] != cst[pv + i] { : false; }
+        i = i + 1;
+    }
+    : true;
+}
+
+// a byte inside a JSON string, escaped
+const_put_json_byte(c = 0) {
+    c == '"' || c == 92 { const_put_byte(92); const_put_byte(c); :; }
+    c == 10 { const_put_str("\\n"); :; }
+    c == 9 { const_put_str("\\t"); :; }
+    c < 32 { const_put_byte(' '); :; }
+    const_put_byte(c);
+}
+
+const_put_json_source(start = 0, n = 0) {
+    i = 0;
+    n { const_put_json_byte(source[start + i]); i = i + 1; }
+}
+
+const_put_int(v = 0) {
+    v < 0 { const_put_byte('-'); v = -v; }
+    v == 0 { const_put_byte('0'); :; }
+    dig = [0 ; 24];
+    k = 0;
+    * v > 0 { dig[k] = '0' + v % 10; v = v / 10; k = k + 1; }
+    * k > 0 { k = k - 1; const_put_byte(dig[k]); }
+}
+
+// the "//" lines right above method k, joined with spaces
+tool_description(k = 0) {
+    i = s_ofs[k];
+    * i > 0 && source[i - 1] != 10 { i = i - 1; }
+    starts = [0 ; 64];
+    ends = [0 ; 64];
+    n = 0;
+    going = true;
+    * going && i > 0 && n < 64 {
+        e = i - 1;                       // the "\n" before the line below
+        b = e;
+        * b > 0 && source[b - 1] != 10 { b = b - 1; }
+        p = b;
+        * p < e && (source[p] == ' ' || source[p] == 9) { p = p + 1; }
+        e - p >= 2 && source[p] == '/' && source[p + 1] == '/' {
+            p = p + 2;
+            * p < e && (source[p] == ' ' || source[p] == 9) { p = p + 1; }
+            q = e;
+            * q > p && (source[q - 1] == ' ' || source[q - 1] == 9 || source[q - 1] == 13) { q = q - 1; }
+            starts[n] = p;
+            ends[n] = q;
+            n = n + 1;
+            i = b;
+        } || {
+            going = false;
+        }
+    }
+    first = true;
+    * n > 0 {
+        n = n - 1;
+        ends[n] > starts[n] {
+            !first { const_put_byte(' '); }
+            first = false;
+            const_put_json_source(starts[n], ends[n] - starts[n]);
+        }
+    }
+}
+
+// a tool's parameter e of method k: its JSON type, or an error
+tool_param_type(k = 0, e = 0) {
+    t = p_type[e];
+    t == TYPE_INT { : "integer"; }
+    t == TYPE_FLOAT { : "number"; }
+    t == TYPE_BOOL { : "boolean"; }
+    t == TYPE_STR { : "string"; }
+    error_start();
+    put_str("parameter '");
+    put_source(p_start[e], p_len[e]);
+    put_str("' of ");
+    put_source(s_ofs[k], s_len[k]);
+    put_str(" is ");
+    put_type(t);
+    put_str(": a tool takes INT, FLOAT, BOOL or STRING");
+    error_end();
+    : "";
+}
+
+// the default of parameter e as JSON; a FLOAT goes as byte 1 and 16 hex digits of its bits,
+// made into text at run time (__nihil_tools_fix)
+const_put_default(e = 0) {
+    t = p_type[e];
+    v = p_default[e];
+    t == TYPE_INT { const_put_int(v); :; }
+    t == TYPE_BOOL { v != 0 { const_put_str("true"); } || { const_put_str("false"); } :; }
+    t == TYPE_STR {
+        const_put_byte('"');
+        n = cst_len(v);
+        i = 0;
+        n { const_put_json_byte(cst[v + i]); i = i + 1; }
+        const_put_byte('"');
+        :;
+    }
+    const_put_byte(1);
+    i = 15;
+    * i >= 0 {
+        d = (v >> (i * 4)) & 15;
+        d < 10 { const_put_byte('0' + d); } || { const_put_byte('a' + d - 10); }
+        i = i - 1;
+    }
+}
+
+// tok = "(" of tools(…) or call_tool(…) → the prefix (a literal STRING), tok after it
+tool_prefix() {
+    next_token();
+    tok_type != T_STR { error("tools() takes the prefix as a literal text"); }
+    : tok_value;
+}
+
+// tools("prefix") (SPEC §27): tok = "tools" → a STRING, the JSON array MCP's tools/list wants
+tools_text() {
+    next_token();                        // name → "("
+    pv = tool_prefix();
+    pn = cst_len(pv);
+    next_token();
+    expect(')', "')': tools() takes the prefix");
+    const_init();
+    const_put_str("[");
+    first = true;
+    k = 0;
+    * k < n_sym {
+        tool_named(k, pv, pn) {
+            !first { const_put_str(", "); }
+            first = false;
+            const_put_str("{\"name\": \"");
+            const_put_json_source(s_ofs[k] + pn, s_len[k] - pn);
+            const_put_str("\", \"description\": \"");
+            tool_description(k);
+            const_put_str("\", \"inputSchema\": {\"type\": \"object\", \"properties\": {");
+            j = 0;
+            * j < s_nparam[k] {
+                e = s_extra[k] + j;
+                ty = tool_param_type(k, e);
+                j > 0 { const_put_str(", "); }
+                const_put_byte('"');
+                const_put_json_source(p_start[e], p_len[e]);
+                const_put_str("\": {\"type\": \"");
+                const_put_str(ty);
+                const_put_str("\", \"default\": ");
+                const_put_default(e);
+                const_put_str("}");
+                j = j + 1;
+            }
+            const_put_str("}}}");
+        }
+        k = k + 1;
+    }
+    const_put_str("]");
+    push_const(const_close());
+    call_prelude("__nihil_tools_fix", 8);
+    : TYPE_STR;
+}
+
+// call_tool("prefix", name, arguments) (SPEC §27): tok = "call_tool" → STRING? in rax/rdx.
+// The tool's index comes from the prelude; then one branch per tool reads its parameters from
+// the JSON object, calls it and makes its result a STRING
+call_tool_call() {
+    next_token();                        // name → "("
+    pv = tool_prefix();
+    pn = cst_len(pv);
+    next_token();
+    expect(',', "',' and the tool's name");
+    ai = tok_start; al = tok_len; an = tok_line; ali = tok_lstart;
+    u = expression();
+    u != TYPE_STR && u != TYPE_UNKNOWN { error_op_types(ai, al, an, ali, u, 0); }
+    emit(0x50);                          // push rax: the name
+    expect(',', "',' and the arguments (a JSON object)");
+    ai = tok_start; al = tok_len; an = tok_line; ali = tok_lstart;
+    u = expression();
+    u != TYPE_STR && u != TYPE_UNKNOWN { error_op_types(ai, al, an, ali, u, 0); }
+    expect(')', "')'");
+    emit(0x50);                          // push rax: the arguments; [rsp] arguments, [rsp+8] name
+    // the names, separated by spaces → the index of the one asked for (or -1)
+    const_init();
+    count = 0;
+    k = 0;
+    * k < n_sym {
+        tool_named(k, pv, pn) {
+            count > 0 { const_put_byte(' '); }
+            const_put_source(s_ofs[k] + pn, s_len[k] - pn);
+            count = count + 1;
+        }
+        k = k + 1;
+    }
+    tool_names = const_close();
+    push_const(tool_names);
+    eb(0xFF, 0xB4, 0x24); emit_d(16);    // push qword [rsp + 16]: the name
+    call_prelude("__nihil_tool_index", 16);
+    dones = [0 ; count + 1];
+    nd = 0;
+    i = 0;
+    k = 0;
+    * k < n_sym {
+        tool_named(k, pv, pn) {
+            eb(0x48, 0x3D); emit_d(i);   // cmp rax, i
+            eb(0x0F, 0x85);              // jne the next tool
+            next_pos = size_code;
+            emit_d(0);
+            j = 0;
+            * j < s_nparam[k] {
+                e = s_extra[k] + j;
+                ty = tool_param_type(k, e);
+                eb(0xFF, 0xB4, 0x24); emit_d(8 * j);     // push qword [rsp + 8j]: the arguments
+                const_init();
+                const_put_source(p_start[e], p_len[e]);
+                push_const(const_close());
+                t = p_type[e];
+                t == TYPE_STR {
+                    push_const(p_default[e]);
+                    call_prelude("__nihil_tool_str", 24);
+                } || {
+                    eb(0x48, 0xB8); emit_q(p_default[e]);   // mov rax, default ; push rax
+                    emit(0x50);
+                    t == TYPE_INT { call_prelude("__nihil_tool_int", 24); }
+                    t == TYPE_FLOAT { call_prelude("__nihil_tool_float", 24); }
+                    t == TYPE_BOOL { call_prelude("__nihil_tool_bool", 24); }
+                }
+                emit(0x50);
+                j = j + 1;
+            }
+            note_call(k);
+            emit(0xE8);
+            register_fixup(size_code, k, true);
+            emit_d(0);
+            s_nparam[k] > 0 { eb(0x48, 0x81, 0xC4); emit_d(8 * s_nparam[k]); }
+            r = s_type[k];
+            r == 0 {
+                final_pass {
+                    error_start();
+                    put_str("could not find out what '");
+                    put_name_method(k);
+                    put_str("' returns");
+                    error_end();
+                }
+                unknowns = unknowns + 1;
+            } || r == TYPE_NONE {
+                const_init();
+                push_const(const_close());
+                emit(0x58);              // pop rax: ""
+            } || r != TYPE_STR {
+                emit_to_json(r);
+            }
+            eb(0xBA, 1, 0, 0, 0);        // mov edx, 1
+            emit(0xE9);                  // jmp the end
+            dones[nd] = size_code;
+            nd = nd + 1;
+            emit_d(0);
+            patch_here(next_pos);
+            i = i + 1;
+        }
+        k = k + 1;
+    }
+    eb(0x31, 0xC0, 0x31, 0xD2);          // xor eax, eax ; xor edx, edx: no such tool
+    d = 0;
+    * d < nd { patch_here(dones[d]); d = d + 1; }
+    eb(0x48, 0x83, 0xC4, 16);            // add rsp, 16
+    : TYPE_STR | TYPE_OPT;
+}
+
 // tok = "." of value.name(…), with the value (type t) in rax → the result's type
 library_call(t = 0) {
     next_token();                        // "." → name
@@ -181,6 +510,7 @@ library_call(t = 0) {
         unknowns = unknowns + 1;
         : TYPE_UNKNOWN;
     }
+    name_is(ns, nl, "to_json") { : to_json_call(t); }
     is_rec_array(t) { : query_call(t); }
     is_map(t) { : map_method(t, ns, nl); }
     is_rec(t) { : model_method_call(t, ns, nl); }

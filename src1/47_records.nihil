@@ -448,6 +448,37 @@ new_record(k = 0) {
     : model_type(m);
 }
 
+// tok = the model's name of MODEL.from_json(text) or MODEL.from_json_items(text) (SPEC §26)
+model_from_json(k = 0) {
+    m = s_extra[k];
+    next_token();                        // name → "."
+    next_token();                        // "." → the method
+    ns = tok_start; nl = tok_len;
+    items = name_is(ns, nl, "from_json_items");
+    !items && !name_is(ns, nl, "from_json") {
+        error_start();
+        put_str("a data model has from_json(text) and from_json_items(text): '");
+        put_source(ns, nl);
+        put_str("' is not one of them");
+        error_end();
+    }
+    next_token();
+    tok_type != '(' { error_expected("'('"); }
+    next_token();
+    pi = tok_start; pl = tok_len; pn = tok_line; pli = tok_lstart;
+    u = expression();
+    u != TYPE_STR && u != TYPE_UNKNOWN { error_op_types(pi, pl, pn, pli, u, 0); }
+    expect(')', "')'");
+    emit(0x50);
+    push_model(m);
+    items {
+        call_prelude("__nihil_r_from_json_items", 32);
+        : model_type(m) | TYPE_ARR;
+    }
+    call_prelude("__nihil_r_from_json", 32);
+    : model_type(m);
+}
+
 // ---- files and text ----------------------------------------------------------
 push_const(c = 0) {
     eb(0x48, 0x8D, 0x05);                   // lea rax, [rip + constant] ; push rax

@@ -67,6 +67,10 @@ t_put:          jmp strict near rt_put             ; RT_PUT
 t_rec_parse:    jmp strict near rt_rec_parse       ; RT_REC_PARSE
 t_lines:        jmp strict near rt_lines           ; RT_LINES
 t_net_connect:  jmp strict near rt_net_connect     ; RT_NET_CONNECT
+t_protect:      jmp strict near rt_protect         ; RT_PROTECT
+t_unprotect:    jmp strict near rt_unprotect       ; RT_UNPROTECT
+t_err_text:     jmp strict near rt_err_text        ; RT_ERR_TEXT
+t_fail:         jmp strict near rt_fail            ; RT_FAIL
 
 ; ---- arithmetic -------------------------------------------------------------
 ; Division truncated toward zero (as in C). MIN / -1 gives MIN (idiv
@@ -920,8 +924,13 @@ rt_flush:
 .finish:
     ret
 
-; rt_write_fd: edi = fd, rsi = ptr, rdx = len (gives up on error)
+; rt_write_fd: edi = fd, rsi = ptr, rdx = len (gives up on error). While a runtime error
+; is being caught (ERR_CAPTURE), what goes to fd 2 goes into ?!'s text instead.
 rt_write_fd:
+    cmp edi, 2
+    jne .repeat
+    cmp qword [ERR_CAPTURE], 0
+    jne .capture
 .repeat:
     test rdx, rdx
     jz .finish
@@ -934,6 +943,145 @@ rt_write_fd:
     jmp .repeat
 .finish:
     ret
+.capture:                           ; appended to the text, up to 4000 bytes
+    push rdi
+    mov rdi, [PROT_BASE]
+    add rdi, 4096
+    add rdi, [ERR_LEN]
+    mov rcx, 4000
+    sub rcx, [ERR_LEN]
+    cmp rdx, rcx
+    jbe .fits
+    mov rdx, rcx
+.fits:
+    add [ERR_LEN], rdx
+    mov rcx, rdx
+    rep movsb
+    pop rdi
+    ret
+
+; ---- protected calls (SPEC §25) -------------------------------------------------
+; A runtime error starts with rt_err_begin and ends with rt_err_end. With no protection active
+; they write "nihil: …" and end the program with 2; inside a protected call the text goes to
+; ?! and rt_err_end resumes after the call, with the stack and the registers it had.
+rt_err_begin:
+    cmp qword [PROT_DEPTH], 0
+    je .plain
+    mov qword [ERR_LEN], 0
+    mov qword [ERR_CAPTURE], 1
+    ret
+.plain:
+    call rt_flush
+    mov edi, 2
+    lea rsi, [rel s_nihil]
+    mov edx, s_nihil_len
+    jmp rt_write_fd
+
+rt_err_end:
+    cmp qword [ERR_CAPTURE], 0
+    jne .resume
+    mov eax, 60
+    mov edi, 2
+    syscall
+.resume:
+    mov qword [ERR_CAPTURE], 0
+    mov rcx, [ERR_LEN]              ; the text without its final line break
+    test rcx, rcx
+    jz .pop
+    mov rsi, [PROT_BASE]
+    cmp byte [rsi + 4096 + rcx - 1], 10
+    jne .pop
+    dec qword [ERR_LEN]
+.pop:
+    dec qword [PROT_DEPTH]
+    mov rcx, [PROT_DEPTH]
+    shl rcx, 6
+    add rcx, [PROT_BASE]
+    mov rsp, [rcx]
+    mov rbp, [rcx + 8]
+    mov rbx, [rcx + 24]
+    mov r12, [rcx + 32]
+    mov r13, [rcx + 40]
+    mov r14, [rcx + 48]
+    mov r15, [rcx + 56]
+    xor eax, eax
+    xor edx, edx
+    jmp [rcx + 16]
+
+; rt_protect: rax = where to resume. Keeps the caller's stack pointer (after this call
+; returns), its frame and the optimizer's registers.
+rt_protect:
+    cmp qword [PROT_BASE], 0
+    jne .ready
+    push rax
+    mov esi, 8192
+    call gc_mmap
+    cmp rax, -4096
+    jae .no_memory
+    mov [PROT_BASE], rax
+    pop rax
+.ready:
+    mov rcx, [PROT_DEPTH]
+    cmp rcx, 64
+    jae .too_deep
+    shl rcx, 6
+    add rcx, [PROT_BASE]
+    lea rdx, [rsp + 8]
+    mov [rcx], rdx
+    mov [rcx + 8], rbp
+    mov [rcx + 16], rax
+    mov [rcx + 24], rbx
+    mov [rcx + 32], r12
+    mov [rcx + 40], r13
+    mov [rcx + 48], r14
+    mov [rcx + 56], r15
+    inc qword [PROT_DEPTH]
+    ret
+.too_deep:
+    lea rsi, [rel s_too_deep]
+    jmp rt_error
+.no_memory:
+    lea rsi, [rel s_without_memory]
+    jmp rt_error
+
+rt_unprotect:                       ; keeps rax and rdx
+    dec qword [PROT_DEPTH]
+    mov qword [ERR_LEN], 0
+    ret
+
+; rt_err_text → rax = ?! (a new STRING)
+rt_err_text:
+    push rbx
+    mov rbx, [ERR_LEN]
+    lea rcx, [rbx + 8]
+    shr rcx, 3
+    call rt_alloc
+    mov [rax - 8], rbx
+    test rbx, rbx
+    jz .empty
+    mov rdi, rax
+    mov rsi, [PROT_BASE]
+    add rsi, 4096
+    mov rcx, rbx
+    rep movsb
+.empty:
+    pop rbx
+    ret
+
+; rt_fail: rax = STRING → a runtime error with that message (the prelude's errors)
+rt_fail:
+    push rax
+    call rt_err_begin
+    mov rsi, [rsp]
+    mov rdx, [rsi - 8]
+    mov edi, 2
+    call rt_write_fd
+    pop rax
+    mov edi, 2
+    lea rsi, [rel s_nl]
+    mov edx, 1
+    call rt_write_fd
+    jmp rt_err_end
 
 ; ---- termination ----------------------------------------------------------------
 rt_exit:                            ; rdi = exit code
@@ -947,11 +1095,12 @@ rt_exit:                            ; rdi = exit code
 ; and exits with code 2 (SPEC §8.3).
 rt_error:
     push rsi
-    call rt_flush
-    mov edi, 2
-    lea rsi, [rel s_nihil]
-    mov edx, s_nihil_len
-    call rt_write_fd
+    lea rcx, [rel s_without_memory]
+    cmp rsi, rcx
+    jne .catchable
+    mov qword [PROT_DEPTH], 0       ; out of memory is never caught: the heap may be inconsistent
+.catchable:
+    call rt_err_begin
     pop rsi
     xor edx, edx
 .size:
@@ -966,9 +1115,7 @@ rt_error:
     lea rsi, [rel s_nl]
     mov edx, 1
     call rt_write_fd
-    mov eax, 60
-    mov edi, 2
-    syscall
+    jmp rt_err_end
 
 ; ---- arrays and heap ----------------------------------------------------------
 ; An array is [length: 8 bytes][8-byte elements]; the value of the array points
@@ -1888,11 +2035,7 @@ rt_array_rep:                       ; rcx = n, rdx = value → rax = [value ; n]
 rt_error_index:
     push qword [rax - 8]            ; length
     push rcx
-    call rt_flush
-    mov edi, 2
-    lea rsi, [rel s_nihil]
-    mov edx, s_nihil_len
-    call rt_write_fd
+    call rt_err_begin
     mov edi, 2
     lea rsi, [rel s_index]
     mov edx, s_index_len
@@ -1909,9 +2052,7 @@ rt_error_index:
     lea rsi, [rel s_close_nl]
     mov edx, 2
     call rt_write_fd
-    mov eax, 60
-    mov edi, 2
-    syscall
+    jmp rt_err_end
 .number:                            ; writes rax in decimal to stderr
     sub rsp, 32
     lea rdi, [rsp + 32]
@@ -2156,11 +2297,7 @@ rt_read_file:
     xor eax, eax                    ; optional: "_"
     jmp .back
 .fatal:
-    call rt_flush
-    mov edi, 2
-    lea rsi, [rel s_nihil]
-    mov edx, s_nihil_len
-    call rt_write_fd
+    call rt_err_begin
     mov edi, 2
     lea rsi, [rel s_read]
     mov edx, s_read_len
@@ -2181,9 +2318,7 @@ rt_read_file:
     lea rsi, [rel s_quote_nl]
     mov edx, 2
     call rt_write_fd
-    mov eax, 60
-    mov edi, 2
-    syscall
+    jmp rt_err_end
 
 ; rt_text: rax = ARRAY of INT → rax = STRING with the low byte of each element
 rt_text:
@@ -2465,11 +2600,7 @@ rt_write_file:
 .report:                            ; rax = -errno
     neg rax
     mov r14, rax
-    call rt_flush
-    mov edi, 2
-    lea rsi, [rel s_nihil]
-    mov edx, s_nihil_len
-    call rt_write_fd
+    call rt_err_begin
     mov edi, 2
     lea rsi, [rel s_write]
     mov edx, s_write_len
@@ -2515,9 +2646,7 @@ rt_write_file:
     lea rsi, [rel s_nl]
     mov edx, 1
     call rt_write_fd
-    mov eax, 60
-    mov edi, 2
-    syscall
+    jmp rt_err_end
 
 ; rt_read_at: rax = path (STRING), rcx = offset, rdx = bytes wanted.
 ; → rax = a new STRING with the bytes at that offset (fewer at the end of the
@@ -2686,6 +2815,7 @@ s_div_zero: db "division by zero", 0
 s_size_negativo: db "negative array size", 0
 s_size_large:   db "array too large", 0
 s_without_memory:  db "out of memory", 0
+s_too_deep:   db "more than 64 protected calls inside each other", 0
 s_index:   db "index "
 s_index_len equ $ - s_index
 s_out:     db " out of bounds (size "

@@ -124,6 +124,10 @@ RT_PUT = 225;
 RT_REC_PARSE = 230;
 RT_LINES = 235;
 RT_NET_CONNECT = 240;
+RT_PROTECT = 245;       // protected calls (SPEC §25): rax = where to resume after a runtime error
+RT_UNPROTECT = 250;
+RT_ERR_TEXT = 255;      // ?! → rax = a new STRING
+RT_FAIL = 260;          // rax = STRING: a runtime error with that message
 
 // ---- limits (the same as the stage 0 arenas) ----
 SIZE_SOURCE = 16 << 20;
@@ -205,6 +209,8 @@ n_fields = 0;
 // ---- method parameters ----
 p_type = [0 ; MAX_PARAM];
 p_default = [0 ; MAX_PARAM];
+p_start = [0 ; MAX_PARAM];    // the parameter's name in the source (for tools(), SPEC §27)
+p_len = [0 ; MAX_PARAM];
 n_param = 0;
 lit_type = 0;
 lit_value = 0;
