@@ -341,10 +341,13 @@ cmd_method(k = 0) {
     next_token();                        // name → "("
     next_token();
     np = s_nparam[k];
+    // a prelude method's parameters take no name from the program: inside the method they come
+    // first (the newest symbol wins), so the program may have a method called line, path or env
+    in_prelude = s_len[k] > 8 && name_is(s_ofs[k], 8, "__nihil_");
     i = 0;
     * tok_type != ')' {
         q = lookup(tok_start, tok_len);
-        q >= 0 && s_flags[q] & FLAG_GLOBAL == 0 {
+        q >= 0 && s_flags[q] & FLAG_GLOBAL == 0 && !(in_prelude && s_flags[q] & FLAG_PARAM == 0) {
             error_start();
             put_str("parameter '");
             put_source(tok_start, tok_len);

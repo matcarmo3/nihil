@@ -110,15 +110,77 @@ project_of(p = "") {
     : "";
 }
 
+// ---- the project's database: DATABASE_DIR in its .env ---------------------------------------
+// a key of the project's .env ("" when it is not set)
+project_env(project = "", key = "") {
+    t? = @? (project + "/.env");
+    lines = (t || "").split("\n");
+    i = 0;
+    * i < #lines {
+        l = lines[i].trim();
+        eq? = l.find("=");
+        !l.starts_with("#") && eq != _ && l.slice(0, eq || 0).trim() == key { : l.slice((eq || 0) + 1).trim(); }
+        i = i + 1;
+    }
+    : "";
+}
+
+// the database folder when it is outside the project (absolute DATABASE_DIR), else ""
+outside_db(project = "") {
+    d = project_env(project, "DATABASE_DIR");
+    * #d > 1 && d.ends_with("/") { d = d.slice(0, #d - 1); }
+    !d.starts_with("/") || d == project || d.starts_with(project + "/") { : ""; }
+    : d;
+}
+
+// the file of a table the page names: "@db/…" is in the outside database folder
+table_file(project = "", rel = "") {
+    rel.starts_with("@db/") {
+        db = outside_db(project);
+        #db == 0 || !safe_rel(rel.slice(4)) { : ""; }
+        : db + "/" + rel.slice(4);
+    }
+    !safe_rel(rel) { : ""; }
+    : project + "/" + rel;
+}
+
+// the .dat files under the outside database folder (as "@db/…")
+walk_db(dir = "", rel = "", depth = 0) {
+    depth > 4 { :; }
+    full = dir;
+    #rel > 0 { full = dir + "/" + rel; }
+    names? = full.list();
+    ns = names || ["" ; 0];
+    i = 0;
+    * i < #ns {
+        r = ns[i];
+        #rel > 0 { r = rel + "/" + ns[i]; }
+        !ns[i].starts_with(".") {
+            (dir + "/" + r).is_dir() { walk_db(dir, r, depth + 1); }
+            || ns[i].ends_with(".dat") { TABLES = TABLES + ["@db/" + r]; }
+        }
+        i = i + 1;
+    }
+}
+
 // ---- files of a project -------------------------------------------------------------------
 FILES = ["" ; 0];
 TABLES = ["" ; 0];
+DIRS = ["" ; 0];                // the folders walked (empty ones too), relative to the project
 
 // the folders that are listed and can be saved: the whole project, or for the language
 // repository only the workspace and the examples (its sources are not edited from here)
 roots_of(project = "") {
     project == ROOT { : ["ide/workspace", "examples"]; }
     : [""];
+}
+
+// a folder that may be made: inside the project, not in build/; in the language repository
+// only inside ide/workspace or examples
+folder_ok(project = "", rel = "") {
+    !safe_rel(rel) || rel == "build" || rel.starts_with("build/") { : false; }
+    project != ROOT { : true; }
+    : rel.starts_with("ide/workspace/") || rel.starts_with("examples/");
 }
 
 editable(project = "", rel = "") {
@@ -139,7 +201,7 @@ walk(project = "", rel = "", depth = 0) {
         r = n;
         #rel > 0 { r = rel + "/" + n; }
         !n.starts_with(".") && !SKIP.contains(n) {
-            (project + "/" + r).is_dir() { walk(project, r, depth + 1); }
+            (project + "/" + r).is_dir() { DIRS = DIRS + [r]; walk(project, r, depth + 1); }
             || n.ends_with(".nihil") { FILES = FILES + [r]; }
             || n.ends_with(".dat") { TABLES = TABLES + [r]; }
         }
@@ -150,16 +212,37 @@ walk(project = "", rel = "", depth = 0) {
 files_json(project = "") {
     FILES = ["" ; 0];
     TABLES = ["" ; 0];
+    DIRS = ["" ; 0];
     rs = roots_of(project);
     i = 0;
-    * i < #rs { walk(project, rs[i], 0); i = i + 1; }
+    * i < #rs { #rs[i] > 0 && (project + "/" + rs[i]).is_dir() { DIRS = DIRS + [rs[i]]; } walk(project, rs[i], 0); i = i + 1; }
+    db = outside_db(project);
+    #db > 0 { walk_db(db, "", 0); }
     f = ["" ; #FILES];
     i = 0;
     * i < #FILES { f[i] = q(FILES[i]); i = i + 1; }
     t = ["" ; #TABLES];
+    info = ["" ; #TABLES];
     i = 0;
-    * i < #TABLES { t[i] = q(TABLES[i]); i = i + 1; }
-    : "{\"files\": [" + f.join(", ") + "], \"tables\": [" + t.join(", ") + "]}";
+    * i < #TABLES {
+        t[i] = q(TABLES[i]);
+        // size and records without reading the table: its lines all have the first one's width
+        full = table_file(project, TABLES[i]);
+        size = full.size() || 0;
+        first = full.read_from(0, 4096) || "";
+        nl? = first.find("\n");
+        width = size;
+        nl != _ { width = nl || 0; }
+        records = 0;
+        size > 0 { records = (size + 1) / (width + 1); }
+        info[i] = "{\"path\": " + q(TABLES[i]) + ", \"bytes\": " + $size + ", \"records\": " + $records + "}";
+        i = i + 1;
+    }
+    d = ["" ; #DIRS];
+    i = 0;
+    * i < #DIRS { d[i] = q(DIRS[i]); i = i + 1; }
+    : "{\"files\": [" + f.join(", ") + "], \"tables\": [" + t.join(", ") + "], \"table_info\": [" + info.join(", ")
+      + "], \"dirs\": [" + d.join(", ") + "]}";
 }
 
 // ---- tables: the data model that fits a .dat file ---------------------------------------------
@@ -277,8 +360,9 @@ find_models(project = "") {
 // table has lines of one width, so line i starts at i × (width + 1) and the count comes
 // from the size. Big tables (hundreds of MB) open as fast as small ones.
 table_json(project = "", rel = "", from = 0, limit = 100) {
-    !safe_rel(rel) || !rel.ends_with(".dat") { : ""; }
-    full = project + "/" + rel;
+    !rel.ends_with(".dat") { : ""; }
+    full = table_file(project, rel);
+    #full == 0 { : ""; }
     sz? = full.size();
     sz == _ { : ""; }
     size = sz || 0;
@@ -615,6 +699,18 @@ handle(c = 0, req = "") {
         full.slice(0, last).make_dir();
         @>> full, content;
         c.respond(200, "application/json", "{\"ok\": true, \"path\": " + q(rel) + ", \"hash\": " + $fnv(content) + "}");
+        :;
+    }
+    path == "/api/folder" {
+        rel = (body.json("path") || "\"\"").json_text() || "";
+        * #rel > 0 && rel.ends_with("/") { rel = rel.slice(0, #rel - 1); }
+        !folder_ok(project, rel) {
+            msg = "a folder is made inside the project";
+            project == ROOT { msg = "in the language repository, folders are made in ide/workspace or examples"; }
+            c.respond(400, "application/json", "{\"error\": " + q(msg) + "}"); :;
+        }
+        !(project + "/" + rel).make_dir() { c.respond(500, "application/json", "{\"error\": " + q("could not make " + rel) + "}"); :; }
+        c.respond(200, "application/json", "{\"ok\": true, \"path\": " + q(rel) + "}");
         :;
     }
     path == "/api/run" || path == "/api/asm" { c.respond(200, "application/json", run_json(project, body, path == "/api/asm")); :; }

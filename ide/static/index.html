@@ -45,14 +45,27 @@ select { background: var(--panel2); color: var(--text); border: 1px solid var(--
   padding: 5px 8px; font: inherit; max-width: 240px; cursor: pointer; }
 #current { color: var(--dim); font-family: ui-monospace, monospace; }
 #current.dirty::after { content: " ●"; color: var(--accent); }
-main { display: grid; grid-template-columns: 220px 1fr; min-height: 0; }
-aside { background: var(--panel); border-right: 1px solid var(--line); overflow: auto; padding: 8px 0; }
+main { display: grid; grid-template-columns: 240px 5px 1fr; min-height: 0; }
+aside { background: var(--panel); display: grid; grid-template-rows: 3fr 6px 2fr; min-height: 0; overflow: hidden; }
+#files, #db { overflow: auto; min-height: 0; padding: 6px 0; }
+#sideSplit { background: var(--line); cursor: row-resize; }
+#sideResize { cursor: col-resize; background: var(--line); opacity: .5; }
+#sideResize:hover, #sideSplit:hover { background: var(--dim); }
 aside h3 { margin: 8px 12px 4px; font-size: 11px; text-transform: uppercase; color: var(--dim); letter-spacing: .8px; }
 aside .file { padding: 3px 12px 3px 20px; cursor: pointer; font-family: ui-monospace, monospace; font-size: 12px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 aside .file:hover { background: var(--panel2); }
 aside .file.active { background: var(--sel); }
 aside .file.table::before { content: "▦ "; color: var(--accent); }
+aside .folder { padding: 3px 12px; cursor: pointer; font-size: 12px; white-space: nowrap; user-select: none; }
+aside .folder:hover { background: var(--panel2); }
+aside .folder.active { color: var(--accent); }
+aside .folder .caret { display: inline-block; width: 14px; color: var(--dim); }
+aside .folder .icon { margin-right: 4px; }
+aside .db-head { margin: 2px 12px 4px; font-size: 11px;
+  text-transform: uppercase; color: var(--dim); letter-spacing: .8px; display: flex; justify-content: space-between; }
+aside .file.table .meta { float: right; color: var(--dim); font-size: 11px; margin-left: 8px; }
+aside .db-group { padding: 4px 12px 0 14px; font-size: 11px; color: var(--dim); }
 #table .head { padding: 8px 12px; color: var(--dim); display: flex; gap: 12px; align-items: center;
   border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--panel); }
 #table .head b { color: var(--text); font-weight: 600; }
@@ -67,7 +80,19 @@ aside .file.table::before { content: "▦ "; color: var(--accent); }
 #table tr.bad td { color: var(--err); }
 #table tr:hover td { background: #22252e; }
 #work { display: grid; grid-template-rows: 1fr 6px 38%; min-height: 0; min-width: 0; }
-#editor { min-height: 0; }
+#editorPane { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+#editor { flex: 1; min-height: 0; }
+#editorTabs { display: flex; overflow-x: auto; background: var(--panel); border-bottom: 1px solid var(--line); flex: none; min-height: 31px; }
+#editorTabs:empty { display: none; }
+#editorTabs .etab { display: flex; align-items: center; gap: 6px; padding: 6px 8px 6px 12px; border-right: 1px solid var(--line);
+  font: 12px ui-monospace, monospace; color: var(--dim); cursor: pointer; white-space: nowrap; user-select: none; }
+#editorTabs .etab:hover { background: var(--panel2); }
+#editorTabs .etab.active { background: var(--bg); color: var(--text); box-shadow: inset 0 2px 0 var(--accent); }
+#editorTabs .etab .x { width: 16px; height: 16px; line-height: 15px; text-align: center; border-radius: 4px; color: var(--dim); }
+#editorTabs .etab .x:hover { background: var(--line); color: var(--text); }
+#editorTabs .etab.dirty .x::before { content: "●"; color: var(--accent); }
+#editorTabs .etab.dirty .x:hover::before { content: "×"; color: var(--text); }
+#editorTabs .etab:not(.dirty) .x::before { content: "×"; }
 .CodeMirror { height: 100%; background: var(--bg); color: var(--text);
   font: 14px/1.5 ui-monospace, "JetBrains Mono", Menlo, monospace; }
 .CodeMirror-gutters { background: var(--bg); border-right: 1px solid var(--line); }
@@ -116,7 +141,8 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
     <div class="logo"><img src="/static/mark.png" alt="">Nihil <span>IDE</span></div>
     <select id="project" title="Project: the folder you are working in (programs run inside it)"></select>
     <button id="btnProject" title="Open or create a project folder">Open folder…</button>
-    <button id="btnNew" title="New file">New</button>
+    <button id="btnNew" title="New file (in the selected folder)">New</button>
+    <button id="btnFolder" title="New folder (in the selected folder)">New folder</button>
     <button id="btnSave" title="Save (Ctrl+S)">Save</button>
     <button id="btnRun" class="primary" title="Save and run (Ctrl+Enter)">▶ Run</button>
     <button id="btnStop" disabled title="Stop the program">■ Stop</button>
@@ -126,9 +152,14 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
     <div id="current"></div>
   </header>
   <main>
-    <aside id="files"></aside>
+    <aside id="side">
+      <div id="files"></div>
+      <div id="sideSplit" title="Drag to resize the folders and the database"></div>
+      <div id="db"></div>
+    </aside>
+    <div id="sideResize" title="Drag to resize the side bar"></div>
     <div id="work">
-      <div id="editor"></div>
+      <div id="editorPane"><div id="editorTabs"></div><div id="editor"></div></div>
       <div id="splitter"></div>
       <div id="bottom">
         <div class="tabs">
@@ -152,6 +183,13 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
   <label class="opt" style="margin:10px 0 0"><input type="checkbox" id="projCreate"> create the folder if it does not exist</label>
   <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end">
     <button value="cancel">Cancel</button><button value="ok" class="primary">Open</button>
+  </div>
+</form></dialog>
+<dialog id="folderDialog"><form method="dialog">
+  <div style="margin-bottom:8px">New folder (a path inside the project):</div>
+  <input id="folderName" autocomplete="off" style="width:420px">
+  <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end">
+    <button value="cancel">Cancel</button><button value="ok" class="primary">Create</button>
   </div>
 </form></dialog>
 <dialog id="newDialog"><form method="dialog">
@@ -203,7 +241,8 @@ const editor = CodeMirror($('editor'), {
     Tab: (cm) => cm.somethingSelected() ? cm.indentSelection('add') : cm.replaceSelection('    '),
   },
 });
-editor.on('change', () => { $('current').classList.toggle('dirty', editor.getValue() !== savedText); clearMarks(); });
+editor.on('change', () => { const d = editor.getValue() !== savedText; $('current').classList.toggle('dirty', d);
+  const t = tabs.find((x) => x.path === current); if (t && t.dirty !== d) { t.dirty = d; renderTabs(); } clearMarks(); });
 editor.on('cursorActivity', () => { const c = editor.getCursor(); $('cursorPos').textContent = `Ln ${c.line + 1}, Col ${c.ch + 1}`; });
 
 function status(text, cls = '') { const s = $('status'); s.textContent = text; s.className = cls; }
@@ -321,29 +360,113 @@ term.onData((d) => {
 
 // ---------------------------------------------------------------- files
 let tableOpen = null;
-async function loadFiles() {
-  const { files, tables } = await api('/api/files');
-  const groups = {};
-  for (const f of files) { const d = f.includes('/') ? f.slice(0, f.lastIndexOf('/')) : '.'; (groups[d] = groups[d] || []).push(f); }
-  const box = $('files'); box.innerHTML = '';
-  if (!files.length) box.innerHTML = '<div class="empty" style="padding:10px">No .nihil files in this project yet: click New.</div>';
-  for (const [dir, list] of Object.entries(groups)) {
-    const h = document.createElement('h3'); h.textContent = dir === '.' ? 'project' : dir; box.appendChild(h);
-    for (const f of list) {
-      const el = document.createElement('div'); el.className = 'file' + (f === current ? ' active' : '');
-      el.textContent = f.slice(f.lastIndexOf('/') + 1); el.title = f; el.onclick = () => open(f); box.appendChild(el);
-    }
-  }
-  if (tables.length) {
-    const h = document.createElement('h3'); h.textContent = 'Tables'; box.appendChild(h);
-    for (const t of tables) {
-      const el = document.createElement('div'); el.className = 'file table' + (t === tableOpen ? ' active' : '');
-      el.textContent = t.slice(t.lastIndexOf('/') + 1); el.title = t; el.onclick = () => showTable(t); box.appendChild(el);
-    }
-  }
-  if (tableOpen && !tables.includes(tableOpen)) { tableOpen = null; $('table').innerHTML = '<div class="empty">The table is gone.</div>'; }
-  return files;
+// the file tree: folders open and close (▾/▸), and each project remembers the closed ones;
+// clicking a folder also selects it, and New / New folder make things inside it
+let tree = { files: [], tables: [], dirs: [], info: [] }, collapsed = new Set(), selectedFolder = '';
+function loadCollapsed() {
+  try { collapsed = new Set(JSON.parse(localStorage.getItem('nihil-ide-collapsed:' + project) || '[]')); } catch (e) { collapsed = new Set(); }
 }
+function saveCollapsed() { try { localStorage.setItem('nihil-ide-collapsed:' + project, JSON.stringify([...collapsed])); } catch (e) {} }
+const dirOf = (p) => p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '';
+async function loadFiles() {
+  const r = await api('/api/files');
+  tree = { files: r.files || [], tables: r.tables || [], dirs: r.dirs || [], info: r.table_info || [] };
+  renderTree();
+  if (tableOpen && !tree.tables.includes(tableOpen)) { tableOpen = null; $('table').innerHTML = '<div class="empty">The table is gone.</div>'; }
+  return tree.files;
+}
+function renderTree() {
+  const root = { dirs: {}, items: [] };
+  const node = (path) => {
+    let n = root;
+    if (path) for (const part of path.split('/')) { n.dirs[part] = n.dirs[part] || { dirs: {}, items: [] }; n = n.dirs[part]; }
+    return n;
+  };
+  for (const d of tree.dirs) node(d);
+  for (const f of tree.files) node(dirOf(f)).items.push({ path: f, table: false });
+  const box = $('files'); box.innerHTML = '';
+  drawDatabase($('db'));
+  if (!tree.files.length && !tree.dirs.length) {
+    box.innerHTML = '<div class="empty" style="padding:10px">No programs in this project yet: click New or New folder.</div>';
+    return;
+  }
+  const draw = (n, prefix, depth) => {
+    for (const name of Object.keys(n.dirs).sort()) {
+      const path = prefix ? prefix + '/' + name : name;
+      const open = !collapsed.has(path);
+      const el = document.createElement('div');
+      el.className = 'folder' + (path === selectedFolder ? ' active' : '');
+      el.style.paddingLeft = (8 + depth * 14) + 'px'; el.title = path;
+      const caret = document.createElement('span'); caret.className = 'caret'; caret.textContent = open ? '▾' : '▸';
+      const icon = document.createElement('span'); icon.className = 'icon'; icon.textContent = open ? '📂' : '📁';
+      el.append(caret, icon, name);
+      el.onclick = () => {
+        selectedFolder = path;
+        if (collapsed.has(path)) collapsed.delete(path); else collapsed.add(path);
+        saveCollapsed(); renderTree();
+      };
+      box.appendChild(el);
+      if (open) draw(n.dirs[name], path, depth + 1);
+    }
+    for (const it of n.items.sort((a, b) => (a.path < b.path ? -1 : 1))) {
+      const el = document.createElement('div');
+      const active = it.table ? it.path === tableOpen : it.path === current;
+      el.className = 'file' + (it.table ? ' table' : '') + (active ? ' active' : '');
+      el.style.paddingLeft = (22 + depth * 14) + 'px';
+      el.textContent = it.path.slice(it.path.lastIndexOf('/') + 1); el.title = it.path;
+      el.onclick = () => { selectedFolder = dirOf(it.path); it.table ? showTable(it.path) : open(it.path); };
+      box.appendChild(el);
+    }
+  };
+  draw(root, '', 0);
+}
+
+// the Database area: every table of the project, by folder, with its records and size
+function drawDatabase(box) {
+  box.innerHTML = '';
+  const info = tree.info.length ? tree.info : tree.tables.map((path) => ({ path, bytes: 0, records: 0 }));
+  const head = document.createElement('div'); head.className = 'db-head';
+  const total = info.reduce((t, x) => t + x.records, 0), bytes = info.reduce((t, x) => t + x.bytes, 0);
+  head.innerHTML = `<span>Database</span><span>${info.length} tables · ${fmtSize(bytes)}</span>`;
+  head.title = `${total.toLocaleString('en-US')} records`;
+  box.appendChild(head);
+  if (!info.length) {
+    const e = document.createElement('div'); e.className = 'db-group'; e.textContent = 'No tables (.dat) in this project.'; box.appendChild(e);
+    return;
+  }
+  let group = null;
+  for (const t of [...info].sort((a, b) => (a.path < b.path ? -1 : 1))) {
+    const d = dirOf(t.path);
+    if (d !== group) {
+      group = d;
+      const g = document.createElement('div'); g.className = 'db-group'; g.textContent = (d || 'project') + '/'; box.appendChild(g);
+    }
+    const el = document.createElement('div');
+    el.className = 'file table' + (t.path === tableOpen ? ' active' : '');
+    el.style.paddingLeft = '22px'; el.title = `${t.path} · ${t.records.toLocaleString('en-US')} records · ${fmtSize(t.bytes)}`;
+    const meta = document.createElement('span'); meta.className = 'meta'; meta.textContent = t.records.toLocaleString('en-US');
+    el.append(meta, t.path.slice(t.path.lastIndexOf('/') + 1));
+    el.onclick = () => showTable(t.path);
+    box.appendChild(el);
+  }
+}
+const fmtSize = (n) => n >= 1073741824 ? (n / 1073741824).toFixed(1) + ' GB' : n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB'
+  : n >= 1024 ? Math.round(n / 1024) + ' KB' : n + ' B';
+$('btnFolder').onclick = () => {
+  const inRepo = projects.length && project === projects[0].path;
+  const base = selectedFolder || (inRepo ? 'ide/workspace' : '');
+  $('folderName').value = (base ? base + '/' : '') + 'new-folder';
+  $('folderDialog').showModal(); $('folderName').select();
+};
+$('folderDialog').addEventListener('close', async () => {
+  if ($('folderDialog').returnValue !== 'ok') return;
+  const path = $('folderName').value.trim().replace(/\/+$/, '');
+  const r = await api('/api/folder', { path });
+  if (r.error) return status(r.error, 'bad');
+  selectedFolder = r.path;
+  for (let p = r.path; p; p = dirOf(p)) collapsed.delete(p);     // show it, opened
+  saveCollapsed(); await loadFiles(); status('Made the folder ' + r.path);
+});
 const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 // a table opens with its first 100 records; the buttons page through it (the server reads
 // only the lines shown, so a table of hundreds of MB opens at once)
@@ -353,7 +476,7 @@ async function showTable(path, quiet, from = 0) {
   const box = $('table');
   if (r.error) { box.innerHTML = `<div class="empty">${esc(r.error)}</div>`; return; }
   tableOpen = path;
-  document.querySelectorAll('aside .file.table').forEach((e) => e.classList.toggle('active', e.title === path));
+  renderTree();
   const shown = r.fields ? r.rows.length : r.raw.length;
   const first = r.from, last = r.from + shown, lastPage = Math.max(0, Math.floor((r.total - 1) / r.limit) * r.limit);
   const n = (x) => x.toLocaleString('en-US');
@@ -386,17 +509,55 @@ async function showTable(path, quiet, from = 0) {
   $('tablePage').onchange = (e) => { tablePage = +e.target.value; showTable(path, true, Math.floor(first / tablePage) * tablePage); };
   if (!quiet) showTab('table');
 }
+// ---------------------------------------------------------------- tabs
+// every open file is a tab with its own document: text, cursor, undo history and unsaved
+// changes (●) stay when another tab is shown. Each project remembers its tabs.
+let tabs = [];                                    // {path, doc, saved, hash, editable, dirty}
+function renderTabs() {
+  const bar = $('editorTabs'); bar.innerHTML = '';
+  for (const t of tabs) {
+    const el = document.createElement('div');
+    el.className = 'etab' + (t.path === current ? ' active' : '') + (t.dirty ? ' dirty' : '');
+    el.title = t.path + (t.editable ? '' : ' (read only)');
+    const x = document.createElement('span'); x.className = 'x'; x.title = 'Close (middle click)';
+    el.append(t.path.slice(t.path.lastIndexOf('/') + 1), x);
+    el.onclick = () => activate(t);
+    el.onauxclick = (e) => { if (e.button === 1) { e.preventDefault(); closeTab(t); } };
+    x.onclick = (e) => { e.stopPropagation(); closeTab(t); };
+    bar.appendChild(el);
+  }
+  const a = bar.querySelector('.active'); if (a) a.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  try { localStorage.setItem('nihil-ide-tabs:' + project, JSON.stringify({ open: tabs.map((t) => t.path), active: current })); } catch (e) {}
+}
+function activate(t) {
+  current = t.path; editable = t.editable; savedText = t.saved; savedHash = t.hash;
+  editor.swapDoc(t.doc); editor.setOption('readOnly', !editable); clearMarks();
+  $('current').textContent = t.path + (editable ? '' : '  (read only)'); $('current').classList.toggle('dirty', t.dirty);
+  renderTabs(); renderTree(); editor.focus();
+}
+function closeTab(t) {
+  if (t.dirty && !confirm(`Close ${t.path} without saving the changes?`)) return;
+  const i = tabs.indexOf(t);
+  tabs.splice(i, 1);
+  if (t.path === current) {
+    const next = tabs[i] || tabs[i - 1];
+    if (next) { activate(next); return; }
+    current = null; savedText = ''; savedHash = null;
+    editor.swapDoc(CodeMirror.Doc('', 'nihil')); editor.setOption('readOnly', true);
+    $('current').textContent = ''; $('current').classList.remove('dirty');
+  }
+  renderTabs(); renderTree();
+}
 async function open(path, line, col) {
-  if (path !== current) {
-    if (editable && current && editor.getValue() !== savedText && !confirm(`Discard the changes to ${current}?`)) return false;
+  let t = tabs.find((x) => x.path === path);
+  if (!t) {
     const r = await api('/api/file?path=' + encodeURIComponent(path));
     if (r.error) { status(r.error, 'bad'); return false; }
-    current = path; editable = r.editable; savedText = r.content; savedHash = r.hash;
-    editor.setValue(r.content); editor.clearHistory(); editor.setOption('readOnly', !editable);
-    $('current').textContent = path + (editable ? '' : '  (read only)'); $('current').classList.remove('dirty');
-    try { localStorage.setItem('nihil-ide-file:' + project, path); } catch (e) {}
-    loadFiles();
+    t = { path, doc: CodeMirror.Doc(r.content, 'nihil'), saved: r.content, hash: r.hash, editable: r.editable, dirty: false };
+    const at = tabs.findIndex((x) => x.path === current);
+    tabs.splice(at < 0 ? tabs.length : at + 1, 0, t);      // next to the tab being shown
   }
+  if (path !== current) activate(t);
   if (line) { editor.setCursor({ line: line - 1, ch: Math.max(0, col - 1) }); editor.scrollIntoView(null, 120); }
   editor.focus();
   return true;
@@ -414,12 +575,14 @@ async function save() {
   }
   if (r.error) { status(r.error, 'bad'); return false; }
   savedText = text; savedHash = r.hash; $('current').classList.remove('dirty'); status('Saved ' + current);
+  const st = tabs.find((x) => x.path === current); if (st) { st.saved = text; st.hash = r.hash; st.dirty = false; renderTabs(); }
   return true;
 }
 $('btnNew').onclick = () => {
   const inRepo = projects.length && project === projects[0].path;
   $('newHint').textContent = inRepo ? 'New file (inside ide/workspace/ or examples/):' : 'New file (a path inside the project):';
-  $('newName').value = inRepo ? 'ide/workspace/untitled.nihil' : 'untitled.nihil';
+  const base = selectedFolder || (inRepo ? 'ide/workspace' : '');
+  $('newName').value = (base ? base + '/' : '') + 'untitled.nihil';
   $('newDialog').showModal(); $('newName').select();
 };
 $('newDialog').addEventListener('close', async () => {
@@ -527,6 +690,28 @@ function showTab(name) {
   if (name === 'terminal') setTimeout(fitTerm, 0);
 }
 document.querySelectorAll('.tab').forEach((t) => t.onclick = () => showTab(t.dataset.pane));
+// the side bar: its width (the bar between it and the editor) and how much of it the folders
+// and the database take (the bar between them); both are remembered
+const remember = (k, v) => { try { localStorage.setItem(k, String(v)); } catch (e) {} };
+const recall = (k) => { try { return parseFloat(localStorage.getItem(k)); } catch (e) { return NaN; } };
+function setSideWidth(w) { document.querySelector('main').style.gridTemplateColumns = `${w}px 5px 1fr`; }
+function setSideRows(f) { $('side').style.gridTemplateRows = `${f}fr 6px ${1 - f}fr`; }
+{ const w = recall('nihil-ide-side-width'), f = recall('nihil-ide-side-rows');
+  if (w >= 140) setSideWidth(w); if (f > 0 && f < 1) setSideRows(f); }
+$('sideResize').onmousedown = (e) => {
+  e.preventDefault();
+  const left = document.querySelector('main').getBoundingClientRect().left;
+  const move = (ev) => { const w = Math.min(640, Math.max(140, ev.clientX - left)); setSideWidth(w); remember('nihil-ide-side-width', w); editor.refresh(); fitTerm(); };
+  const up = () => { removeEventListener('mousemove', move); removeEventListener('mouseup', up); };
+  addEventListener('mousemove', move); addEventListener('mouseup', up);
+};
+$('sideSplit').onmousedown = (e) => {
+  e.preventDefault();
+  const side = $('side'), top = side.getBoundingClientRect().top, h = side.clientHeight;
+  const move = (ev) => { const y = Math.min(h - 50, Math.max(50, ev.clientY - top)); const f = y / h; setSideRows(f); remember('nihil-ide-side-rows', f); };
+  const up = () => { removeEventListener('mousemove', move); removeEventListener('mouseup', up); };
+  addEventListener('mousemove', move); addEventListener('mouseup', up);
+};
 $('splitter').onmousedown = (e) => {
   e.preventDefault();
   const work = $('work'), top = work.getBoundingClientRect().top, h = work.clientHeight;
@@ -535,7 +720,7 @@ $('splitter').onmousedown = (e) => {
   const up = () => { removeEventListener('mousemove', move); removeEventListener('mouseup', up); };
   addEventListener('mousemove', move); addEventListener('mouseup', up);
 };
-addEventListener('beforeunload', (e) => { if (editable && current && editor.getValue() !== savedText) e.preventDefault(); });
+addEventListener('beforeunload', (e) => { if (tabs.some((t) => t.dirty)) e.preventDefault(); });
 addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); run(); }
   if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); save(); }
@@ -554,15 +739,20 @@ async function loadProjects(want) {
   sel.value = project;
 }
 async function switchProject(path, target) {
-  if (editable && current && editor.getValue() !== savedText && !confirm(`Discard the changes to ${current}?`)) { $('project').value = project; return; }
+  const dirty = tabs.filter((t) => t.dirty).map((t) => t.path);
+  if (dirty.length && !confirm(`Discard the changes to ${dirty.join(', ')}?`)) { $('project').value = project; return; }
   project = path; $('project').value = path;
   try { localStorage.setItem('nihil-ide-project', project); } catch (e) {}
-  current = null; savedText = ''; savedHash = null; editor.setValue(''); clearMarks();
+  tabs = []; current = null; savedText = ''; savedHash = null;
+  editor.swapDoc(CodeMirror.Doc('', 'nihil')); clearMarks(); renderTabs();
+  selectedFolder = ''; loadCollapsed();
   tableOpen = null; $('table').innerHTML = '<div class="empty">Click a table on the left to see its records.</div>';
   const files = await loadFiles();
-  let last = null; try { last = localStorage.getItem('nihil-ide-file:' + project); } catch (e) {}
-  const first = files.includes(target) ? target : files.includes(last) ? last
-    : files.includes('ide/workspace/hello.nihil') ? 'ide/workspace/hello.nihil' : files[0];
+  let saved = null; try { saved = JSON.parse(localStorage.getItem('nihil-ide-tabs:' + project) || 'null'); } catch (e) {}
+  const reopen = saved && saved.open ? saved.open.filter((f) => files.includes(f)) : [];
+  for (const f of reopen) await open(f);                          // the tabs this project had
+  const first = files.includes(target) ? target : saved && reopen.includes(saved.active) ? saved.active
+    : reopen.length ? reopen[0] : files.includes('ide/workspace/hello.nihil') ? 'ide/workspace/hello.nihil' : files[0];
   if (first) await open(first);
   else { $('current').textContent = ''; editor.setOption('readOnly', true); }
   status('Project: ' + ((projects.find((p) => p.path === project) || {}).name || project));

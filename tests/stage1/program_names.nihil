@@ -1,0 +1,9 @@
+// the program may name its methods as the prelude names its parameters (line, path, env, s, text …):
+// those parameters stay inside the prelude
+line(n = 0) { : "line " + $n; }
+path(a = "", b = "") { : a + "/" + b; }
+env(key = "") { : "env:" + key; }
+s(x = 0) { : x * 2; }
+text(t = "") { : t.upper(); }
+>> line(3) + " | " + path("data", "items.dat") + " | " + env("PORT") + " | " + $s(21) + " | " + text("ok") + "\n";
+>> "a,b".split(",").join("+") + " " + $"x y".contains(" ") + " " + ("  trim  ".trim()) + "\n";
