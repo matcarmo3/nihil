@@ -33,7 +33,8 @@
 %define GC_COUNT        (BASE_DATA + 0xB0)     ; collections so far
 %define GC_DIRTY        (BASE_DATA + 0xB8)     ; empty small pages kept for reuse (page numbers)
 %define GC_NDIRTY       (BASE_DATA + 0xC0)
-%define GC_MINCORE      (BASE_DATA + 0xC8)     ; buffer for mincore: one byte per 4 KiB
+%define GC_MINCORE      (BASE_DATA + 0xC8)     ; buffer for mincore (a byte per 4 KiB) or pagemap entries
+%define GC_PAGEMAP      (BASE_DATA + 0xD0)     ; /proc/self/pagemap's fd + 1 during a collection (0: none)
 %define GC_FREE         (BASE_DATA + 0x100)    ; 21 free lists, one per size class
 %define OUTPUT_BUF       (BASE_DATA + 0x1000)   ; standard output buffer
 %define OUTPUT_CAP       65536
