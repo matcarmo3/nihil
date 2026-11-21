@@ -1,4 +1,4 @@
-# Nihil — Language Specification (v3.8)
+# Nihil — Language Specification (v3.9)
 
 > **Nihil**: an imperative, minimalist language compiled straight to x86_64 machine
 > code, with no libc, no linker and no VM. The name is Latin for
@@ -1020,7 +1020,42 @@ nihil: 'products.dat' has no PRODUCT with code = 99 to delete
 nihil: 'products.dat', line 3: the key code = 1 is also in line 1, and a key is unique
 ```
 
-### 20.6 Implementation
+### 20.6 Methods of a model
+
+A method declared with a model's name and a `.` in front belongs to that model.
+Its first parameter is the record itself, and it is called on a record with a
+`.`, like the library (§21):
+
+```text
+SHELF = @[module: INT(3); level: INT(3); width: FLOAT(12); used: FLOAT(12)];
+
+SHELF.free(s = SHELF()) {                // s is the record ("self")
+    : s.width - s.used;
+}
+
+SHELF.place(s = SHELF(), it = ITEM()) {
+    s.used = s.used + it.width * .it.fronts;     // a record is a reference: this shelf changes
+}
+
+top = SHELF(1, 5, 338.0, 300.0);
+>> top.free();                           // 38.0
+top.place(soap);
+shelves[i].free() > 0.0 { … }
+>> top.grow(10.0).free();                // calls chain when a method returns a record
+```
+
+- The name is `MODEL.name`, with the `.` touching both names. It takes no name
+  away from the program: `free` can still be a variable or another method, and
+  two models can each have a `free`.
+- The first parameter must have the model's type (`s = SHELF()`); the others
+  are as in any method (§9).
+- `value.name(…)` is resolved when compiling, from the model of the value: it is
+  an ordinary call, with no table of methods and no cost. A name the model does
+  not have is a compile error that lists the ones it has.
+- There is no inheritance: a model can hold another one's fields, and its
+  methods can call that model's methods.
+
+### 20.7 Implementation
 
 A record is a block of 8-byte slots with the ARRAY layout (§3); a STRING field
 holds the address of its text. Its type is a model number, so each model is a
@@ -1314,6 +1349,7 @@ it. The IDE server (`ide/server.nihil`) is written with them and §23.
 | **v1.9:** saved registers learned between passes | The prologue comes before the body; using the count from the previous pass avoids saving registers for nothing |
 | **v2.1:** `... ms;` waits | Animations need a fixed speed; a busy loop depends on the machine. The ellipsis reads as a pause and cannot start any valid expression |
 | **v2.2:** renamed from Ket to Nihil | Latin for *nothing*: no keywords, and `_` for the missing value |
+| **v3.9:** methods of a model: `MODEL.name(self = MODEL(), …) { … }`, called as `record.name(…)` | Programs organized around their data (a planogram, its shelves and items) read better when the operations live with the model. The `.` already called the library on a value; extending it to the program's own models needs no keyword and no runtime dispatch. Inheritance is left out: composition covers it and keeps the language small |
 | **v3.8:** directories and processes: `path.list()`, `is_dir`, `is_file`, `make_dir`, `remove`, `size`, `read_from`; `cmd.start(out, err, dir)`, `run`; `p.write`, `close_input`, `done`, `wait`, `kill` | Tools around the language (the IDE, data collection) needed to list folders and run programs. One kernel-call routine in the runtime and the rest in the prelude keeps the assembly small and the library testable; the IDE server moved from Python to Nihil |
 | **v3.7:** `contains`, `starts_with`, `ends_with` on STRING, ARRAY and MAP (the old `has`, `starts`, `ends` kept as synonyms); `upper`/`lower` change the Latin-1 letters too; the network gives `_` or `false` instead of `-errno`; faster reading: text → FLOAT by Clinger's fast path, native copies and JSON scanning, `@` of files with no size (`/proc`, pipes) | Names that other languages' libraries use, one way to report a failure across the library (optionals, not error codes), and upper case that works for Portuguese, Spanish, French and German text. Reading tables of decimals went from 14 to about 100 MB/s and JSON from 23 to 90 MB/s: the exact big-integer conversion stays for the rare numbers with more than 15 digits or a power of ten beyond 22 |
 | **v3.6:** a TCP server and HTTP: `port.listen()`, `accept`, `receive`, `respond`, `http_path`, `http_param` | Serving analyses as JSON from one place, instead of one generated page per analysis. Calls on INT keep the language free of reserved words, as the library does |

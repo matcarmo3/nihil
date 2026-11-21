@@ -21,6 +21,27 @@ lookup(start = 0, n = 0) {
     : -1;
 }
 
+// the method "MODEL.name": km = the model's symbol, the name at source[start .. start+n)
+// → symbol index, or -1
+lookup_model_method(km = 0, start = 0, n = 0) {
+    mo = s_ofs[km];
+    ml = s_len[km];
+    k = n_sym;
+    * k > 0 {
+        k = k - 1;
+        s_len[k] == ml + 1 + n && s_flags[k] & FLAG_METHOD != 0 {
+            o = s_ofs[k];
+            equal = source[o + ml] == '.';
+            i = 0;
+            * equal && i < ml { source[o + i] != source[mo + i] { equal = false; } i = i + 1; }
+            i = 0;
+            * equal && i < n { source[o + ml + 1 + i] != source[start + i] { equal = false; } i = i + 1; }
+            equal { : k; }
+        }
+    }
+    : -1;
+}
+
 // symbol whose name is the STRING s (for the prelude's methods) → index, or -1
 lookup_text(s = "") {
     k = n_sym;

@@ -1,0 +1,1 @@
+the first parameter of 'P.twice' is the P itself, with a default like self = P()

@@ -77,7 +77,7 @@ gcstress:
 ide: build/ide-server
 
 build/ide-server: build/nihilc1 ide/server.nihil
-	./nihilc1.sh ide/server.nihil $@
+	./nihilc1.sh ide/server.nihil $@.new && mv $@.new $@     # the running server keeps its copy
 
 clean:
 	rm -rf build

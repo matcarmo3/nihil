@@ -174,6 +174,7 @@ library_call(t = 0) {
     }
     is_rec_array(t) { : query_call(t); }
     is_map(t) { : map_method(t, ns, nl); }
+    is_rec(t) { : model_method_call(t, ns, nl); }
     target = lib_target(t, ns, nl);
     #target == 0 { lib_missing(t, ns, nl); }
     k = lookup_text(target);
@@ -184,6 +185,47 @@ library_call(t = 0) {
     r = call_method(k, 1);
     lib_k = sv_k; lib_name_start = sv_s; lib_name_len = sv_l;
     t == TYPE_STR && name_is(ns, nl, "float") { r = TYPE_FLOAT | TYPE_OPT; }   // the prelude gives the bits
+    : r;
+}
+
+// record.name(…): the method "MODEL.name" of the record's model (SPEC §20.6), with the record
+// as its first argument. Resolved here, at compile time: a plain call.
+model_method_call(t = 0, ns = 0, nl = 0) {
+    km = m_sym[t >> 8];
+    k = lookup_model_method(km, ns, nl);
+    k < 0 {
+        error_start();
+        put_source(s_ofs[km], s_len[km]);
+        put_str(" has no method '");
+        put_source(ns, nl);
+        put_str("'");
+        listed = 0;
+        j = 0;
+        * j < n_sym {
+            s_flags[j] & FLAG_METHOD != 0 && s_len[j] > s_len[km] + 1 && source[s_ofs[j] + s_len[km]] == '.'
+                && same_source(s_ofs[j], s_ofs[km], s_len[km]) {
+                listed == 0 { put_str(": it has "); } || { put_str(", "); }
+                put_source(s_ofs[j] + s_len[km] + 1, s_len[j] - s_len[km] - 1);
+                listed = listed + 1;
+            }
+            j = j + 1;
+        }
+        listed == 0 {
+            put_str(" (declare one: ");
+            put_source(s_ofs[km], s_len[km]);
+            put_str(".");
+            put_source(ns, nl);
+            put_str("(self = ");
+            put_source(s_ofs[km], s_len[km]);
+            put_str("()) { … })");
+        }
+        error_end();
+    }
+    emit(0x50);                            // push rax: the record is the first argument
+    sv_k = lib_k; sv_s = lib_name_start; sv_l = lib_name_len;
+    lib_k = k; lib_name_start = ns; lib_name_len = nl;
+    r = call_method(k, 1);
+    lib_k = sv_k; lib_name_start = sv_s; lib_name_len = sv_l;
     : r;
 }
 

@@ -34,6 +34,15 @@ command() {
 command_name() {
     e = peek_type();               // name = …  |  name(…)  |  name op … {
     km = lookup(tok_start, tok_len);
+    is_model(km) && e == '.' {               // MODEL.name( … ) { … }: a method of the model
+        k = model_method_here();
+        k >= 0 {
+            next_token();                    // model → "."
+            next_token();                    // "." → name
+            cmd_method(k);
+            :;
+        }
+    }
     is_model(km) && e != '(' && e != '@' && e != T_AT_OPT {
         s_ofs[km] == tok_start { skip_model(); :; }    // NAME = @[ … ]; (read in the prescan)
         error_start();
@@ -59,6 +68,23 @@ command_name() {
         }
     }
     cmd_expr_block();
+}
+
+// tok = a model followed by ".": the symbol of the method "MODEL.name" declared right here,
+// or -1. Consumes nothing.
+model_method_here() {
+    ms = tok_start;
+    save_lexer();
+    next_token();
+    next_token();
+    end = tok_start + tok_len;
+    ok = tok_type == T_IDENT;
+    back_lexer();
+    drop_lexer();
+    !ok { : -1; }
+    k = lookup(ms, end - ms);
+    k >= 0 && s_flags[k] & FLAG_METHOD != 0 && s_ofs[k] == ms { : k; }
+    : -1;
 }
 
 // name[…] = …  (true)  or  name[…] op … {  (false). Consumes nothing.

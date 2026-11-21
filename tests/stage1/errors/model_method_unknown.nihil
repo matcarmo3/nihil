@@ -1,0 +1,4 @@
+P = @[a: INT(2)];
+P.twice(p = P()) { : p.a * 2; }
+x = P(3);
+>> x.half();

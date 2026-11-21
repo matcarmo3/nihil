@@ -15,8 +15,9 @@ prescan() {
     pv_type = T_END;
     * tok_type != T_END {
         t = tok_type;
-        t == T_IDENT && braces == 0 && parens == 0 {
-            peek_type() == '(' { try_method(); }
+        t == T_IDENT && braces == 0 && parens == 0 && pv_type != '.' {   // after "MODEL." it is part of that name
+            peek_type() == '(' { try_method(-1, 0); }
+            peek_type() == '.' && is_model(lookup(tok_start, tok_len)) { try_model_method(); }
             t = tok_type;
         }
         t == '{' { braces = braces + 1; }
@@ -57,10 +58,27 @@ prescan() {
     }
 }
 
+// tok = a model's name followed by ".": "MODEL.name( … ) {" declares a method of the model
+// (SPEC §20.6). Its symbol is the text "MODEL.name" (the "." touching both names), so
+// value.name() finds it from the model of the value. The lexer goes back to the model.
+try_model_method() {
+    ms = tok_start;
+    ml = tok_len;
+    save_lexer();
+    next_token();                        // model → "."
+    dot = tok_start;
+    next_token();                        // "." → name
+    ok = tok_type == T_IDENT && dot == ms + ml && tok_start == dot + 1 && peek_type() == '(';
+    ok { try_method(ms, tok_start + tok_len - ms); }
+    back_lexer();
+    drop_lexer();
+}
+
 // tok = name followed by "(". If it has declaration form ("f()" or
 // "f(name = …" or "f(name? …") and the matching ")" is followed by "{",
-// registers the method. The lexer goes back to the name.
-try_method() {
+// registers the method. The lexer goes back to the name. ns, nl: the method's whole
+// name in the source when it is not the token ("MODEL.name"); ns < 0: the token.
+try_method(ns = 0, nl = 0) {
     save_lexer();
     next_token();                        // name → "("
     e = peek_type();
@@ -98,19 +116,20 @@ try_method() {
     }
     back_lexer();
     declare {
-        register_method();
+        register_method(ns, nl);
         back_lexer();
     }
     drop_lexer();
 }
 
-// tok = name of the declaration
-register_method() {
-    k = lookup(tok_start, tok_len);
+// tok = name of the declaration (ns, nl: the whole name, as in try_method)
+register_method(ns = 0, nl = 0) {
+    ns < 0 { ns = tok_start; nl = tok_len; }
+    k = lookup(ns, nl);
     k >= 0 {
         error_start();
         put_str("'");
-        put_source(tok_start, tok_len);
+        put_source(ns, nl);
         s_flags[k] & FLAG_METHOD != 0 {
             put_str("' was already declared on line ");
             put_line(s_end[k]);
@@ -119,7 +138,7 @@ register_method() {
         }
         error_end();
     }
-    k = new_symbol(tok_start, tok_len, 0);  // return type not known yet
+    k = new_symbol(ns, nl, 0);              // return type not known yet
     s_flags[k] = FLAG_METHOD;
     s_extra[k] = n_param;
     s_end[k] = tok_line;                     // (line, only until the first pass)
@@ -167,6 +186,28 @@ register_method() {
         } || tok_type != ')' {
             error_expected("',' or ')'");
         }
+    }
+    model_method_check(k, ns, nl);
+}
+
+// a method "MODEL.name": its first parameter is the record itself (self = MODEL())
+model_method_check(k = 0, ns = 0, nl = 0) {
+    d = 0;
+    * d < nl && source[ns + d] != '.' { d = d + 1; }
+    d == nl { :; }                           // an ordinary method
+    km = lookup(ns, d);
+    t = model_type(0);
+    is_model(km) { t = model_type(s_extra[km]); }
+    s_nparam[k] == 0 || p_type[s_extra[k]] != t {
+        error_start();
+        put_str("the first parameter of '");
+        put_source(ns, nl);
+        put_str("' is the ");
+        put_source(ns, d);
+        put_str(" itself, with a default like self = ");
+        put_source(ns, d);
+        put_str("()");
+        error_end();
     }
 }
 

@@ -1,0 +1,40 @@
+// methods of a data model (SPEC §20.6): MODEL.name(self = MODEL(), …) { … }, called as value.name(…)
+SHELF = @[module: INT(3); level: INT(3); width: FLOAT(12); used: FLOAT(12)];
+ITEM = @[name: STRING(20); width: FLOAT(8); fronts: INT(4)];
+
+SHELF.free(s = SHELF()) {
+    : s.width - s.used;
+}
+
+SHELF.fits(s = SHELF(), it = ITEM()) {
+    : it.width * .it.fronts <= s.free();          // a method calling another one
+}
+
+SHELF.place(s = SHELF(), it = ITEM()) {
+    s.used = s.used + it.width * .it.fronts;      // records are references: the shelf changes
+}
+
+SHELF.grow(s = SHELF(), extra = 0.0) {
+    : SHELF(s.module, s.level, s.width + extra, s.used);   // a new record
+}
+
+ITEM.free(it = ITEM()) {                          // the same name in another model
+    : "item " + it.name;
+}
+
+ITEM.label(it = ITEM()) {
+    : it.name + " ×" + $it.fronts;
+}
+
+top = SHELF(1, 5, 338.0, 300.0);
+soap = ITEM("soap", 12.5, 2);
+rice = ITEM("rice", 30.0, 2);
+>> $top.free() + " " + $top.fits(soap) + " " + $top.fits(rice) + "\n";
+top.place(soap);
+>> $top.free() + " " + soap.free() + " " + soap.label() + "\n";
+shelves = [SHELF(1, 1, 100.0, 0.0), SHELF(1, 2, 100.0, 80.0)];
+i = 0;
+* i < #shelves { >> $shelves[i].free() + " "; i = i + 1; }
+>> "\n";
+>> $top.grow(10.0).free() + " " + $top.free() + "\n";
+top.fits(rice) { >> "rice fits\n"; } || { >> "no room for rice\n"; }
