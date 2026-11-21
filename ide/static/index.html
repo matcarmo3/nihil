@@ -48,7 +48,7 @@ select { background: var(--panel2); color: var(--text); border: 1px solid var(--
 /* the Claude panel (right) */
 #chatResize { cursor: col-resize; background: var(--line); opacity: .5; }
 #chatResize:hover { background: var(--dim); }
-#chat { display: grid; grid-template-rows: auto auto 1fr auto; background: var(--panel); min-height: 0; min-width: 0; }
+#chat { display: grid; grid-template-rows: auto auto auto 1fr auto; background: var(--panel); min-height: 0; min-width: 0; }
 #chat[hidden], #chatResize[hidden] { display: none; }
 #chat .chat-head { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--line); }
 #chat .chat-head b { color: var(--accent); }
@@ -71,6 +71,23 @@ select { background: var(--panel2); color: var(--text); border: 1px solid var(--
 .tool pre.diff { margin: 3px 0 6px; padding: 4px 6px; background: #101116; border-radius: 5px; overflow: auto; max-height: 220px; }
 .tool .del { color: var(--err); } .tool .add { color: var(--ok); }
 .denied { color: var(--err); font-size: 12px; }
+/* activity: what Claude and the IDE are doing */
+#activity { border-bottom: 1px solid var(--line); padding: 5px 10px; font-size: 12px; max-height: 34%; overflow: auto; }
+#activity summary { cursor: pointer; color: var(--dim); user-select: none; }
+#activity summary .live { color: var(--accent); }
+#activity .row { display: flex; gap: 6px; align-items: baseline; margin: 3px 0; }
+#activity .k { color: var(--dim); min-width: 70px; }
+#activity .v { overflow-wrap: anywhere; }
+#activity .v .f { font-family: ui-monospace, Menlo, monospace; cursor: pointer; }
+#activity .v .f:hover { text-decoration: underline; }
+#activity .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); margin-right: 4px;
+  animation: pulse 1.2s ease-in-out infinite; }
+#activity .done { color: var(--dim); }
+@keyframes pulse { 50% { opacity: .25; } }
+/* tabs Claude read (◦), edited (✎) or is working in now (pulsing) */
+.etab.claude-read::before { content: "◦ "; color: var(--accent); }
+.etab.claude-edit::before { content: "✎ "; color: var(--accent); }
+.etab.claude-now { box-shadow: inset 0 -2px 0 var(--accent); }
 .chat-input { border-top: 1px solid var(--line); padding: 8px 10px; display: grid; grid-template-columns: 1fr auto; gap: 6px; }
 .chat-input textarea { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px;
   padding: 6px 8px; font: inherit; resize: vertical; min-height: 44px; }
@@ -216,6 +233,7 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
         <label><input type="checkbox" id="ctxFile" checked>active file</label>
         <label><input type="checkbox" id="ctxTabs" checked>tabs</label>
         <label><input type="checkbox" id="ctxErr" checked>errors</label></div>
+      <details id="activity" open><summary>Activity <span class="live" id="actSummary"></span></summary><div id="actBody"></div></details>
       <div id="chatLog"><div class="empty">Ask about the code: "explain the selection", "why does this not compile?", "write a program that…". Claude reads the project and the language's SPEC; with "may edit" it can also change files.</div></div>
       <div class="chat-input">
         <textarea id="chatText" rows="3" placeholder="Message (Enter sends, Shift+Enter: new line)"></textarea>
@@ -568,8 +586,10 @@ function renderTabs() {
   const bar = $('editorTabs'); bar.innerHTML = '';
   for (const t of tabs) {
     const el = document.createElement('div');
-    el.className = 'etab' + (t.path === current ? ' active' : '') + (t.dirty ? ' dirty' : '');
-    el.title = t.path + (t.editable ? '' : ' (read only)');
+    const cm = claudeFiles.get(t.path);
+    el.className = 'etab' + (t.path === current ? ' active' : '') + (t.dirty ? ' dirty' : '')
+      + (cm ? ' claude-' + cm : '') + (t.path === claudeNow ? ' claude-now' : '');
+    el.title = t.path + (t.editable ? '' : ' (read only)') + (cm === 'edit' ? ' — edited by Claude' : cm === 'read' ? ' — read by Claude' : '');
     const x = document.createElement('span'); x.className = 'x'; x.title = 'Close (middle click)';
     el.append(t.path.slice(t.path.lastIndexOf('/') + 1), x);
     el.onclick = () => activate(t);
@@ -789,6 +809,59 @@ addEventListener('keydown', (e) => {
 // The message goes to the server (/api/claude), which runs `claude -p` in the project; its answer,
 // one JSON event per line, is read with /api/output as it is written.
 let chatSession = '', chatRun = null;
+// activity: the step Claude is on, its helpers (subagents), the files it touched, and what runs
+let claudeStep = '', claudeNow = '', claudeAgents = [], claudeFiles = new Map(), runningNow = [];
+function setStep(text, file) { claudeStep = text; claudeNow = file || ''; renderActivity(); renderTabs(); }
+function touchFile(rel, kind) {
+  if (!rel || rel.startsWith('/')) return;
+  if (kind === 'edit' || claudeFiles.get(rel) !== 'edit') claudeFiles.set(rel, kind);
+}
+const fmtMs = (ms) => ms < 60000 ? Math.round(ms / 1000) + ' s' : Math.floor(ms / 60000) + ' min ' + Math.round(ms % 60000 / 1000) + ' s';
+function fileLink(rel) {
+  const a = document.createElement('span'); a.className = 'f'; a.textContent = rel;
+  if (rel.endsWith('.nihil')) a.onclick = () => open(rel);
+  return a;
+}
+function renderActivity() {
+  const body = $('actBody'); if (!body) return; body.innerHTML = '';
+  const row = (k, fill) => { const r = document.createElement('div'); r.className = 'row';
+    const kk = document.createElement('span'); kk.className = 'k'; kk.textContent = k; const v = document.createElement('span'); v.className = 'v';
+    fill(v); r.append(kk, v); body.appendChild(r); };
+  row('Claude', (v) => {
+    if (chatRun) { const d = document.createElement('span'); d.className = 'dot'; v.append(d, claudeStep || 'starting…');
+      if (claudeNow) { v.append(' '); v.appendChild(fileLink(claudeNow)); } }
+    else v.append(chatSession ? 'idle (the conversation goes on)' : 'idle');
+  });
+  for (const a of claudeAgents) row('helper', (v) => {
+    if (a.state === 'running') { const d = document.createElement('span'); d.className = 'dot'; v.appendChild(d); }
+    v.append(a.desc + (a.step ? ' — ' + a.step : '')); if (a.state !== 'running') v.classList.add('done');
+    if (a.state !== 'running') v.append(' (done)');
+  });
+  const reads = [...claudeFiles].filter(([, k]) => k === 'read').map(([f]) => f), edits = [...claudeFiles].filter(([, k]) => k === 'edit').map(([f]) => f);
+  if (reads.length || edits.length) row('files', (v) => {
+    if (edits.length) { v.append('edited '); edits.forEach((f, i) => { if (i) v.append(', '); v.appendChild(fileLink(f)); }); }
+    if (reads.length) { if (edits.length) v.append('; '); v.append('read '); reads.forEach((f, i) => { if (i) v.append(', '); v.appendChild(fileLink(f)); }); }
+  });
+  row('tabs', (v) => { v.textContent = tabs.length ? tabs.map((t) => t.path.slice(t.path.lastIndexOf('/') + 1) + (t.dirty ? ' ●' : '')).join(', ') : 'none open'; });
+  const progs = runningNow.filter((r) => r.kind === 'program'), chats = runningNow.filter((r) => r.kind === 'claude' && r.run !== chatRun);
+  row('programs', (v) => {
+    if (!progs.length) { v.textContent = 'none running'; return; }
+    progs.forEach((r, i) => { if (i) v.append(', '); const d = document.createElement('span'); d.className = 'dot'; v.appendChild(d);
+      v.appendChild(fileLink(r.label)); v.append(` (${fmtMs(r.ms)}${r.project !== project ? ', ' + r.project.split('/').pop() : ''})`); });
+  });
+  if (chats.length) row('other chats', (v) => { v.textContent = chats.map((r) => `"${r.label}" (${fmtMs(r.ms)})`).join(', '); });
+  row('shells', (v) => { v.textContent = 'none: the panel runs no commands (Bash is blocked), so there are no shells or monitors'; });
+  const live = (chatRun ? 1 : 0) + claudeAgents.filter((a) => a.state === 'running').length + progs.length;
+  $('actSummary').textContent = live ? `· ${live} working` : '';
+}
+async function pollActivity() {
+  if (chatOpen && project) {
+    const r = await api('/api/activity').catch(() => null);
+    if (r && r.running) { runningNow = r.running; renderActivity(); }
+  }
+  setTimeout(pollActivity, 1500);
+}
+setTimeout(pollActivity, 500);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function chatKey() { return 'nihil-ide-claude:' + project; }
 function loadChat() {
@@ -818,7 +891,8 @@ $('chatResize').onmousedown = (e) => {
   addEventListener('mousemove', move); addEventListener('mouseup', up);
 };
 $('chatEdits').onchange = () => { try { localStorage.setItem(chatKey() + ':edits', $('chatEdits').checked ? '1' : '0'); } catch (e) {} };
-$('chatNew').onclick = () => { if (chatRun) return; setSession(''); $('chatLog').innerHTML = ''; $('chatText').focus(); };
+$('chatNew').onclick = () => { if (chatRun) return; setSession(''); $('chatLog').innerHTML = ''; claudeFiles.clear(); claudeAgents = [];
+  renderTabs(); renderActivity(); $('chatText').focus(); };
 $('chatText').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); chatSend(); } });
 $('chatSend').onclick = () => chatSend();
 $('chatStop').onclick = async () => { if (chatRun) await api('/api/stop', { id: chatRun }); };
@@ -902,11 +976,38 @@ async function chatSend() {
   let textEl = null, raw = '', out = 0, err = 0, buf = '', errText = '', result = null;
   const edited = new Set();
   const thinking = document.createElement('div'); thinking.className = 'tool'; thinking.textContent = 'thinking…'; box.appendChild(thinking);
+  claudeAgents = []; setStep('starting…');
+  const describe = (b) => {
+    const inp = b.input || {}, f = inp.file_path ? relPath(inp.file_path) : '';
+    if (b.name === 'Read') return ['reading', f];
+    if (b.name === 'Edit') return ['editing', f];
+    if (b.name === 'Write') return ['writing', f];
+    if (b.name === 'Grep') return ['searching for ' + (inp.pattern || ''), ''];
+    if (b.name === 'Glob') return ['listing ' + (inp.pattern || ''), ''];
+    return [b.name, f];
+  };
   const handle = (line) => {
     let d; try { d = JSON.parse(line); } catch (e) { return; }
     if (d.type === 'system' && d.subtype === 'init' && d.session_id) setSession(d.session_id);
+    if (d.parent_tool_use_id) {                       // a helper (subagent) at work
+      const a = claudeAgents.find((x) => x.id === d.parent_tool_use_id);
+      if (a && d.type === 'assistant' && d.message) for (const b of d.message.content || []) if (b.type === 'tool_use') {
+        const [verb, f] = describe(b); a.step = verb + (f ? ' ' + f : '');
+        if (f) touchFile(f, b.name === 'Edit' || b.name === 'Write' ? 'edit' : 'read');
+        renderActivity(); renderTabs();
+      }
+      return;
+    }
+    if (d.type === 'user' && d.message) for (const b of d.message.content || []) {
+      if (b && b.type === 'tool_result') {
+        const a = claudeAgents.find((x) => x.id === b.tool_use_id); if (a) { a.state = 'done'; a.step = ''; }
+        setStep('thinking…');
+      }
+    }
     if (d.type === 'stream_event') {
       const ev = d.event || {};
+      if (ev.type === 'content_block_start' && ev.content_block && ev.content_block.type === 'thinking') setStep('thinking…');
+      if (ev.type === 'content_block_start' && ev.content_block && ev.content_block.type === 'text') setStep('writing the answer');
       if (ev.type === 'content_block_start' && ev.content_block && ev.content_block.type === 'text') {
         textEl = document.createElement('div'); box.appendChild(textEl); raw = '';
       }
@@ -921,6 +1022,13 @@ async function chatSend() {
         if (b.type === 'tool_use') {
           toolLine(box, b); thinking.remove();
           if ((b.name === 'Edit' || b.name === 'Write') && b.input && b.input.file_path) edited.add(relPath(b.input.file_path));
+          if (b.name === 'Agent' || b.name === 'Task') {
+            claudeAgents.push({ id: b.id, desc: (b.input && (b.input.description || (b.input.prompt || '').slice(0, 60))) || 'a helper', state: 'running', step: '' });
+            setStep('waiting for its helpers');
+          } else {
+            const [verb, f] = describe(b); setStep(verb, f);
+            if (f) touchFile(f, b.name === 'Edit' || b.name === 'Write' ? 'edit' : 'read');
+          }
         }
       }
       textEl = null;
@@ -965,6 +1073,8 @@ async function chatSend() {
     chatAdd('error', esc(errText.trim() || 'Claude stopped before answering'));
   }
   chatRun = null; setChatBusy(false);
+  for (const a of claudeAgents) a.state = 'done';
+  setStep('', '');
   if (edited.size) {
     for (const p of edited) { const t = tabs.find((x) => x.path === p); if (t) await reloadTab(t); }
     await loadFiles();
@@ -993,7 +1103,7 @@ async function switchProject(path, target) {
   tabs = []; current = null; savedText = ''; savedHash = null;
   editor.swapDoc(CodeMirror.Doc('', 'nihil')); clearMarks(); renderTabs();
   selectedFolder = ''; loadCollapsed();
-  loadChat(); if (!chatRun) $('chatLog').innerHTML = '';
+  loadChat(); if (!chatRun) { $('chatLog').innerHTML = ''; claudeFiles.clear(); claudeAgents = []; }
   tableOpen = null; $('table').innerHTML = '<div class="empty">Click a table on the left to see its records.</div>';
   const files = await loadFiles();
   let saved = null; try { saved = JSON.parse(localStorage.getItem('nihil-ide-tabs:' + project) || 'null'); } catch (e) {}

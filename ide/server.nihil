@@ -527,11 +527,15 @@ RUN_T0 = {0: 0 ; 64};
 RUN_SEEN = {0: 0 ; 64};         // the last time the page asked for its output
 RUN_CODE = {0: 0 ; 64};         // the exit code, once it finished
 RUN_STOPPED = {0: false ; 64};
+RUN_KIND = {0: "" ; 64};        // "program" or "claude" (for /api/activity)
+RUN_LABEL = {0: "" ; 64};       // the program's path, or the start of the message
+RUN_PROJECT = {0: "" ; 64};
 
 finish_run(id = 0) {
     b = RUN_BASE[id] || "";
     (b + ".bin").remove(); (b + ".out").remove(); (b + ".err").remove();
     RUN_PROC[id] = _; RUN_BASE[id] = _; RUN_T0[id] = _; RUN_SEEN[id] = _; RUN_CODE[id] = _; RUN_STOPPED[id] = _;
+    RUN_KIND[id] = _; RUN_LABEL[id] = _; RUN_PROJECT[id] = _;
 }
 
 // programs past their time, or whose page went away, are stopped
@@ -600,6 +604,7 @@ run_json(project = "", body = "", asm = false) {
     RUN_BASE[id] = base;
     RUN_T0[id] = now_ms();
     RUN_SEEN[id] = now_ms();
+    RUN_KIND[id] = "program"; RUN_LABEL[id] = rel; RUN_PROJECT[id] = project;
     : "{\"ok\": true, \"errors\": " + COMPILE_ERRORS + ", \"compile_ms\": " + $COMPILE_MS + ", \"size\": " + $size + ", \"run\": " + $id + "}";
 }
 
@@ -692,7 +697,31 @@ claude_json(project = "", body = "") {
     RUN_BASE[id] = base;
     RUN_T0[id] = now_ms();
     RUN_SEEN[id] = now_ms();
+    label = msg.trim().replace("\n", " ");
+    #label > 80 { label = label.slice(0, 80) + "…"; }
+    RUN_KIND[id] = "claude"; RUN_LABEL[id] = label; RUN_PROJECT[id] = project;
     : "{\"ok\": true, \"run\": " + $id + "}";
+}
+
+// what is running: the programs and the Claude conversations of this server, every project
+activity_json() {
+    ids = RUN_PROC.keys().sort();
+    parts = ["" ; 0];
+    i = 0;
+    * i < #ids {
+        id = ids[i];
+        running = RUN_CODE.contains(id) == false;
+        running {
+            d? = (RUN_PROC[id] || 0).done();
+            d != _ { RUN_CODE[id] = d || 0; running = false; }
+        }
+        running {
+            parts = parts + ["{\"run\": " + $id + ", \"kind\": " + q(RUN_KIND[id] || "program") + ", \"label\": " + q(RUN_LABEL[id] || "")
+                             + ", \"project\": " + q(RUN_PROJECT[id] || "") + ", \"ms\": " + $(now_ms() - (RUN_T0[id] || 0)) + "}"];
+        }
+        i = i + 1;
+    }
+    : "{\"running\": [" + parts.join(", ") + "]}";
 }
 
 // ---- HTTP -------------------------------------------------------------------------------
@@ -803,6 +832,7 @@ handle(c = 0, req = "") {
         c.respond(200, "application/json", "{\"ok\": true, \"path\": " + q(rel) + "}");
         :;
     }
+    path == "/api/activity" { c.respond(200, "application/json", activity_json()); :; }
     path == "/api/claude" { c.respond(200, "application/json", claude_json(project, body)); :; }
     path == "/api/run" || path == "/api/asm" { c.respond(200, "application/json", run_json(project, body, path == "/api/asm")); :; }
     path == "/api/output" {
