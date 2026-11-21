@@ -1336,35 +1336,15 @@ gc_init:
     pop rax
     ret
 
-; → rax = an address above every frame of the program's stack, or 0: the
-; file name the kernel put at the top of the stack (AT_EXECFN), from
-; prctl(PR_GET_AUXV); else the end of "[stack]" in /proc/self/maps
+; → rax = an address above every frame of the program's stack, or 0: the end of the mapping
+; of /proc/self/maps that holds the stack pointer. (AT_EXECFN, the file name the kernel puts at
+; the top of the stack, is not used: under Rosetta, which runs x86_64 programs on Apple silicon,
+; it points outside the program's stack.)
 gc_stack_top:
     push rbx
     push r12
-    sub rsp, 1024
-    mov eax, 157                    ; sys_prctl(PR_GET_AUXV, buffer, size)
-    mov edi, 0x41555856
-    mov rsi, rsp
-    mov edx, 1024
-    xor r10d, r10d
-    xor r8d, r8d
-    syscall
-    test rax, rax
-    jle .maps
-    mov rcx, rsp
-.aux:
-    mov rdx, [rcx]
-    test rdx, rdx                   ; AT_NULL
-    jz .maps
-    cmp rdx, 31                     ; AT_EXECFN
-    je .execfn
-    add rcx, 16
-    jmp .aux
-.execfn:
-    mov rax, [rcx + 8]
-    jmp .end
-.maps:
+    push r13
+    mov r13, rsp                    ; an address in the program's stack
     mov rsi, 1 << 20                ; the file, read into a temporary block
     call gc_mmap
     cmp rax, -4096
@@ -1399,46 +1379,53 @@ gc_stack_top:
     mov rdi, r12
     syscall
     pop rcx
-    xor eax, eax                    ; looking for "[stack]"
-    xor edx, edx                    ; start of the current line
-.scan:
-    lea rsi, [rax + 7]
-    cmp rsi, rcx
-    ja .not_found
-    cmp byte [rbx + rax], 10
-    jne .compare
-    lea rdx, [rax + 1]
-.compare:
-    cmp dword [rbx + rax], '[sta'
-    jne .next
-    cmp dword [rbx + rax + 3], 'ack]'
-    je .line
-.next:
-    inc rax
-    jmp .scan
-.line:                              ; "start-end …": the hexadecimal after '-'
+    xor edx, edx                    ; position: the start of a line "start-end perms …"
+.line:
+    cmp rdx, rcx
+    jae .not_found
+    call .hex                       ; rax = start
+    mov r10, rax
+    cmp rdx, rcx
+    jae .not_found
     cmp byte [rbx + rdx], '-'
-    je .hex
+    jne .skip
+    inc rdx
+    call .hex                       ; rax = end
+    cmp r13, r10
+    jb .skip
+    cmp r13, rax
+    jb .found                       ; start <= rsp < end: this mapping holds the stack
+.skip:                              ; to the next line
+    cmp rdx, rcx
+    jae .not_found
+    cmp byte [rbx + rdx], 10
+    je .next_line
+    inc rdx
+    jmp .skip
+.next_line:
     inc rdx
     jmp .line
-.hex:
-    inc rdx
+.hex:                               ; the hexadecimal at rdx → rax (rdx after it)
     xor eax, eax
 .digit:
-    movzx ecx, byte [rbx + rdx]
-    sub ecx, '0'
-    cmp ecx, 9
+    cmp rdx, rcx
+    jae .hex_end
+    movzx r8d, byte [rbx + rdx]
+    sub r8d, '0'
+    cmp r8d, 9
     jbe .add
-    sub ecx, 'a' - '0' - 10
-    cmp ecx, 10
-    jb .found
-    cmp ecx, 15
-    ja .found
+    sub r8d, 'a' - '0' - 10
+    cmp r8d, 10
+    jb .hex_end
+    cmp r8d, 15
+    ja .hex_end
 .add:
     shl rax, 4
-    add rax, rcx
+    add rax, r8
     inc rdx
     jmp .digit
+.hex_end:
+    ret
 .not_found:
     xor eax, eax
 .found:
@@ -1457,7 +1444,7 @@ gc_stack_top:
 .none:
     xor eax, eax
 .end:
-    add rsp, 1024
+    pop r13
     pop r12
     pop rbx
     ret
