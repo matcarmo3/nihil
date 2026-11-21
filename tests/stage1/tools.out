@@ -1,6 +1,7 @@
-[{"name": "area", "description": "the area of a rectangle, in square units", "inputSchema": {"type": "object", "properties": {"width": {"type": "number", "default": 0.0}, "height": {"type": "number", "default": 0.0}}}}, {"name": "hello", "description": "greets someone", "inputSchema": {"type": "object", "properties": {"name": {"type": "string", "default": "world"}, "loud": {"type": "boolean", "default": false}}}}, {"name": "shelf", "description": "a shelf", "inputSchema": {"type": "object", "properties": {"module": {"type": "integer", "default": 1}}}}]
+[{"name": "area", "description": "the area of a rectangle, in square units", "inputSchema": {"type": "object", "properties": {"width": {"type": "number", "default": 0.0}, "height": {"type": "number", "default": 0.0}}}}, {"name": "hello", "description": "greets someone", "inputSchema": {"type": "object", "properties": {"name": {"type": "string", "default": "world"}, "loud": {"type": "boolean", "default": false}}}}, {"name": "shelf", "description": "a shelf", "inputSchema": {"type": "object", "properties": {"module": {"type": "integer", "default": 1}}}}, {"name": "divide", "description": "protected: an error inside the tool is caught", "inputSchema": {"type": "object", "properties": {"a": {"type": "integer", "default": 0}, "b": {"type": "integer", "default": 0}}}}]
 10.0
 hello, world
 HELLO, NIHIL!
 {"module": 3, "width": 338.0}
 _
+_ | division by zero

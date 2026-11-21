@@ -483,6 +483,7 @@ call_tool_call() {
     d = 0;
     * d < nd { patch_here(dones[d]); d = d + 1; }
     eb(0x48, 0x83, 0xC4, 16);            // add rsp, 16
+    call_end = size_code;                // a call: ?call_tool(…) protects it
     : TYPE_STR | TYPE_OPT;
 }
 

@@ -24,3 +24,8 @@ helper(x = 0) { : x; }                 // not a tool: another prefix
 >> call_tool("tool_", "shelf", "{\"module\": \"3\"}") || "?"; >> "\n";   // a number given as text
 u? = call_tool("tool_", "nope", "{}");
 >> u; >> "\n";
+
+// protected: an error inside the tool is caught
+tool_divide(a = 0, b = 0) { : a / b; }
+v? = ?call_tool("tool_", "divide", "{\"a\": 1, \"b\": 0}");
+>> v; >> " | " + ?! + "\n";
