@@ -994,8 +994,10 @@ rt_error:
 ; New memory is always zero: fresh pages come zeroed from the kernel, freed
 ; pages are given back with madvise(MADV_DONTNEED) (zero again when touched),
 ; and a reused small block is cleared before it is handed out. A large block
-; is scanned only where the kernel has memory for it (mincore): a big array
-; never written costs nothing, as before.
+; is scanned only on the pages that hold something (/proc/self/pagemap: present
+; or swapped): a big array never written costs nothing, as before. mincore is
+; not enough: it says 0 for a page in swap, and skipping that page freed the
+; blocks it pointed to. mincore stays the fallback when pagemap cannot be read.
 %define GC_PAGE_SHIFT 16
 %define GC_PAGE       (1 << GC_PAGE_SHIFT)
 %define GC_SMALL_MAX  32768
@@ -1467,6 +1469,16 @@ gc_collect:
     push r13
     push r14
     push r15
+    mov eax, 257                    ; sys_openat(AT_FDCWD, "/proc/self/pagemap", O_RDONLY | O_CLOEXEC)
+    mov rdi, -100
+    lea rsi, [rel s_pagemap]
+    mov edx, 0x80000
+    syscall
+    inc rax                         ; fd + 1; an error gives 0 or less
+    jg .pagemap
+    xor eax, eax
+.pagemap:
+    mov [GC_PAGEMAP], rax
     mov r14, [GC_HEAP_BASE]
     mov r13, [GC_BUMP]
     sub r13, r14                    ; bytes of the heap in use (pages handed out)
@@ -1495,6 +1507,14 @@ gc_collect:
     call gc_scan_resident
     jmp .drain
 .sweep:
+    mov rdi, [GC_PAGEMAP]
+    test rdi, rdi
+    jz .swept
+    dec rdi
+    mov eax, 3                      ; sys_close
+    syscall
+    mov qword [GC_PAGEMAP], 0
+.swept:
     call gc_sweep
     inc qword [GC_COUNT]
     mov qword [GC_ALLOCATED], 0
@@ -1585,14 +1605,71 @@ gc_scan:
     lea rsi, [rel s_without_memory]
     jmp rt_error
 
-; gc_scan of a large block [rsi, rdi), skipping the 4 KiB pages the kernel has
-; no memory for (never written: zero, so they hold no references)
+; gc_scan of a large block [rsi, rdi), skipping the 4 KiB pages that hold
+; nothing (never written: zero, so they hold no references). pagemap says it
+; page by page (bit 63 present, bit 62 swapped), read 1024 entries at a time
+; into the mincore buffer (16 KiB at least); mincore when pagemap is not open.
 gc_scan_resident:
     push rbx
     push rbp
     mov rbx, rsi
     and rbx, -4096                  ; first page
     mov rbp, rdi                    ; end
+    cmp qword [GC_PAGEMAP], 0
+    je .mincore
+.refill:
+    cmp rbx, rbp
+    jae .end
+    mov rdx, rbp
+    sub rdx, rbx
+    add rdx, 4095
+    shr rdx, 12                     ; pages left
+    cmp rdx, 1024
+    jbe .count
+    mov edx, 1024
+.count:
+    shl rdx, 3                      ; bytes of entries
+    mov r10, rbx
+    shr r10, 12 - 3                 ; the offset: page number × 8
+    mov rdi, [GC_PAGEMAP]
+    dec rdi
+    mov rsi, [GC_MINCORE]
+    mov eax, 17                     ; sys_pread64(fd, buffer, bytes, offset)
+    syscall
+    cmp rax, 8
+    jl .whole                       ; could not read it: the rest, all of it
+    shr rax, 3
+    mov r10, rax                    ; entries read
+    mov r11, [GC_MINCORE]
+.entry:
+    mov rax, [r11]
+    shr rax, 62                     ; present or swapped
+    jz .empty
+    mov rsi, rbx
+    lea rdi, [rbx + 4096]
+    cmp rdi, rbp
+    jbe .scan_page
+    mov rdi, rbp
+.scan_page:
+    push r10
+    push r11
+    call gc_scan
+    pop r11
+    pop r10
+.empty:
+    add rbx, 4096
+    add r11, 8
+    cmp rbx, rbp
+    jae .end
+    dec r10
+    jnz .entry
+    jmp .refill
+.whole:
+    mov rsi, rbx
+    mov rdi, rbp
+    call gc_scan
+    jmp .end
+.mincore:
     mov rsi, rdi
     sub rsi, rbx
     add rsi, 4095                   ; bytes, in whole pages
@@ -2601,6 +2678,7 @@ s_true:     db "true"
 s_absent:  db "_"
 s_false:    db "false"
 s_maps:       db "/proc/self/maps", 0
+s_pagemap:    db "/proc/self/pagemap", 0
 s_nihil:      db "nihil: "
 s_nihil_len   equ $ - s_nihil
 s_nl:       db 10
