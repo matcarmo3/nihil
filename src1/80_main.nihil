@@ -92,6 +92,9 @@ one_pass() {
 
 load_program();
 compile();
+// -map: the runtime ends after the header and its block, the program's code at code_end, the
+// constants follow (8-aligned) up to the end of the file
+want_map { !>> "nihil-map " + $(SIZE_HEADER + #runtime_bin) + " " + $code_end + " " + $size_code + "\n"; }
 output_byte = 0;
 size_code {
     >>> code[output_byte];

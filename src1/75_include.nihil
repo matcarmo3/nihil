@@ -232,12 +232,25 @@ load_program() {
         }
         <<< c;
     }
-    // "-O0 " before the path: no optimizations (the same bytes as stage 0)
-    size_names >= 4 && names[0] == '-' && names[1] == 'O' && names[2] == '0' && names[3] == ' ' {
-        optimize = false;
-        i = 0;
-        size_names - 4 { names[i] = names[i + 4]; i = i + 1; }
-        size_names = size_names - 4;
+    // options before the path: "-O0 " (no optimizations: the same bytes as stage 0) and "-map "
+    // (where the runtime, the code and the constants are, on stderr: the macOS translator reads it)
+    going = true;
+    * going {
+        going = false;
+        size_names >= 4 && names[0] == '-' && names[1] == 'O' && names[2] == '0' && names[3] == ' ' {
+            optimize = false;
+            i = 0;
+            size_names - 4 { names[i] = names[i + 4]; i = i + 1; }
+            size_names = size_names - 4;
+            going = true;
+        }
+        size_names >= 5 && names[0] == '-' && names[1] == 'm' && names[2] == 'a' && names[3] == 'p' && names[4] == ' ' {
+            want_map = true;
+            i = 0;
+            size_names - 5 { names[i] = names[i + 5]; i = i + 1; }
+            size_names = size_names - 5;
+            going = true;
+        }
     }
     main = store_name(0, size_names);
     expanding = true;

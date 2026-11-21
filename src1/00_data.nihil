@@ -275,6 +275,8 @@ pv2_line = 0;
 
 // ---- optimizations (M9) ----
 optimize = true;                 // "-O0 " before the path turns them off (the same bytes as stage 0)
+want_map = false;                // "-map " before the path: where the code ends, on stderr (for the macOS translator)
+code_end = 0;                    // where the program's code ends and its constants begin
 REGS = [3, 12, 13, 14, 15];     // rbx, r12 … r15 (preserved by the runtime)
 n_regs = 0;                     // registers in use in the current method
 limit_regs = 0;                // how many the current method saved in its prologue

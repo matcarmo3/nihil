@@ -495,6 +495,7 @@ error_json(rel = "", l = "") {
 }
 
 COMPILE_MS = 0;
+MAC = false;                // macOS: native ARM64 executables (nihilc1.sh builds them with macos/nihil)
 COMPILE_ERRORS = "";        // a JSON array
 
 // compiles project/rel into bin; true if it worked
@@ -570,8 +571,11 @@ run_json(project = "", body = "", asm = false) {
     }
     size = #((bin.read_from(0)) || "");
     asm {
-        p? = ["env", "LC_ALL=C", "objdump", "-D", "-b", "binary", "-mi386:x86-64", "-M", "intel", "--adjust-vma=0x400000",
-              "--start-address=0x4000b0", bin].start(base + ".asm", "", "");
+        // Linux: the x86-64 code after the header; macOS: the native ARM64 executable
+        cmd = ["env", "LC_ALL=C", "objdump", "-D", "-b", "binary", "-mi386:x86-64", "-M", "intel", "--adjust-vma=0x400000",
+               "--start-address=0x4000b0", bin];
+        MAC { cmd = ["objdump", "-d", "--no-show-raw-insn", bin]; }
+        p? = cmd.start(base + ".asm", "", "");
         p != _ { pr = p || 0; pr.close_input(); pr.wait(); }
         dump? = @? (base + ".asm");
         ls = (dump || "").split("\n");
@@ -583,7 +587,7 @@ run_json(project = "", body = "", asm = false) {
             * k < #l && l[k] == ' ' { k = k + 1; }
             j = k;
             * j < #l && (l[j] >= '0' && l[j] <= '9' || l[j] >= 'a' && l[j] <= 'f') { j = j + 1; }
-            k > 0 && j > k && j < #l && l[j] == ':' { keep = keep + [l]; }
+            (k > 0 || MAC) && j > k && j < #l && l[j] == ':' { keep = keep + [l]; }
             i = i + 1;
         }
         (base + ".asm").remove();
@@ -768,6 +772,7 @@ main() {
         i = i + 1;
     }
     !(ROOT + "/nihilc1.sh").is_file() { !>> "nihil ide: start it in the Nihil repository (no nihilc1.sh in " + ROOT + ")\n"; :: 1; }
+    MAC = "/System/Library/CoreServices/SystemVersion.plist".is_file();
     PROJECTS_FILE = ROOT + "/ide/projects.txt";
     TOKEN = ((@ "/proc/sys/kernel/random/uuid") + (@ "/proc/sys/kernel/random/uuid")).replace("\n", "").replace("-", "");
     (ROOT + "/ide/workspace").make_dir();

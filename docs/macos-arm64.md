@@ -1,0 +1,83 @@
+# Nihil on macOS (Apple silicon, ARM64) — the port
+
+## Now: native through a translator (works)
+
+Instead of a second backend in the compiler (the plan below), the x86-64 code the compiler
+already emits is **translated** to ARM64 assembly. The compiler emits a closed set of about 180
+instruction forms (a stack machine, no indirect jumps), so the translation is instruction by
+instruction, and the compiler itself is translated the same way: there is a native compiler.
+
+    macos/nihil prog.nihil [out]     a native Mach-O executable (NIHIL_O0=1: no optimizations)
+    ./nihilc1.sh prog.nihil [out]    the same on macOS (on Linux, unchanged)
+    macos/test-native.sh             tests/ and tests/stage1/ natively (101 programs)
+    macos/test.sh                    the same, compiled by the x86 compiler in a Linux VM
+
+- `nihilc1 -map` writes `nihil-map RUNTIME_END CODE_END SIZE` on stderr: where the program's
+  code starts (after the header and the runtime) and where its constants start. The output
+  is the same with and without it.
+- `macos/translate.py` disassembles `[RUNTIME_END, CODE_END)` (clang + objdump) and writes
+  `.s`: rax rcx rdx rsi rdi → x9–x13; rbx r12–r15 → x19–x23 (kept by C); rbp → x29; the x86
+  stack is emulated exactly by x28 in its own area (`nh_emu_stack`); globals → a symbol through
+  x27; constants are copied after the code. Calls into the runtime's jump table become glue that
+  passes the registers to the C functions of `arm64/rt.c` and keeps every other register.
+  cmp/test/ucomisd map to cmp/tst/fcmp, with the conditions mapped for each.
+- `arm64/rt.c` is the runtime (libSystem): the collector also scans the emulated stack, and
+  `/proc/self/environ`, `/proc/uptime` and `/proc/sys/kernel/random/uuid` are made from
+  macOS's equivalents. Linux system calls used by the prelude (`nh_syscall`) are mapped.
+- `build/macos/nihilc1-native` (the translated compiler) compiles `src1/nihilc1.nihil` to
+  the same bytes as the x86 compiler, and the compiler it builds does the same (fixed point).
+- The IDE server (`ide/server.nihil`) builds native programs on macOS and its assembly view
+  shows ARM64.
+- Collector: a large block is scanned only on pages mincore reports anything about. On macOS a
+  page never written reports only MINCORE_ANONYMOUS (0x80); a compressed or swapped page is
+  not "in core" but has other flags and must be scanned (skipping it freed live blocks under
+  memory pressure). The Linux runtime (`src/runtime.asm`) has the same risk with swap: mincore
+  says 0 for a swapped page there.
+
+Bootstrapping a new Mac: `build/macos/nihilc1-native` comes from translating the output of
+`printf -- "-map src1/nihilc1.nihil\n" | build/nihilc1` (Linux), once; after that the Mac
+rebuilds its compiler by itself (`macos/nihil src1/nihilc1.nihil build/macos/nihilc1-native`).
+
+## The original plan (a second backend)
+
+## The target
+
+- The compiler writes **ARM64 assembly text** (`.s`); `clang -arch arm64` assembles it, links
+  it with libSystem and signs it (ad-hoc), which macOS requires. No Mach-O writer, no code
+  signing and no ARM64 encoder of our own at first; direct emission can come later.
+- The kernel is reached through **libSystem** (`write`, `read`, `mmap`, `open`, `socket`,
+  `posix_spawn`, `exit` …): macOS does not keep its system call numbers stable.
+- Code is position independent (`adrp`/`add` for globals and texts): macOS does not load
+  programs at a fixed address, so the x86 absolute addressing (`[disp32]`) has no equivalent.
+- Registers: x86 `rax` → `x0` (the value), `rdx` → `x1` (an optional's presence), `rbp` →
+  `x29` (the frame). The stack stays 16-byte aligned, so a push takes 16 bytes
+  (`str x0, [sp, #-16]!`). The optimizer's registers (`FLAG_REG`) go to x19–x28.
+- Texts and arrays keep their layout: the length in the 8 bytes before the data.
+
+## Phases
+
+0. **Done: the path works.** `arm64/runtime.s` (output buffer, numbers, texts, exit) and
+   `arm64/fib.s` (what the compiler will emit for a small program, by hand, in its
+   stack-machine style). `clang -arch arm64 -o fib runtime.s fib.s` gives a signed Mach-O that
+   prints the right numbers; fib(35) and the first 31 in 0.12 s on an M4.
+1. **The runtime in ARM64** (on the Mac, now): every routine of `src/runtime.asm` (2,600 lines)
+   — the heap and arrays (`mmap`), the conservative garbage collector (stack and registers),
+   texts, input (`<<`, `<<<`), files and tables (`open`, `pread`, `pwrite`, `fstat`), runtime
+   errors, the native helpers (record parsing, JSON value end, copies), time, network
+   (`socket`, `bind`, `accept` …) and processes (`posix_spawn`, `waitpid`, `kill`). Tested
+   with hand-written callers, as phase 0.
+2. **A backend layer in the compiler** (needs Linux x86_64 to build): the 410 places that emit
+   x86 bytes (`40_emit`, `47_records`, `48_library`, `49_maps`, `50_expressions`,
+   `60_commands`, `80_main` …) go through named operations (load a local, push, pop, compare,
+   call a runtime routine …). The x86 output must stay byte for byte the same: `make compare`
+   and `make fixedpoint` prove it at every step. Then an ARM64 implementation of the same
+   operations that writes text.
+3. **Cross-compiling**: `nihilc1 --target=macos-arm64 prog.nihil` on Linux writes `prog.s`;
+   on the Mac, `clang` and the test battery (`tests/`, the same expected outputs).
+4. **Self-hosting**: `nihilc1` compiled for macOS, compiling on the Mac (it calls `clang`), and
+   the fixed point there (the Mac compiler compiles itself to the same text).
+5. **The optimizer** on ARM64 (registers x19–x28; `-O` and `-O0` give the same results).
+6. **The tools**: `make` targets for the Mac, the IDE server and the MCP server on the Mac.
+
+Stage 0 (`src/nihilc.asm`, NASM) stays as it is: it only builds stage 1 on Linux, and the
+first macOS compiler comes from stage 1 (phase 3).
