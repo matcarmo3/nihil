@@ -463,6 +463,12 @@ primary_name() {
         k < 0 && name_is(pi, pl, "__nihil_fd_read") { : net_intrinsic(3); }
         k < 0 && name_is(pi, pl, "__nihil_fd_send") { : net_intrinsic(4); }
         k < 0 && name_is(pi, pl, "__nihil_fd_close") { : net_intrinsic(5); }
+        k < 0 && name_is(pi, pl, "__nihil_syscall") { : syscall_intrinsic(); }
+        k < 0 && name_is(pi, pl, "__nihil_json_end_rt") { : json_intrinsic(1); }
+        k < 0 && name_is(pi, pl, "__nihil_lines_rt") { : json_intrinsic(2); }
+        k < 0 && name_is(pi, pl, "__nihil_rec_parse_rt") { : copy_intrinsic(3); }
+        k < 0 && name_is(pi, pl, "__nihil_sub_rt") { : copy_intrinsic(1); }
+        k < 0 && name_is(pi, pl, "__nihil_put_rt") { : copy_intrinsic(2); }
         k < 0 && name_is(pi, pl, "__nihil_bytes") { : bytes_intrinsic(1); }
         k < 0 && name_is(pi, pl, "__nihil_poke") { : bytes_intrinsic(2); }
         is_model(k) { : new_record(k); }

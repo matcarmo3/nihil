@@ -1,0 +1,13 @@
+// the names common libraries use (contains, starts_with, ends_with), the older synonyms
+// (has, starts, ends), and upper/lower on the Latin-1 letters (SPEC §21)
+s = "Ação e reação";
+>> $s.contains("e r") + " " + $s.starts_with("Aç") + " " + $s.ends_with("ção") + " " + $s.has("x") + " " + $s.starts("A") + " " + $s.ends("o") + "\n";
+>> s.upper() + "|" + s.lower() + "\n";
+>> "ÀÉÎÕÜ Ç × ÷ ß ÿ".lower() + "|" + "àéîõü ç × ÷ ß ÿ".upper() + "\n";
+>> "plain ASCII 123".upper() + "|" + "PLAIN ASCII 123".lower() + "\n";
+ints = [3, 1, 2];
+floats = [1.5, 2.5];
+words = ["a", "b"];
+>> $ints.contains(2) + " " + $floats.contains(1.5) + " " + $words.contains("c") + " " + $ints.has(9) + "\n";
+ages = {"ana": 30};
+>> $ages.contains("ana") + " " + $ages.contains("bob") + " " + $ages.has("ana") + "\n";

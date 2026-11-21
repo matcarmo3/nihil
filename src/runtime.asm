@@ -60,6 +60,12 @@ t_net_accept:   jmp strict near rt_net_accept      ; RT_NET_ACCEPT
 t_fd_read:      jmp strict near rt_fd_read         ; RT_FD_READ
 t_fd_send:      jmp strict near rt_fd_send         ; RT_FD_SEND
 t_fd_close:     jmp strict near rt_fd_close        ; RT_FD_CLOSE
+t_syscall:      jmp strict near rt_syscall         ; RT_SYSCALL
+t_json_end:     jmp strict near rt_json_end        ; RT_JSON_END
+t_sub:          jmp strict near rt_sub             ; RT_SUB
+t_put:          jmp strict near rt_put             ; RT_PUT
+t_rec_parse:    jmp strict near rt_rec_parse       ; RT_REC_PARSE
+t_lines:        jmp strict near rt_lines           ; RT_LINES
 
 ; ---- arithmetic -------------------------------------------------------------
 ; Division truncated toward zero (as in C). MIN / -1 gives MIN (idiv
@@ -285,6 +291,469 @@ rt_fd_close:
     mov rdi, rax
     mov eax, 3
     syscall
+    ret
+
+; rt_json_end: rax = STRING s, rcx = i → rax = the position after the JSON value that starts
+; at i (after spaces), or -1 if there is no valid value there. The inner loop of the JSON
+; library (SPEC §21.2), the same rule as the prelude had: a string ends at its closing quote
+; (a backslash skips the next byte); an object or array where its brackets balance (strings
+; inside skipped); anything else (number, true, false, null) at , } ] or a space.
+rt_json_end:
+    push rbx
+    mov rsi, rax                    ; the bytes
+    mov rdx, [rax - 8]              ; n
+    mov rbx, rcx                    ; i
+    test rbx, rbx
+    js .fail
+.ws:
+    cmp rbx, rdx
+    jae .fail
+    movzx eax, byte [rsi + rbx]
+    cmp al, 32
+    je .ws_next
+    cmp al, 10
+    je .ws_next
+    cmp al, 13
+    je .ws_next
+    cmp al, 9
+    jne .value
+.ws_next:
+    inc rbx
+    jmp .ws
+.value:
+    cmp al, '"'
+    je .string
+    cmp al, '{'
+    je .nest
+    cmp al, '['
+    je .nest
+    mov rcx, rbx                    ; a number, true, false or null
+.scalar:
+    cmp rbx, rdx
+    jae .scalar_end
+    movzx eax, byte [rsi + rbx]
+    cmp al, ','
+    je .scalar_end
+    cmp al, '}'
+    je .scalar_end
+    cmp al, ']'
+    je .scalar_end
+    cmp al, 32
+    je .scalar_end
+    cmp al, 10
+    je .scalar_end
+    cmp al, 13
+    je .scalar_end
+    cmp al, 9
+    je .scalar_end
+    inc rbx
+    jmp .scalar
+.scalar_end:
+    cmp rbx, rcx
+    je .fail
+    mov rax, rbx
+    jmp .end
+.string:
+    call json_skip_string
+    test rbx, rbx
+    js .fail
+    mov rax, rbx
+    jmp .end
+.nest:
+    xor ecx, ecx                    ; depth
+.nest_loop:
+    cmp rbx, rdx
+    jae .fail
+    movzx eax, byte [rsi + rbx]
+    cmp al, '"'
+    jne .bracket
+    call json_skip_string
+    test rbx, rbx
+    js .fail
+    jmp .nest_loop
+.bracket:
+    inc rbx
+    cmp al, '{'
+    je .open
+    cmp al, '['
+    je .open
+    cmp al, '}'
+    je .close
+    cmp al, ']'
+    jne .nest_loop
+.close:
+    dec rcx
+    jnz .nest_loop
+    mov rax, rbx
+    jmp .end
+.open:
+    inc rcx
+    jmp .nest_loop
+.fail:
+    mov rax, -1
+.end:
+    pop rbx
+    ret
+
+; rt_sub: rax = STRING s, rcx = a, rdx = b → rax = a new STRING with the bytes a … b - 1
+; (the prelude's __nihil_sub: slices, split, JSON parts, text fields of tables)
+rt_sub:
+    push rbx
+    push r12
+    push r13
+    mov rbx, rax
+    mov r12, rcx
+    mov r13, rdx
+    sub r13, r12                    ; n
+    jns .size
+    xor r13d, r13d
+.size:
+    lea rcx, [r13 + 8]              ; n + 1 bytes, zeroed: the 0 at the end comes with it
+    shr rcx, 3
+    call rt_alloc
+    mov [rax - 8], r13
+    mov rdi, rax
+    lea rsi, [rbx + r12]
+    mov rcx, r13
+    rep movsb
+    pop r13
+    pop r12
+    pop rbx
+    ret
+
+; rt_put: rax = STRING r (a new one the prelude is building), rcx = at, rdx = STRING t →
+; the bytes of t copied into r from position at; rax = at + #t
+rt_put:
+    lea rdi, [rax + rcx]
+    mov rsi, rdx
+    mov r8, rcx
+    mov rcx, [rdx - 8]
+    add r8, rcx
+    rep movsb
+    mov rax, r8
+    ret
+
+; rt_lines: rax = text, rcx = width → rax = the number of lines when every line has exactly
+; that width (the last one may lack its "\n"); -1 if one does not (the prelude then finds it
+; and says which). NAME @ path checks this before reading the records.
+rt_lines:
+    push rbx
+    mov rsi, rax
+    mov rdx, [rax - 8]              ; n
+    mov r8, rcx                     ; width
+    xor ecx, ecx                    ; lines
+    xor ebx, ebx                    ; where the line starts
+    test r8, r8
+    jle .bad
+.next:
+    cmp rbx, rdx
+    jae .done
+    lea r9, [rbx + r8]              ; where it must end
+    cmp r9, rdx
+    ja .bad
+    mov r10, rbx
+.scan:                              ; no line break inside it
+    cmp r10, r9
+    jae .end_ok
+    cmp byte [rsi + r10], 10
+    je .bad
+    inc r10
+    jmp .scan
+.end_ok:
+    inc rcx
+    cmp r9, rdx
+    je .done                        ; the last line, without "\n"
+    cmp byte [rsi + r9], 10
+    jne .bad
+    lea rbx, [r9 + 1]
+    jmp .next
+.done:
+    mov rax, rcx
+    pop rbx
+    ret
+.bad:
+    mov rax, -1
+    pop rbx
+    ret
+
+; rt_rec_parse: rax = text, rcx = where the line starts, rdx = schema ([n, type, width, …]:
+; 1 INT, 2 BOOL, 3 STRING, 4 FLOAT) → rax = a new ARRAY of n slots (the record), or -1 when a
+; field is not plain (an error, a FLOAT with an exponent or more than 15 digits, an INT that
+; overflows): then the prelude reads that line its own way, with its messages. INT, BOOL and
+; FLOAT fields drop the spaces around; STRING keeps the leading ones. FLOAT: Clinger's fast
+; path, m × 10^-k with m < 10^15 and k <= 22, one correctly rounded division, the same
+; bits as the exact conversion.
+rt_rec_parse:
+    push rbx
+    push rbp
+    push r12
+    push r13
+    push r14
+    push r15
+    mov rbx, rax                    ; the text (kept alive in a register)
+    mov r13, rcx                    ; position of the current field
+    mov r14, rdx                    ; the schema
+    mov rcx, [r14]                  ; n slots
+    call rt_alloc
+    mov rcx, [r14]
+    mov [rax - 8], rcx
+    mov r15, rax                    ; the record
+    xor ebp, ebp                    ; field i
+.field:
+    cmp rbp, [r14]
+    jae .ok
+    mov rax, rbp
+    shl rax, 4
+    mov r12, [r14 + rax + 8]        ; type
+    mov rdi, [r14 + rax + 16]       ; width
+    mov rsi, r13                    ; a
+    add rdi, r13                    ; b
+    add r13, [r14 + rax + 16]       ; the next field starts after this one
+    cmp r12, 3
+    je .trim_end
+.trim_start:
+    cmp rsi, rdi
+    jae .trim_end
+    cmp byte [rbx + rsi], ' '
+    jne .trim_end
+    inc rsi
+    jmp .trim_start
+.trim_end:
+    cmp rdi, rsi
+    jbe .trimmed
+    cmp byte [rbx + rdi - 1], ' '
+    jne .trimmed
+    dec rdi
+    jmp .trim_end
+.trimmed:
+    cmp r12, 1
+    je .int
+    cmp r12, 2
+    je .bool
+    cmp r12, 3
+    je .string
+    ; ---- FLOAT
+    xor eax, eax
+    cmp rsi, rdi
+    je .store                       ; empty: 0
+    xor r8d, r8d                    ; negative?
+    movzx ecx, byte [rbx + rsi]
+    cmp cl, '-'
+    jne .f_plus
+    mov r8d, 1
+    inc rsi
+    jmp .f_start
+.f_plus:
+    cmp cl, '+'
+    jne .f_start
+    inc rsi
+.f_start:
+    xor eax, eax                    ; m
+    xor r9d, r9d                    ; significant digits
+    xor r10d, r10d                  ; power of ten (0 or negative)
+    xor r11d, r11d                  ; a digit was seen
+.f_int:
+    cmp rsi, rdi
+    jae .f_end
+    movzx ecx, byte [rbx + rsi]
+    sub ecx, '0'
+    cmp ecx, 9
+    ja .f_dot
+    call .f_digit
+    jc .fallback
+    inc rsi
+    jmp .f_int
+.f_dot:
+    cmp ecx, '.' - '0'
+    jne .fallback                   ; an exponent or something else
+    inc rsi
+.f_frac:
+    cmp rsi, rdi
+    jae .f_end
+    movzx ecx, byte [rbx + rsi]
+    sub ecx, '0'
+    cmp ecx, 9
+    ja .fallback
+    call .f_digit
+    jc .fallback
+    dec r10
+    inc rsi
+    jmp .f_frac
+.f_end:
+    test r11, r11
+    jz .fallback                    ; no digit: not a number
+    cmp r10, -22
+    jl .fallback
+    test rax, rax
+    jz .f_sign                      ; zero (with its sign)
+    cvtsi2sd xmm0, rax
+    neg r10
+    lea rcx, [rel pow10_table]
+    divsd xmm0, [rcx + r10 * 8]
+    movq rax, xmm0
+.f_sign:
+    test r8, r8
+    jz .store
+    bts rax, 63
+    jmp .store
+.f_digit:                           ; ecx = digit: into m, unless there are already 15 (CF = 1)
+    mov r11d, 1
+    test rax, rax
+    jnz .f_count
+    test ecx, ecx
+    jz .f_digit_ok                  ; a leading zero does not count
+.f_count:
+    cmp r9, 15
+    jae .f_too_many
+    inc r9
+    imul rax, rax, 10
+    add rax, rcx
+.f_digit_ok:
+    clc
+    ret
+.f_too_many:
+    stc
+    ret
+    ; ---- INT
+.int:
+    xor eax, eax
+    cmp rsi, rdi
+    je .store                       ; empty: 0
+    xor r8d, r8d
+    movzx ecx, byte [rbx + rsi]
+    cmp cl, '-'
+    jne .i_plus
+    mov r8d, 1
+    inc rsi
+    jmp .i_digits
+.i_plus:
+    cmp cl, '+'
+    jne .i_digits
+    inc rsi
+.i_digits:
+    cmp rsi, rdi
+    je .fallback                    ; a sign alone
+.i_loop:
+    cmp rsi, rdi
+    jae .i_end
+    movzx ecx, byte [rbx + rsi]
+    sub ecx, '0'
+    cmp ecx, 9
+    ja .fallback
+    imul rax, rax, 10
+    jo .fallback                    ; too big (the prelude says so, or reads the smallest INT)
+    add rax, rcx
+    jo .fallback
+    inc rsi
+    jmp .i_loop
+.i_end:
+    test r8, r8
+    jz .store
+    neg rax
+    jmp .store
+    ; ---- BOOL
+.bool:
+    xor eax, eax
+    mov rcx, rdi
+    sub rcx, rsi
+    jz .store                       ; empty: false
+    cmp rcx, 1
+    jne .fallback
+    movzx ecx, byte [rbx + rsi]
+    cmp cl, 'F'
+    je .store
+    cmp cl, 'T'
+    jne .fallback
+    mov eax, 1
+    jmp .store
+    ; ---- STRING
+.string:
+    mov r12, rdi
+    sub r12, rsi                    ; length
+    push rsi
+    lea rcx, [r12 + 8]
+    shr rcx, 3
+    call rt_alloc
+    pop rsi
+    mov [rax - 8], r12
+    mov rdi, rax
+    lea rsi, [rbx + rsi]
+    mov rcx, r12
+    rep movsb
+.store:
+    mov [r15 + rbp * 8], rax
+    inc rbp
+    jmp .field
+.ok:
+    mov rax, r15
+    jmp .end
+.fallback:
+    mov rax, -1
+.end:
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbp
+    pop rbx
+    ret
+
+; json_skip_string: rsi = bytes, rdx = n, rbx = the opening quote → rbx after the closing
+; quote, or -1 if the string does not end
+json_skip_string:
+    inc rbx
+.loop:
+    cmp rbx, rdx
+    jae .bad
+    movzx eax, byte [rsi + rbx]
+    cmp al, '"'
+    je .done
+    inc rbx
+    cmp al, 92                      ; a backslash: skip what it escapes
+    jne .loop
+    inc rbx
+    jmp .loop
+.done:
+    inc rbx
+    ret
+.bad:
+    mov rbx, -1
+    ret
+
+; rt_syscall: rax = ARRAY of INT [n, a1 … a6] → rax = what the kernel gave (-errno on an
+; error). For the prelude only (directories and processes are coming). Missing arguments are 0.
+rt_syscall:
+    push rbx
+    mov rbx, rax
+    mov rcx, [rbx - 8]              ; how many: n and up to six arguments
+    xor edi, edi
+    xor esi, esi
+    xor edx, edx
+    xor r10d, r10d
+    xor r8d, r8d
+    xor r9d, r9d
+    cmp rcx, 2
+    jb .go
+    mov rdi, [rbx + 8]
+    cmp rcx, 3
+    jb .go
+    mov rsi, [rbx + 16]
+    cmp rcx, 4
+    jb .go
+    mov rdx, [rbx + 24]
+    cmp rcx, 5
+    jb .go
+    mov r10, [rbx + 32]
+    cmp rcx, 6
+    jb .go
+    mov r8, [rbx + 40]
+    cmp rcx, 7
+    jb .go
+    mov r9, [rbx + 48]
+.go:
+    mov rax, [rbx]
+    syscall
+    pop rbx
     ret
 
 ; rt_array_concat: rax = a, rcx = b (ARRAYs of one type) → a new ARRAY with
@@ -1457,7 +1926,7 @@ rt_read_file:
     mov edx, 2
     syscall
     test rax, rax
-    js .fail
+    jle .stream                     ; no size (a pipe, /proc, /dev/stdin): read to the end
     mov r13, rax                    ; length
     mov eax, 8                      ; back to the start
     mov rdi, r12
@@ -1484,6 +1953,45 @@ rt_read_file:
     add rbx, rax
     sub r13, rax
     jmp .read
+.stream:                          ; unknown size: a buffer that doubles until read gives 0
+    mov r13d, 65536                 ; capacity
+    lea rcx, [r13 + 8]
+    shr rcx, 3
+    call rt_alloc
+    push rax                        ; [rsp] = the buffer (a GC root on the stack)
+    xor ebx, ebx                    ; bytes read so far
+.stream_read:
+    cmp rbx, r13
+    jb .stream_room
+    lea rcx, [r13 * 2 + 8]          ; full: a buffer twice as big, with what was read
+    shr rcx, 3
+    call rt_alloc
+    mov rdi, rax
+    mov rsi, [rsp]
+    mov rcx, rbx
+    rep movsb
+    mov [rsp], rax
+    shl r13, 1
+.stream_room:
+    mov rsi, [rsp]
+    add rsi, rbx
+    mov rdx, r13
+    sub rdx, rbx
+    xor eax, eax                    ; sys_read
+    mov rdi, r12
+    syscall
+    cmp rax, -4                     ; -EINTR: again
+    je .stream_read
+    test rax, rax
+    js .fail_reading
+    jz .stream_end
+    add rbx, rax
+    jmp .stream_read
+.stream_end:
+    mov rax, [rsp]
+    mov [rax - 8], rbx              ; the length (the block keeps its size)
+    add rbx, rax                    ; where the 0 goes
+    jmp .got
 .shrank:                          ; the file shrank while being read
     mov rax, [rsp]
     sub [rax - 8], r13
@@ -1999,6 +2507,10 @@ rt_concat:
     ret
 
 ; ---- data ------------------------------------------------------------------
+align 8
+pow10_table:                        ; 10^0 … 10^22: every one exact as a double (Clinger's fast path)
+    dq 1.0e0, 1.0e1, 1.0e2, 1.0e3, 1.0e4, 1.0e5, 1.0e6, 1.0e7, 1.0e8, 1.0e9, 1.0e10, 1.0e11
+    dq 1.0e12, 1.0e13, 1.0e14, 1.0e15, 1.0e16, 1.0e17, 1.0e18, 1.0e19, 1.0e20, 1.0e21, 1.0e22
 s_true:     db "true"
 s_absent:  db "_"
 s_false:    db "false"
@@ -2087,3 +2599,9 @@ ASSERT_AT t_net_accept,   RT_NET_ACCEPT
 ASSERT_AT t_fd_read,      RT_FD_READ
 ASSERT_AT t_fd_send,      RT_FD_SEND
 ASSERT_AT t_fd_close,     RT_FD_CLOSE
+ASSERT_AT t_syscall,      RT_SYSCALL
+ASSERT_AT t_json_end,     RT_JSON_END
+ASSERT_AT t_sub,          RT_SUB
+ASSERT_AT t_put,          RT_PUT
+ASSERT_AT t_rec_parse,    RT_REC_PARSE
+ASSERT_AT t_lines,        RT_LINES

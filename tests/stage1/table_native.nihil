@@ -1,0 +1,15 @@
+// reading tables: plain lines are read natively (rt_rec_parse); a line with a rare field
+// (a FLOAT with more than 15 digits or an exponent, the smallest INT) goes the prelude's way.
+// Both must give back exactly what was written (a STRING loses only its trailing spaces).
+T = @[i: INT(20); f: FLOAT(26); b: BOOL; s: STRING(8)];
+rows = [T(-42, 324.56, true, "  ab"), T(0, -0.0, false, ""), T(9223372036854775807, 0.1234567890123456789, true, "x y"),
+        T(-9223372036854775807 - 1, 1.5e300, false, "end"), T(7, -123456789012345.6, true, "z"),
+        T(-1, 12345678901234.5, false, "çé"), T(123, 0.000001, true, " a"), T(5, 2.5e-10, false, "last")];
+@>> "build/table_native.dat", rows;
+back = T @ "build/table_native.dat";
+k = 0;
+* k < #rows {
+    a = rows[k]; r = back[k];
+    >> $r.i + " " + $r.f + " " + $r.b + " [" + r.s + "] " + $(r.i == a.i && r.f == a.f && r.b == a.b && r.s == a.s) + "\n";
+    k = k + 1;
+}

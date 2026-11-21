@@ -1,9 +1,9 @@
 // JSON as text: s.json(key), json_items, json_keys, json_values, json_text, json_quote
-t = "{\"nome\": \"Caf\\u00e9 \\\"forte\\\"\\n\", \"lista\": [1, 2.5, \"três\", {\"a\": [true, null]}], \"vazio\": {}, \"n\": -12, \"emoji\": \"\\ud83d\\ude00\"}";
->> (t.json("nome") || "").json_text() || "?";
-lista = (t.json("lista") || "[]").json_items();
->> $#lista + " | " + lista[3] + " | " + $((lista[1].float() || 0.0) * 2.0) + " | " + (lista[2].json_text() || "") + "\n";
->> $((t.json("n") || "0").int() || 0) + " " + $(t.json("faltando") == _) + " " + $#(t.json("vazio") || "").json_keys() + " " + $#"[]".json_items() + "\n";
+t = "{\"name\": \"Caf\\u00e9 \\\"au lait\\\"\\n\", \"list\": [1, 2.5, \"crème\", {\"a\": [true, null]}], \"empty\": {}, \"n\": -12, \"emoji\": \"\\ud83d\\ude00\"}";
+>> (t.json("name") || "").json_text() || "?";
+list = (t.json("list") || "[]").json_items();
+>> $#list + " | " + list[3] + " | " + $((list[1].float() || 0.0) * 2.0) + " | " + (list[2].json_text() || "") + "\n";
+>> $((t.json("n") || "0").int() || 0) + " " + $(t.json("missing") == _) + " " + $#(t.json("empty") || "").json_keys() + " " + $#"[]".json_items() + "\n";
 >> t.json_keys().join(",") + "\n";
 v = t.json_values();
 >> v[3] + " " + $((v[4].json_text() || "") == "😀") + " " + $#(v[4].json_text() || "") + "\n";

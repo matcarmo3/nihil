@@ -1,4 +1,4 @@
-# Nihil — Language Specification (v3.6)
+# Nihil — Language Specification (v3.7)
 
 > **Nihil**: an imperative, minimalist language compiled straight to x86_64 machine
 > code, with no libc, no linker and no VM. The name is Latin for
@@ -1053,13 +1053,13 @@ n = "42".int() || 0;                    // 42; "4x".int() is _
 | Call | Result |
 |---|---|
 | `s.find(t)`, `s.find(t, from)` | `INT?`: the first position of `t` (from `from`), or `_` |
-| `s.has(t)` | `BOOL`: `t` appears in `s` |
-| `s.starts(t)`, `s.ends(t)` | `BOOL` |
+| `s.contains(t)` | `BOOL`: `t` appears in `s` |
+| `s.starts_with(t)`, `s.ends_with(t)` | `BOOL` |
 | `s.slice(a)`, `s.slice(a, b)` | the bytes `a` … `b - 1` (to the end without `b`); negative counts from the end, and both are kept inside the text |
 | `s.split(sep)` | `ARRAY of STRING`: the parts between each `sep` (`""` gives single bytes) |
 | `s.replace(a, b)` | every `a` replaced by `b` |
 | `s.trim()` | without spaces, tabs and line breaks at both ends |
-| `s.upper()`, `s.lower()` | ASCII letters changed, other bytes kept |
+| `s.upper()`, `s.lower()` | ASCII and Latin-1 letters changed (`"ação".upper()` is `"AÇÃO"`; À–Þ ⇄ à–þ, but not `×`, `÷`, `ß`, `ÿ`); the size stays and other bytes are kept |
 | `s.repeat(n)` | `s` `n` times |
 | `s.int()` | `INT?`: the number in `s` (spaces around allowed, a sign), or `_` if it is not one or does not fit |
 | `s.float()` | `FLOAT?`: the same for a FLOAT (exact, §6.1.1) |
@@ -1070,10 +1070,13 @@ n = "42".int() || 0;                    // 42; "4x".int() is _
 |---|---|
 | `v.sort()` | a new ARRAY in increasing order (merge sort: stable, *n* log *n*; STRING byte by byte) |
 | `v.find(x)` | `INT?`: the first position of `x`, or `_` |
-| `v.has(x)` | `BOOL` |
+| `v.contains(x)` | `BOOL`: `x` is in `v` |
 | `v.reverse()` | a new ARRAY, last element first |
 | `v.sum()`, `v.min()`, `v.max()` | INT and FLOAT only: the total (0 for none); the smallest and largest as `INT?`/`FLOAT?`, `_` for none |
 | `parts.join(sep)` | ARRAY of STRING only: one STRING with `sep` between the parts |
+
+The older names `has`, `starts` and `ends` still work as synonyms of `contains`,
+`starts_with` and `ends_with`, so programs written before v3.7 compile unchanged.
 
 ### 21.1 Queries on an ARRAY of records
 
@@ -1111,11 +1114,11 @@ text, so reading JSON needs no type that changes at run time. Numbers become
 INT or FLOAT with `.int()` and `.float()`; `true`, `false` and `null` are compared as text.
 
 ```text
-plano = linha.json("structure") || "{}";        // STRING?: the value of a key, as JSON text
-modulos = plano.json_values();                  // the values of an object, in order
-largura = (modulos[0].json("width") || "0").float() || 0.0;
-nome = (p.json("name") || "").json_text() || "";   // the text of a JSON string: quotes and \n, \u00e9 … decoded
->> nome.json_quote();                           // and back: a JSON string, for writing JSON
+layout = row.json("structure") || "{}";         // STRING?: the value of a key, as JSON text
+modules = layout.json_values();                 // the values of an object, in order
+width = (modules[0].json("width") || "0").float() || 0.0;
+name = (p.json("name") || "").json_text() || "";   // the text of a JSON string: quotes and \n, \u00e9 … decoded
+>> name.json_quote();                           // and back: a JSON string, for writing JSON
 ```
 
 | Call | Result |
@@ -1129,12 +1132,13 @@ nome = (p.json("name") || "").json_text() || "";   // the text of a JSON string:
 Each call reads its part from the start, so to visit every value of a large
 object use `json_values()` (one pass) rather than `json(key)` for each key.
 Reading is tolerant: an array or object that is cut short gives what was
-complete. A 10 MB file of planograms is read in about a second.
+complete. The loop that finds where a value ends is native (`rt_json_end`), so a 10 MB file of
+planograms is read and walked in about 0.1 s (about 90 MB/s).
 
 A name the type does not have is a compile error that lists the ones it has:
 
 ```text
-nihilc: f.nihil:2:7: STRING has no method 'size': it has find, has, starts, ends, slice, split, replace, trim, upper, lower, repeat, int and float
+nihilc: f.nihil:2:7: STRING has no method 'size': it has find, contains, starts_with, ends_with, slice, split, replace, trim, upper, lower, repeat, int, float, json, …
 ```
 
 The library is written in Nihil, in the prelude (§18), as methods named
@@ -1151,15 +1155,15 @@ STRING; the value can be any type (INT, FLOAT, BOOL, STRING, a record, an
 ARRAY). Its type is written `MAP of K to V`.
 
 ```text
-idade = {"ana": 30, "bob": 25};        // the types come from the first pair
-vendas = {0: 0.0 ; 100000};            // an empty map of that type, with room for 100,000 keys
-idade["carla"] = 41;                   // adds or replaces
-x = idade["ana"] || 0;                 // m[k] is V?: _ when the key is not there
-vendas[k] = (vendas[k] || 0.0) + q;    // the usual way to add up by key
-idade["bob"] = _;                      // deletes (nothing happens if it is not there)
->> #idade;                             // how many keys
-nomes = idade.keys().sort();           // m.keys(), m.values(): new ARRAYs
-idade.has("ana") { … }
+age = {"ana": 30, "bob": 25};          // the types come from the first pair
+sales = {0: 0.0 ; 100000};             // an empty map of that type, with room for 100,000 keys
+age["carla"] = 41;                     // adds or replaces
+x = age["ana"] || 0;                   // m[k] is V?: _ when the key is not there
+sales[k] = (sales[k] || 0.0) + q;      // the usual way to add up by key
+age["bob"] = _;                        // deletes (nothing happens if it is not there)
+>> #age;                               // how many keys
+names = age.keys().sort();             // m.keys(), m.values(): new ARRAYs
+age.contains("ana") { … }              // (has, the older name, still works)
 ```
 
 - Every pair of a literal must have the same types as the first one; `{k: v ;
@@ -1183,30 +1187,36 @@ about 3.5 s and 160 MB.
 ## 23. Network: a TCP server and HTTP (stage 1)
 
 A port and a connection are INTs (the sockets), and the calls are made on them,
-like the library (§21). A server answers one connection at a time:
+like the library (§21). Failures follow the rest of the library: a call that can
+fail gives an optional (`_`) or a `BOOL`, never an error code. A server answers one
+connection at a time:
 
 ```text
-srv = 8740.listen();                     // only 127.0.0.1; 8740.listen_all() opens it to the network
+srv? = 8740.listen();                    // only 127.0.0.1; 8740.listen_all() opens it to the network
+srv == _ { !>> "port 8740 is taken\n"; :: 1; }
+port = srv || -1;
 * true {
-    c = srv.accept();                    // waits for a connection (what was printed shows up first)
-    req = c.receive();                   // the whole request: headers and the body (Content-Length)
-    req.http_path() == "/saude" {
-        c.respond(200, "application/json", "{\"ok\": true}");   // the response, then closes
+    c? = port.accept();                  // waits for a connection (what was printed shows up first)
+    conn = c || -1;
+    req? = conn.receive();               // the whole request: headers and the body (Content-Length)
+    req == _ { conn.close(); }           // the client closed before asking anything
+    || (req || "").http_path() == "/health" {
+        conn.respond(200, "application/json", "{\"ok\": true}");   // the response, then closes
     } || {
-        c.respond(404, "text/plain", "não encontrado");
+        conn.respond(404, "text/plain", "not found");
     }
 }
 ```
 
 | Call | Result |
 |---|---|
-| `port.listen()`, `port.listen_all()` | the listening socket (`INT`), or a negative number (`-errno`) if the port cannot be opened; `0.listen()` takes any free port |
-| `srv.accept()` | the next connection (`INT`); waits until one arrives |
-| `c.receive()` | `STRING`: the request, its headers and a body of `Content-Length` bytes; `""` if the client closed first |
-| `c.send(text)` | sends all of `text`; `0`, or `-errno` (a client that went away is an error, not the end of the program) |
-| `c.respond(status, type, body)` | an HTTP/1.1 response with `Content-Type`, `Content-Length`, `Connection: close` and `Access-Control-Allow-Origin: *`, then closes |
+| `port.listen()`, `port.listen_all()` | `INT?`: the listening socket, or `_` if the port cannot be opened; `0.listen()` takes any free port |
+| `srv.accept()` | `INT?`: the next connection (waits until one arrives), or `_` if the port failed |
+| `c.receive()` | `STRING?`: the request, its headers and a body of `Content-Length` bytes; `_` if the client closed before sending anything |
+| `c.send(text)` | `BOOL`: all of `text` was sent (`false`: the client went away, which is not the end of the program) |
+| `c.respond(status, type, body)` | `BOOL`: an HTTP/1.1 response with `Content-Type`, `Content-Length`, `Connection: close` and `Access-Control-Allow-Origin: *`, then closes; `false` if the client went away |
 | `c.close()` | closes the connection or the port |
-| `req.http_method()`, `req.http_path()` | `"GET"`; the path without the query, decoded (`"/plano/293"`) |
+| `req.http_method()`, `req.http_path()` | `"GET"`; the path without the query, decoded (`"/plan/293"`) |
 | `req.http_param(name)` | `STRING?`: the value of `name` in the query, decoded, or `_` |
 | `req.http_body()`, `s.url_decode()` | what follows the headers; `%XX` and `+` decoded |
 
@@ -1255,6 +1265,7 @@ for the internet, put the server behind a proxy that has it.
 | **v1.9:** saved registers learned between passes | The prologue comes before the body; using the count from the previous pass avoids saving registers for nothing |
 | **v2.1:** `... ms;` waits | Animations need a fixed speed; a busy loop depends on the machine. The ellipsis reads as a pause and cannot start any valid expression |
 | **v2.2:** renamed from Ket to Nihil | Latin for *nothing*: no keywords, and `_` for the missing value |
+| **v3.7:** `contains`, `starts_with`, `ends_with` on STRING, ARRAY and MAP (the old `has`, `starts`, `ends` kept as synonyms); `upper`/`lower` change the Latin-1 letters too; the network gives `_` or `false` instead of `-errno`; faster reading: text → FLOAT by Clinger's fast path, native copies and JSON scanning, `@` of files with no size (`/proc`, pipes) | Names that other languages' libraries use, one way to report a failure across the library (optionals, not error codes), and upper case that works for Portuguese, Spanish, French and German text. Reading tables of decimals went from 14 to about 100 MB/s and JSON from 23 to 90 MB/s: the exact big-integer conversion stays for the rare numbers with more than 15 digits or a power of ten beyond 22 |
 | **v3.6:** a TCP server and HTTP: `port.listen()`, `accept`, `receive`, `respond`, `http_path`, `http_param` | Serving analyses as JSON from one place, instead of one generated page per analysis. Calls on INT keep the language free of reserved words, as the library does |
 | **v3.5:** JSON as text: `s.json(key)`, `json_items`, `json_keys`, `json_values`, `json_text`, `json_quote` | Importing and serving data needs JSON. Keeping each value as its text needs no dynamic type: the compiler still knows every type, and the existing `.int()`/`.float()` convert numbers |
 | **v3.4:** `MAP of K to V`: `{k: v}`, `m[k]`, `m[k] = v`, `m[k] = _`, `#m`, `has`, `keys`, `values` | Grouping and adding up by key (sales by product, store and month) needed a table in memory; the one on disk syncs every write. Braces after `=` or `(` never started an expression before, and `m[k] = _` deletes as `NAME @{k} path = _` does |

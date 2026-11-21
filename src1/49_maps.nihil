@@ -189,11 +189,11 @@ map_assign(k = 0, t = 0) {
     expect(';', "';'");
 }
 
-// m.has(k), m.keys(), m.values()  (tok = name, the map in rax)
+// m.contains(k) (or the older m.has(k)), m.keys(), m.values()  (tok = name, the map in rax)
 map_method(t = 0, ns = 0, nl = 0) {
     next_token();                        // name → "("
     next_token();
-    name_is(ns, nl, "has") {
+    name_is(ns, nl, "contains") || name_is(ns, nl, "has") {     // has: the older name, kept as a synonym
         emit(0x50);
         pi = tok_start; pl = tok_len; pn = tok_line; pli = tok_lstart;
         u = expression();
@@ -218,7 +218,7 @@ map_method(t = 0, ns = 0, nl = 0) {
     put_type(t);
     put_str(" has no method '");
     put_source(ns, nl);
-    put_str("': it has has, keys and values (and m[k], m[k] = v, m[k] = _, #m)");
+    put_str("': it has contains, keys and values (and m[k], m[k] = v, m[k] = _, #m)");
     error_end();
     : 0;
 }

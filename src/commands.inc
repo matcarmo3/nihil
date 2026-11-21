@@ -253,7 +253,7 @@ cmd_call:
 ; The count is evaluated once and kept in a hidden slot:
 ;   mov [rbp+c], rax
 ; top: cmp qword [rbp+c], 0 ; jle end
-;   … corpo …
+;   … body …
 ;   dec qword [rbp+c] ; jmp top
 ; end:
 counted_loop:

@@ -100,7 +100,20 @@ __nihil_ft_decimal_to_bits(d = [0], n = 0, e10 = 0) {
 // text → bits. Accepts [+-]digits[.digits][(e|E)[+-]digits]. Returns the bits;
 // __nihil_ft_valid tells whether the whole text was a number.
 __nihil_ft_valid = false;
+__nihil_ft_scan_n = 0;                          // what __nihil_ft_scan read: how many digits,
+__nihil_ft_scan_e10 = 0;                        // the power of ten
+__nihil_ft_scan_neg = false;                    // and the sign
+
 __nihil_ft_text_to_bits(s = "") {
+    !__nihil_ft_scan(s) { : 0; }
+    __b = __nihil_ft_decimal_to_bits(__nihil_ft_digits, __nihil_ft_scan_n, __nihil_ft_scan_e10);
+    __nihil_ft_scan_neg { __b = __b | (1 << 63); }
+    : __b;
+}
+
+// reads the digits of s into __nihil_ft_digits (and __nihil_ft_scan_n, _e10, _neg);
+// false if s is not a number (then __nihil_ft_valid is false too)
+__nihil_ft_scan(s = "") {
     __nihil_ft_valid = false;
     __i = 0;
     __neg = false;
@@ -124,7 +137,7 @@ __nihil_ft_text_to_bits(s = "") {
             __i = __i + 1;
         }
     }
-    !__has_digit { : 0; }
+    !__has_digit { : false; }
     __i < #s && (s[__i] == 'e' || s[__i] == 'E') {
         __i = __i + 1;
         __eneg = false;
@@ -132,7 +145,7 @@ __nihil_ft_text_to_bits(s = "") {
             __eneg = s[__i] == '-';
             __i = __i + 1;
         }
-        __i >= #s || s[__i] < '0' || s[__i] > '9' { : 0; }
+        __i >= #s || s[__i] < '0' || s[__i] > '9' { : false; }
         __ev = 0;
         * __i < #s && s[__i] >= '0' && s[__i] <= '9' {
             __ev < 100000 { __ev = __ev * 10 + s[__i] - '0'; }
@@ -141,11 +154,12 @@ __nihil_ft_text_to_bits(s = "") {
         __eneg { __ev = -__ev; }
         __e10 = __e10 + __ev;
     }
-    __i != #s { : 0; }
+    __i != #s { : false; }
     __nihil_ft_valid = true;
-    __b = __nihil_ft_decimal_to_bits(__nihil_ft_digits, __n, __e10);
-    __neg { __b = __b | (1 << 63); }
-    : __b;
+    __nihil_ft_scan_n = __n;
+    __nihil_ft_scan_e10 = __e10;
+    __nihil_ft_scan_neg = __neg;
+    : true;
 }
 
 // -----------------------------------------------------------------------------

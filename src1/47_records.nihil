@@ -845,6 +845,54 @@ net_intrinsic(kind = 0) {
     : TYPE_INT;
 }
 
+// native copies for the prelude: __nihil_sub_rt(s, a, b) → STRING (kind 1),
+// __nihil_put_rt(r, at, t) → INT (kind 2)
+copy_intrinsic(kind = 0) {
+    next_token();                        // name → "("
+    next_token();
+    expression();
+    emit(0x50);
+    expect(',', "','");
+    expression();
+    emit(0x50);
+    expect(',', "','");
+    expression();
+    eb(0x48, 0x89, 0xC2, 0x59, 0x58);       // mov rdx, rax ; pop rcx ; pop rax
+    kind == 1 { emit_call_rt(RT_SUB); }
+    kind == 2 { emit_call_rt(RT_PUT); }
+    kind == 3 { emit_call_rt(RT_REC_PARSE); }
+    call_end = size_code;
+    expect(')', "')'");
+    kind == 1 { : TYPE_STR; }
+    : TYPE_INT;
+}
+
+// JSON and tables for the prelude: __nihil_json_end_rt(s, i) → INT (kind 1, the native
+// inner loop, §21.2); __nihil_lines_rt(text, width) → INT (kind 2, §20)
+json_intrinsic(kind = 0) {
+    next_token();                        // name → "("
+    next_token();
+    expression();
+    emit(0x50);
+    expect(',', "','");
+    expression();
+    eb(0x48, 0x89, 0xC1, 0x58);             // mov rcx, rax ; pop rax
+    kind == 1 { emit_call_rt(RT_JSON_END); } || { emit_call_rt(RT_LINES); }
+    expect(')', "')'");
+    : TYPE_INT;
+}
+
+// the kernel, for the prelude only (directories and processes are coming): __nihil_syscall([n, a1 … a6]) → INT
+syscall_intrinsic() {
+    next_token();                        // name → "("
+    next_token();
+    expression();
+    emit_call_rt(RT_SYSCALL);
+    call_end = size_code;                // may stand alone as a command, like a call
+    expect(')', "')'");
+    : TYPE_INT;
+}
+
 // text for the prelude, one byte per character: __nihil_bytes(n) → a new
 // STRING of n zero bytes; __nihil_poke(s, i, b) puts byte b at s[i] (only in a
 // STRING the prelude has just made: STRING values do not change)

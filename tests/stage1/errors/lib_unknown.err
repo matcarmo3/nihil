@@ -1,1 +1,1 @@
-STRING has no method 'size': it has find, has
+STRING has no method 'size': it has find, contains, starts_with

@@ -1,8 +1,11 @@
 // reading an HTTP request (the text part of the server library, SPEC §23)
-req = "POST /plano/293%2Fb?mes=1&nome=Caf%C3%A9+forte&vazio=&flag HTTP/1.1\r\nHost: x\r\nContent-Length: 7\r\n\r\n{\"a\":1}";
->> req.http_method() + "|" + req.http_path() + "|" + (req.http_param("mes") || "_") + "|" + (req.http_param("nome") || "_") + "\n";
->> (req.http_param("vazio") || "_") + "|" + (req.http_param("flag") || "_") + "|" + (req.http_param("falta") || "_") + "|" + req.http_body() + "\n";
+req = "POST /plan/293%2Fb?month=1&name=Caf%C3%A9+au+lait&empty=&flag HTTP/1.1\r\nHost: x\r\nContent-Length: 7\r\n\r\n{\"a\":1}";
+>> req.http_method() + "|" + req.http_path() + "|" + (req.http_param("month") || "_") + "|" + (req.http_param("name") || "_") + "\n";
+>> (req.http_param("empty") || "_") + "|" + (req.http_param("flag") || "_") + "|" + (req.http_param("missing") || "_") + "|" + req.http_body() + "\n";
 >> "a%20b+c%41%zz".url_decode() + "\n";
-s = 0.listen();                      // port 0: any free port
->> s >= 0; >> "\n";
-s.close();
+port? = 0.listen();                  // port 0: any free port
+>> port != _; >> "\n";
+open_port = port || -1;
+open_port.close();
+taken? = 1.listen();                 // a port below 1024 needs root: _ (not -errno)
+>> taken == _; >> "\n";

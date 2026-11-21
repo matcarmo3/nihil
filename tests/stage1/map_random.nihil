@@ -1,6 +1,6 @@
-// 300 mil operações aleatórias (gravar, somar, apagar) conferidas contra um array
+// 300 thousand random operations (set, add, delete) checked against an array
 N = 20000;
-ref = [0 ; N];          // 0 = ausente; senão valor + 1
+ref = [0 ; N];          // 0 = absent; otherwise value + 1
 m = {0: 0 ; 0};
 x = 7;
 k = 0;
@@ -19,8 +19,8 @@ i = 0;
     ref[i] == 0 { m[i] != _ { bad = bad + 1; } } || { n = n + 1; (m[i] || -1) != ref[i] - 1 { bad = bad + 1; } }
     i = i + 1;
 }
->> "chaves " + $#m + " esperado " + $n + " erros " + $bad + "\n";
+>> "keys " + $#m + " expected " + $n + " errors " + $bad + "\n";
 s = {"": 0 ; 0};
 i = 0;
 * i < 50000 { s["k" + $(i % 30000)] = i; i = i + 1; }
->> "texto " + $#s + " " + $(s["k29999"] || -1) + " " + $(s["k0"] || -1) + "\n";
+>> "text " + $#s + " " + $(s["k29999"] || -1) + " " + $(s["k0"] || -1) + "\n";

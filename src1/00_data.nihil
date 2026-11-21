@@ -117,6 +117,12 @@ RT_NET_ACCEPT = 190;
 RT_FD_READ = 195;
 RT_FD_SEND = 200;
 RT_FD_CLOSE = 205;
+RT_SYSCALL = 210;
+RT_JSON_END = 215;
+RT_SUB = 220;
+RT_PUT = 225;
+RT_REC_PARSE = 230;
+RT_LINES = 235;
 
 // ---- limits (the same as the stage 0 arenas) ----
 SIZE_SOURCE = 16 << 20;

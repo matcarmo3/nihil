@@ -7,10 +7,7 @@
 
 // bytes a … b - 1 of s, as a new STRING
 __nihil_sub(s = "", a = 0, b = 0) {
-    __r = __nihil_bytes(b - a);
-    __i = 0;
-    b - a { __nihil_poke(__r, __i, s[a + __i]); __i = __i + 1; }
-    : __r;
+    : __nihil_sub_rt(s, a, b);                 // a native copy (rt_sub)
 }
 
 // >> and !>> of FLOAT: b = bits of the double; present = false prints "_"
@@ -101,7 +98,7 @@ __nihil_read_float() {
     __l? = __nihil_read_line();
     __l == _ { : _; }
     __s = __l || "";
-    __b = __nihil_ft_text_to_bits(__s);
+    __b = __nihil_text_float(__s);
     !__nihil_ft_valid { __nihil_input_invalid("FLOAT", __s); }
     : __b;
 }
@@ -308,8 +305,12 @@ __nihil_field_int_at(text = "", a = 0, b = 0, path = "", line = 0, names = "", i
     : __v;
 }
 
-// the record that starts at position at of the text (a line already checked)
+// the record that starts at position at of the text (a line already checked): native
+// (rt_rec_parse) for plain fields; a line it does not take (an error, a rare number) is read
+// here, which also gives the message
 __nihil_rec_parse(text = "", at = 0, schema = [0], names = "", path = "", line = 0) {
+    __fast = __nihil_rec_parse_rt(text, at, schema);
+    __fast >= 0 { : __fast; }
     __n = schema[0];
     __slots = [0 ; __n];
     __pos = at;
@@ -333,7 +334,7 @@ __nihil_rec_parse(text = "", at = 0, schema = [0], names = "", path = "", line =
             __slots[__i] = __nihil_addr(__nihil_sub(text, __a, __b));
         } || __b > __a {
             __s = __nihil_sub(text, __a, __b);
-            __bits = __nihil_ft_text_to_bits(__s);
+            __bits = __nihil_text_float(__s);
             !__nihil_ft_valid { __nihil_table_bad(path, line, "field '" + __nihil_word(names, __i) + "' is not a valid FLOAT: '" + __s + "'"); }
             __slots[__i] = __bits;
         }
@@ -348,8 +349,9 @@ __nihil_rec_parse(text = "", at = 0, schema = [0], names = "", path = "", line =
 __nihil_table_read(path = "", text = "", schema = [0], names = "", model = "") {
     __w = __nihil_rec_width(schema);
     __len = #text;
-    __n = 0;
-    __pos = 0;
+    __n = __nihil_lines_rt(text, __w);            // native: every line has the width
+    __pos = __len;
+    __n < 0 { __n = 0; __pos = 0; }               // one does not: find it, for the message
     * __pos < __len {
         __e = __pos;
         * __e < __len && text[__e] != 10 { __e = __e + 1; }
@@ -836,9 +838,7 @@ __nihil_s_split(s = "", sep = "") {
 
 // copies t into r from position at; → the position after it
 __nihil_s_put(r = "", at = 0, t = "") {
-    __i = 0;
-    #t { __nihil_poke(r, at + __i, t[__i]); __i = __i + 1; }
-    : at + #t;
+    : __nihil_put_rt(r, at, t);                // a native copy (rt_put)
 }
 
 // parts.join(sep) → one STRING
@@ -897,25 +897,34 @@ __nihil_s_trim(s = "") {
     : __nihil_sub(s, __a, __b);
 }
 
-// s.upper() / s.lower(): the ASCII letters (other bytes stay)
-__nihil_s_case(s = "", lo = 0, hi = 0, d = 0) {
+// s.upper() / s.lower(): the ASCII letters and the Latin-1 letters (À–Þ ⇄ à–þ: in UTF-8,
+// C3 80–9E ⇄ C3 A0–BE, but not × and ÷), which cover Portuguese, Spanish, French and German.
+// Both forms have the same length, so the text keeps its size; other bytes stay.
+// lo … hi: the ASCII letters to change; llo … lhi and skip: the second byte after C3
+__nihil_s_case(s = "", lo = 0, hi = 0, llo = 0, lhi = 0, skip = 0, d = 0) {
     __r = __nihil_bytes(#s);
     __i = 0;
-    #s {
+    * __i < #s {
         __c = s[__i];
         __c >= lo && __c <= hi { __c = __c + d; }
         __nihil_poke(__r, __i, __c);
+        __c == 0xC3 && __i + 1 < #s {
+            __i = __i + 1;
+            __c = s[__i];
+            __c >= llo && __c <= lhi && __c != skip { __c = __c + d; }
+            __nihil_poke(__r, __i, __c);
+        }
         __i = __i + 1;
     }
     : __r;
 }
 
 __nihil_s_upper(s = "") {
-    : __nihil_s_case(s, 'a', 'z', 'A' - 'a');
+    : __nihil_s_case(s, 'a', 'z', 0xA0, 0xBE, 0xB7, 'A' - 'a');
 }
 
 __nihil_s_lower(s = "") {
-    : __nihil_s_case(s, 'A', 'Z', 'a' - 'A');
+    : __nihil_s_case(s, 'A', 'Z', 0x80, 0x9E, 0x97, 'a' - 'A');
 }
 
 // s.repeat(n) → s n times ("" if n <= 0)
@@ -950,11 +959,43 @@ __nihil_s_int(s = "") {
     : __v;
 }
 
+// text → FLOAT bits for the library (s.float(), tables, JSON). Fast path (Clinger, 1990):
+// with at most 15 significant digits they form an INT m < 2^53, exact as a FLOAT; 10^k is
+// exact for k <= 22; and one IEEE multiplication or division is correctly rounded, so
+// m × 10^e10 (or m / 10^-e10) is the exact answer with no big integers. Other numbers go
+// the exact way (float_text). Here, not in float_text: stage 0 compiles that and has no FLOAT.
+__nihil_pow10 = [1.0, 10.0, 100.0, 1000.0, 10000.0, 100000.0, 1000000.0, 10000000.0, 100000000.0, 1000000000.0,
+                 10000000000.0, 100000000000.0, 1000000000000.0, 10000000000000.0, 100000000000000.0,
+                 1000000000000000.0, 10000000000000000.0, 100000000000000000.0, 1000000000000000000.0,
+                 10000000000000000000.0, 100000000000000000000.0, 1000000000000000000000.0, 10000000000000000000000.0];
+
+__nihil_text_float(s = "") {
+    !__nihil_ft_scan(s) { : 0; }
+    __n = __nihil_ft_scan_n;
+    __e = __nihil_ft_scan_e10;
+    __b = -1;
+    __e <= 22 && __e >= -22 {
+        __i = 0;
+        * __i < __n && __nihil_ft_digits[__i] == 0 { __i = __i + 1; }
+        __n - __i <= 15 {
+            __m = 0;
+            * __i < __n { __m = __m * 10 + __nihil_ft_digits[__i]; __i = __i + 1; }
+            __nihil_ft_overflowed = false;
+            __f = .__m;
+            __e >= 0 { __f = __f * __nihil_pow10[__e]; } || { __f = __f / __nihil_pow10[-__e]; }
+            __b = __nihil_addr(__f);
+        }
+    }
+    __b < 0 { __b = __nihil_ft_decimal_to_bits(__nihil_ft_digits, __n, __e); }
+    __nihil_ft_scan_neg { __b = __b | (1 << 63); }
+    : __b;
+}
+
 // s.float() → FLOAT?: the bits of the number in s, or _ (the compiler types it FLOAT?)
 __nihil_s_float(s = "") {
     __t = __nihil_s_trim(s);
     #__t == 0 { : _; }
-    __b = __nihil_ft_text_to_bits(__t);
+    __b = __nihil_text_float(__t);
     !__nihil_ft_valid { : _; }
     : __b;
 }
@@ -1435,47 +1476,26 @@ __nihil_map_values(m = 0) {
 
 __nihil_json_ws(s = "", i = 0) {
     __i = i;
-    * __i < #s && __nihil_s_space(s[__i]) { __i = __i + 1; }
+    __n = #s;
+    * __i < __n && (s[__i] == 32 || s[__i] == 10 || s[__i] == 13 || s[__i] == 9) { __i = __i + 1; }
     : __i;
 }
 
+// bytes a … b - 1 of s (a key without its quotes) are the text key? Compared in place:
+// no copy unless the key has an escape
+__nihil_json_key_is(s = "", a = 0, b = 0, key = "") {
+    __i = a;
+    * __i < b { s[__i] == 92 { : __nihil_json_unescape(__nihil_sub(s, a, b)) == key; } __i = __i + 1; }
+    b - a != #key { : false; }
+    __i = 0;
+    * __i < #key { s[a + __i] != key[__i] { : false; } __i = __i + 1; }
+    : true;
+}
+
 // the position after the JSON value that starts at i (after spaces); -1 if
-// there is no valid value there
+// there is no valid value there (the loop is native: rt_json_end in the runtime)
 __nihil_json_end(s = "", i = 0) {
-    __i = __nihil_json_ws(s, i);
-    __i >= #s { : -1; }
-    __c = s[__i];
-    __c == '"' {
-        __i = __i + 1;
-        * __i < #s && s[__i] != '"' {
-            s[__i] == 92 { __i = __i + 1; }       // a backslash: skip what it escapes
-            __i = __i + 1;
-        }
-        __i >= #s { : -1; }
-        : __i + 1;
-    }
-    __c == '{' || __c == '[' {
-        __depth = 0;
-        * __i < #s {
-            __c = s[__i];
-            __c == '"' {
-                __i = __nihil_json_end(s, __i);
-                __i < 0 { : -1; }
-            } || {
-                __c == '{' || __c == '[' { __depth = __depth + 1; }
-                __c == '}' || __c == ']' {
-                    __depth = __depth - 1;
-                    __depth == 0 { : __i + 1; }
-                }
-                __i = __i + 1;
-            }
-        }
-        : -1;
-    }
-    __a = __i;                                       // a number, true, false or null
-    * __i < #s && s[__i] != ',' && s[__i] != '}' && s[__i] != ']' && !__nihil_s_space(s[__i]) { __i = __i + 1; }
-    __i == __a { : -1; }
-    : __i;
+    : __nihil_json_end_rt(s, i);
 }
 
 // s.json(key) → STRING?: the text of the value of key in the object s, or _
@@ -1486,14 +1506,13 @@ __nihil_s_json(s = "", key = "") {
     * __i < #s && s[__i] == '"' {
         __ke = __nihil_json_end(s, __i);
         __ke < 0 { : _; }
-        __k = __nihil_sub(s, __i + 1, __ke - 1);
-        __nihil_s_has(__k, "\\") { __k = __nihil_json_unescape(__k); }
+        __ka = __i + 1;
         __i = __nihil_json_ws(s, __ke);
         __i >= #s || s[__i] != ':' { : _; }
         __va = __nihil_json_ws(s, __i + 1);
         __ve = __nihil_json_end(s, __va);
         __ve < 0 { : _; }
-        __k == key { : __nihil_sub(s, __va, __ve); }
+        __nihil_json_key_is(s, __ka, __ke - 1, key) { : __nihil_sub(s, __va, __ve); }
         __i = __nihil_json_ws(s, __ve);
         __i < #s && s[__i] == ',' { __i = __nihil_json_ws(s, __i + 1); }
     }
@@ -1501,48 +1520,55 @@ __nihil_s_json(s = "", key = "") {
 }
 
 // the parts of an array (mode 0: its items) or of an object (1: its keys, 2:
-// its values, in the same order as the keys)
+// its values, in the same order as the keys). One pass keeps where each part starts and
+// ends; then the texts are cut.
 __nihil_json_parts(s = "", mode = 0) {
     keys = mode != 0;
     __open = '[';
     keys { __open = '{'; }
     __i = __nihil_json_ws(s, 0);
     __i >= #s || s[__i] != __open { : ["" ; 0]; }
-    __n = 0;                                         // first count, then fill
-    __pass = 0;
-    __r = ["" ; 0];
-    2 {
-        __pass == 1 { __r = ["" ; __n]; }
-        __n = 0;
-        __j = __nihil_json_ws(s, __i + 1);
-        __going = __j < #s && s[__j] != ']' && s[__j] != '}';
-        * __going {
-            __a = __j;
-            __e = __nihil_json_end(s, __a);
-            __e < 0 { __going = false; } || {
-                keys {
-                    __pass == 1 && mode == 1 {
-                        __k = __nihil_sub(s, __a + 1, __e - 1);
-                        __nihil_s_has(__k, "\\") { __k = __nihil_json_unescape(__k); }
-                        __r[__n] = __k;
-                    }
-                    __e = __nihil_json_ws(s, __e);
-                    __e < #s && s[__e] == ':' {
-                        __va = __nihil_json_ws(s, __e + 1);
-                        __e = __nihil_json_end(s, __va);
-                        __pass == 1 && mode == 2 && __e >= 0 { __r[__n] = __nihil_sub(s, __va, __e); }
-                    } || { __e = -1; }
-                } || {
-                    __pass == 1 { __r[__n] = __nihil_sub(s, __a, __e); }
-                }
-                __e < 0 { __going = false; } || {
-                    __n = __n + 1;
-                    __j = __nihil_json_ws(s, __e);
-                    __j < #s && s[__j] == ',' { __j = __nihil_json_ws(s, __j + 1); } || { __going = false; }
-                }
-            }
+    __from = [0 ; 64];
+    __to = [0 ; 64];
+    __n = 0;
+    __j = __nihil_json_ws(s, __i + 1);
+    __going = __j < #s && s[__j] != ']' && s[__j] != '}';
+    * __going {
+        __a = __j;
+        __e = __nihil_json_end(s, __a);
+        __pa = __a; __pe = __e;                      // the part: the item, the key or the value
+        keys && __e >= 0 {
+            mode == 1 { __pa = __a + 1; __pe = __e - 1; }
+            __e = __nihil_json_ws(s, __e);
+            __e < #s && s[__e] == ':' {
+                __va = __nihil_json_ws(s, __e + 1);
+                __e = __nihil_json_end(s, __va);
+                mode == 2 { __pa = __va; __pe = __e; }
+            } || { __e = -1; }
         }
-        __pass = __pass + 1;
+        __e < 0 { __going = false; } || {
+            __n == #__from {
+                __f2 = [0 ; __n * 2];
+                __t2 = [0 ; __n * 2];
+                __k = 0;
+                * __k < __n { __f2[__k] = __from[__k]; __t2[__k] = __to[__k]; __k = __k + 1; }
+                __from = __f2;
+                __to = __t2;
+            }
+            __from[__n] = __pa;
+            __to[__n] = __pe;
+            __n = __n + 1;
+            __j = __nihil_json_ws(s, __e);
+            __j < #s && s[__j] == ',' { __j = __nihil_json_ws(s, __j + 1); } || { __going = false; }
+        }
+    }
+    __r = ["" ; __n];
+    __k = 0;
+    * __k < __n {
+        __t = __nihil_sub(s, __from[__k], __to[__k]);
+        mode == 1 && __nihil_s_has(__t, "\\") { __t = __nihil_json_unescape(__t); }
+        __r[__k] = __t;
+        __k = __k + 1;
     }
     : __r;
 }
@@ -1672,25 +1698,35 @@ __nihil_s_json_quote(s = "") {
 // ---- network (SPEC §23): a TCP server, and HTTP on top of it ------------------------
 // A port and a connection are INTs (the sockets); the calls are on them:
 // 8080.listen(), srv.accept(), c.receive(), c.send(text), c.respond(…), c.close().
+// Failures follow the rest of the library: a missing value (_) or false, never -errno.
 
+// 8080.listen() → INT?: the listening socket, or _ if the port cannot be opened
 __nihil_i_listen(port = 0) {
-    : __nihil_listen(port, 0);                      // only 127.0.0.1: the machine itself
+    __s = __nihil_listen(port, 0);                  // only 127.0.0.1: the machine itself
+    __s < 0 { : _; }
+    : __s;
 }
 
 __nihil_i_listen_all(port = 0) {
-    : __nihil_listen(port, 1);                      // every address: the network can reach it
+    __s = __nihil_listen(port, 1);                  // every address: the network can reach it
+    __s < 0 { : _; }
+    : __s;
 }
 
+// srv.accept() → INT?: the next connection (waits for it), or _ if the port failed
 __nihil_i_accept(fd = 0) {
-    : __nihil_accept(fd);
+    __c = __nihil_accept(fd);
+    __c < 0 { : _; }
+    : __c;
 }
 
 __nihil_i_close(fd = 0) {
     __nihil_fd_close(fd);
 }
 
+// c.send(text) → BOOL: all of text was sent (false: the client went away)
 __nihil_i_send(fd = 0, t = "") {
-    : __nihil_fd_send(fd, t);
+    : __nihil_fd_send(fd, t) == 0;
 }
 
 // the Content-Length of the headers h (0 without one)
@@ -1703,13 +1739,16 @@ __nihil_http_length(h = "") {
     : __l.slice(__a, __e || #__l).int() || 0;
 }
 
-// c.receive() → a whole HTTP request: the headers and, after them, a body of
-// Content-Length bytes; "" if the connection closed first
+// c.receive() → STRING?: a whole HTTP request, the headers and, after them, a body of
+// Content-Length bytes; _ if the connection closed before sending anything
 __nihil_i_receive(fd = 0) {
     __r = "";
     * true {
         __s = __nihil_str_at(__nihil_fd_read(fd, 65536));
-        #__s == 0 { : __r; }
+        #__s == 0 {
+            #__r == 0 { : _; }
+            : __r;
+        }
         __r = __r + __s;
         __h? = __r.find("\r\n\r\n");
         __h != _ {
@@ -1731,11 +1770,13 @@ __nihil_http_reason(status = 0) {
     : "Status";
 }
 
-// c.respond(status, content type, body): the whole HTTP response, then closes
-__nihil_i_respond(fd = 0, status = 200, tipo = "", corpo = "") {
-    __nihil_fd_send(fd, "HTTP/1.1 " + $status + " " + __nihil_http_reason(status) + "\r\nContent-Type: " + tipo
-        + "\r\nContent-Length: " + $#corpo + "\r\nConnection: close\r\nAccess-Control-Allow-Origin: *\r\n\r\n" + corpo);
+// c.respond(status, content type, body) → BOOL: the whole HTTP response, then closes;
+// false if the client went away
+__nihil_i_respond(fd = 0, status = 200, content_type = "", body = "") {
+    __ok = __nihil_fd_send(fd, "HTTP/1.1 " + $status + " " + __nihil_http_reason(status) + "\r\nContent-Type: " + content_type
+        + "\r\nContent-Length: " + $#body + "\r\nConnection: close\r\nAccess-Control-Allow-Origin: *\r\n\r\n" + body) == 0;
     __nihil_fd_close(fd);
+    : __ok;
 }
 
 // the first line of a request: "GET /plano/293?mes=1 HTTP/1.1"

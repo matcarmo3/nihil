@@ -31,7 +31,10 @@ library_ahead() {
 lib_target(t = 0, s = 0, n = 0) {
     t == TYPE_STR {
         name_is(s, n, "find") { : "__nihil_s_find"; }
-        name_is(s, n, "has") { : "__nihil_s_has"; }
+        name_is(s, n, "contains") { : "__nihil_s_has"; }
+        name_is(s, n, "starts_with") { : "__nihil_s_starts"; }
+        name_is(s, n, "ends_with") { : "__nihil_s_ends"; }
+        name_is(s, n, "has") { : "__nihil_s_has"; }          // older names, kept as synonyms
         name_is(s, n, "starts") { : "__nihil_s_starts"; }
         name_is(s, n, "ends") { : "__nihil_s_ends"; }
         name_is(s, n, "slice") { : "__nihil_s_slice"; }
@@ -69,7 +72,8 @@ lib_target(t = 0, s = 0, n = 0) {
     t == TYPE_ARR | TYPE_INT {
         name_is(s, n, "sort") { : "__nihil_ai_sort"; }
         name_is(s, n, "find") { : "__nihil_ai_find"; }
-        name_is(s, n, "has") { : "__nihil_ai_has"; }
+        name_is(s, n, "contains") { : "__nihil_ai_has"; }
+        name_is(s, n, "has") { : "__nihil_ai_has"; }        // older name, kept as a synonym
         name_is(s, n, "reverse") { : "__nihil_ai_reverse"; }
         name_is(s, n, "sum") { : "__nihil_ai_sum"; }
         name_is(s, n, "min") { : "__nihil_ai_min"; }
@@ -79,7 +83,8 @@ lib_target(t = 0, s = 0, n = 0) {
     t == TYPE_ARR | TYPE_FLOAT {
         name_is(s, n, "sort") { : "__nihil_af_sort"; }
         name_is(s, n, "find") { : "__nihil_af_find"; }
-        name_is(s, n, "has") { : "__nihil_af_has"; }
+        name_is(s, n, "contains") { : "__nihil_af_has"; }
+        name_is(s, n, "has") { : "__nihil_af_has"; }        // older name, kept as a synonym
         name_is(s, n, "reverse") { : "__nihil_af_reverse"; }
         name_is(s, n, "sum") { : "__nihil_af_sum"; }
         name_is(s, n, "min") { : "__nihil_af_min"; }
@@ -89,7 +94,8 @@ lib_target(t = 0, s = 0, n = 0) {
     t == TYPE_ARR | TYPE_STR {
         name_is(s, n, "sort") { : "__nihil_as_sort"; }
         name_is(s, n, "find") { : "__nihil_as_find"; }
-        name_is(s, n, "has") { : "__nihil_as_has"; }
+        name_is(s, n, "contains") { : "__nihil_as_has"; }
+        name_is(s, n, "has") { : "__nihil_as_has"; }        // older name, kept as a synonym
         name_is(s, n, "reverse") { : "__nihil_as_reverse"; }
         name_is(s, n, "join") { : "__nihil_as_join"; }
         : "";
@@ -103,7 +109,7 @@ lib_missing(t = 0, s = 0, n = 0) {
     t == TYPE_STR {
         put_str(" has no method '");
         put_source(s, n);
-        put_str("': it has find, has, starts, ends, slice, split, replace, trim, upper, lower, repeat, int, float, json, json_items, json_keys, json_values, json_text, json_quote, http_method, http_path, http_param, http_body and url_decode");
+        put_str("': it has find, contains, starts_with, ends_with, slice, split, replace, trim, upper, lower, repeat, int, float, json, json_items, json_keys, json_values, json_text, json_quote, http_method, http_path, http_param, http_body and url_decode");
         error_end();
     }
     t == TYPE_INT {
@@ -115,13 +121,13 @@ lib_missing(t = 0, s = 0, n = 0) {
     t == TYPE_ARR | TYPE_INT || t == TYPE_ARR | TYPE_FLOAT {
         put_str(" has no method '");
         put_source(s, n);
-        put_str("': it has sort, find, has, reverse, sum, min and max");
+        put_str("': it has sort, find, contains, reverse, sum, min and max");
         error_end();
     }
     t == TYPE_ARR | TYPE_STR {
         put_str(" has no method '");
         put_source(s, n);
-        put_str("': it has sort, find, has, reverse and join");
+        put_str("': it has sort, find, contains, reverse and join");
         error_end();
     }
     put_str(" has no methods (the library works on STRING and on ARRAY of INT, FLOAT or STRING)");

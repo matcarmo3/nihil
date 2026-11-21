@@ -1,0 +1,8 @@
+-42 324.56 true [  ab] true
+0 -0.0 false [] true
+9223372036854775807 0.12345678901234568 true [x y] true
+-9223372036854775808 1.5e+300 false [end] true
+7 -123456789012345.6 true [z] true
+-1 12345678901234.5 false [çé] true
+123 0.000001 true [ a] true
+5 2.5e-10 false [last] true
