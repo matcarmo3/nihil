@@ -7,7 +7,7 @@ fire_source(MAX_HEAT);
 >> "P6\n"; >> FIRE_W; >> " "; >> FIRE_H; >> "\n255\n";
 i = 0;
 FIRE_W * FIRE_H {
-    heat = fire[i];
-    >>> PALETTE[heat * 3]; >>> PALETTE[heat * 3 + 1]; >>> PALETTE[heat * 3 + 2];
+    c = PALETTE[fire[i]];
+    >>> c >> 16; >>> c >> 8; >>> c;
     i = i + 1;
 }

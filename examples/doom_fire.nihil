@@ -18,7 +18,8 @@ FRAME_MS = 33;
 // a color escape: 38 = foreground, 48 = background
 color(code = 38, heat = 0) {
     >> "\x1b["; >> code; >> ";2;";
-    >> PALETTE[heat * 3]; >> ";"; >> PALETTE[heat * 3 + 1]; >> ";"; >> PALETTE[heat * 3 + 2];
+    c = PALETTE[heat];
+    >> c >> 16; >> ";"; >> c >> 8 & 0xFF; >> ";"; >> c & 0xFF;
     >> "m";
 }
 
