@@ -1,0 +1,18 @@
+x = 7;
+x > 10 {
+    >> "large\n";
+} || x > 5 {
+    >> "medium\n";
+} || {
+    >> "small\n";
+}
+
+3 { >> "hip "; }                // an INT before { repeats the block
+>> "hooray\n";
+
+i = 1;
+* i <= 5 {                      // * is a while loop
+    >> $(i * i) + " ";
+    i = i + 1;
+}
+>> "\n";

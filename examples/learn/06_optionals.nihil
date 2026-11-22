@@ -1,0 +1,20 @@
+// "_" is the value that is not there; a "?" when a variable is created lets it hold _
+find(v = [0], x = 0) {
+    i = 0;
+    * i < #v {
+        v[i] == x { : i; }
+        i = i + 1;
+    }
+    : _;                                // so find returns INT?
+}
+
+nums = [5, 8, 13];
+at? = find(nums, 8);
+>> at;                                  // an optional prints its value, or _
+>> "\n";
+at = find(nums, 99);
+at == _ { >> "99 is not there\n"; }
+pos = find(nums, 13) || -1;             // || takes the value, or the fallback
+>> "13 is at " + $pos + "\n";
+n = "12x".int() || 0;                   // the library returns optionals too
+>> $n + "\n";

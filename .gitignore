@@ -6,3 +6,6 @@ ide/workspace/*.dat
 ide/workspace/*.txt
 *.nihil-idx
 ide/projects.txt
+.DS_Store
+examples/learn/products.dat*
+examples/learn/notes.txt

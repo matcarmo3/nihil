@@ -1,0 +1,11 @@
+count = 3;                      // INT
+price = 2.5;                    // FLOAT
+ready = true;                   // BOOL
+name = "tea";                   // STRING
+total = price * .count;         // .n turns an INT into a FLOAT
+>> name + ": " + $count + " x " + $price + " = " + $total + "\n";
+>> "whole part: " + $#total + "\n";     // #f turns a FLOAT into an INT
+>> "letters: " + $#name + "\n";         // # of a STRING is its length
+>> "ready: " + $ready + "\n";           // $ turns a value into text
+n = "42".int() || 0;                    // text to number (or 0 if it is not one)
+>> $(n + 1) + "\n";

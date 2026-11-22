@@ -1,0 +1,24 @@
+// a method to show an ARRAY of INT ($ of an array of INT makes text from its bytes)
+show(v = [0]) {
+    parts = ["" ; #v];
+    i = 0;
+    * i < #v { parts[i] = $v[i]; i = i + 1; }
+    : "[" + parts.join(", ") + "]";
+}
+
+nums = [5, 3, 8, 1];
+>> $#nums + " numbers, the first is " + $nums[0] + "\n";
+nums = nums + [13];                     // joining makes a new array
+>> show(nums.sort()) + "\n";
+>> "sum " + $nums.sum() + ", max " + $(nums.max() || 0) + "\n";
+
+zeros = [0 ; 4];                        // 4 copies of 0
+zeros[2] = 9;
+>> show(zeros) + "\n";
+>> $[72, 105] + "\n";                   // bytes to text: Hi
+
+line = "  pear, apple, fig ";
+words = line.trim().split(", ");        // an ARRAY of STRING
+>> words.sort().join(" < ") + "\n";
+>> line.trim().upper() + "\n";
+>> $line.contains("apple") + "\n";

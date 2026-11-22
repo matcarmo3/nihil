@@ -1,0 +1,12 @@
+@>> "notes.txt", "first line\n";        // write a file (atomically)
+@+>> "notes.txt", "second line\n";      // append to it
+text = @ "notes.txt";                   // read it whole
+lines = text.trim().split("\n");
+>> $#lines + " lines; the last: " + lines[#lines - 1] + "\n";
+missing? = @? "nope.txt";               // @? gives _ instead of an error
+missing == _ { >> "nope.txt is not there\n"; }
+
+>> "Your name? ";
+name = "";
+<< name;                                // reads a line from the input
+>> "Hello, " + name + "!\n";

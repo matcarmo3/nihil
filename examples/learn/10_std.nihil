@@ -1,0 +1,12 @@
+@ "std:env.nihil";                          // libraries that ship with the compiler
+@ "std:json.nihil";
+
+port = env_int("PORT", 8080);               // the .env file or the environment, or the default
+user = env("USER", "nobody");
+
+item = "{\"name\": \"Tea\", \"price\": 7.5, \"tags\": [\"hot\", \"green\"]}";
+name = (item.json("name") || "\"\"").json_text() || "";
+price = (item.json("price") || "0").float() || 0.0;
+tags = (item.json("tags") || "[]").json_items();
+>> name + " costs " + $price + ", " + $#tags + " tags\n";
+>> "{\"port\": " + $port + ", \"ok\": " + json_bool(port > 0) + "}\n";

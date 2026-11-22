@@ -1,0 +1,16 @@
+PRODUCT = @[#code: INT(4); name: STRING(12); price: FLOAT(6)];   // a data model; # marks the key
+FILE = "products.dat";
+
+@{}>> FILE, PRODUCT(1, "Coffee", 12.5);    // write by key: adds it, or replaces it
+@{}>> FILE, PRODUCT(2, "Tea", 8.0);
+@{}>> FILE, PRODUCT(3, "Cake", 15.0);
+
+p = PRODUCT @{2} FILE;                      // one record by its key
+p.price = 7.5;
+@{}>> FILE, p;
+
+rows = PRODUCT @ FILE;                      // the whole table
+>> $rows.where(price < 13.0).sort(name);    // a query; $ turns records into table lines
+>> "total: " + $rows.sum(price) + "\n";
+PRODUCT @{3} FILE = _;                      // delete by key
+>> $#(PRODUCT @ FILE) + " records left\n";

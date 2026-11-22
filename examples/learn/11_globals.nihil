@@ -1,0 +1,18 @@
+total = 0;                      // a global: assigned at the top level
+
+add(n = 0) {
+    total = total + n;          // changes the global: a name that is global is always the global
+}
+
+reset_counter() {
+    i = 0;                      // a local: no global is called i
+    * i < 3 { i = i + 1; }
+}
+
+add(5);
+add(7);
+>> "total: " + $total + "\n";   // 12
+
+// a parameter may have a global's name, and then it hides the global inside its method
+double(total = 0) { : total * 2; }
+>> $double(21) + " " + $total + "\n";

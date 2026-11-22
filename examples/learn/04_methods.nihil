@@ -1,0 +1,17 @@
+// every parameter has a default, and the default gives its type
+greet(name = "world", times = 1) {
+    times { >> "Hello, " + name + "! "; }
+    >> "\n";
+}
+
+// ":" returns a value
+square(n = 0) { : n * n; }
+
+fib(n = 0) {
+    n < 2 { : n; }
+    : fib(n - 1) + fib(n - 2);
+}
+
+greet();
+greet("Nihil", 2);
+>> $square(12) + " " + $fib(20) + "\n";
