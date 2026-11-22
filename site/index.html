@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nihil — a programming language with no keywords</title>
+<meta name="description" content="Nihil is a small, self-hosted programming language with no keywords at all. It compiles straight to native machine code, with no libc, no linker and no virtual machine.">
+<meta property="og:title" content="Nihil — a programming language with no keywords">
+<meta property="og:description" content="No if, no while, no return: only symbols. Self-hosted, statically typed without annotations, compiled straight to native code.">
+<meta property="og:url" content="https://nihil-lang.dev/">
+<meta property="og:image" content="https://nihil-lang.dev/logo.png">
+<link rel="icon" type="image/png" href="icon-64.png">
+<style>
+:root {
+  --bg: #ffffff;
+  --bg-soft: #f4f6f8;
+  --fg: #14181d;
+  --muted: #5b6672;
+  --line: #dde2e7;
+  --accent: #0fb8be;
+  --accent-strong: #08868b;
+  --code-bg: #0f1419;
+  --code-fg: #d9e1e8;
+  --code-comment: #7d8a96;
+  --code-string: #a5d6a7;
+  --code-number: #f2b880;
+  --code-symbol: #2ee6ec;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0d1116;
+    --bg-soft: #151b22;
+    --fg: #e6ebf0;
+    --muted: #9aa6b2;
+    --line: #26303a;
+    --accent: #2ee6ec;
+    --accent-strong: #7ff3f6;
+    --code-bg: #0a0e12;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0d1116;
+  --bg-soft: #151b22;
+  --fg: #e6ebf0;
+  --muted: #9aa6b2;
+  --line: #26303a;
+  --accent: #2ee6ec;
+  --accent-strong: #7ff3f6;
+  --code-bg: #0a0e12;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 17px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+a { color: var(--accent-strong); }
+code, pre { font-family: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas, monospace; }
+code { font-size: 0.92em; background: var(--bg-soft); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+.wrap { max-width: 980px; margin: 0 auto; padding: 0 16px; }
+
+header.hero { text-align: center; padding: 56px 0 40px; border-bottom: 1px solid var(--line); }
+.hero picture img { width: 240px; max-width: 70%; height: auto; }
+.hero h1 { font-size: clamp(26px, 4.4vw, 40px); line-height: 1.2; margin: 24px 0 12px; letter-spacing: -0.01em; }
+.hero p.lead { color: var(--muted); font-size: 19px; max-width: 680px; margin: 0 auto; }
+.hero .actions { margin-top: 28px; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+.btn { display: inline-block; padding: 10px 20px; border-radius: 8px; text-decoration: none; font-weight: 600; border: 1px solid var(--line); color: var(--fg); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #031314; }
+.btn:hover { border-color: var(--accent); }
+
+section { padding: 48px 0; border-bottom: 1px solid var(--line); }
+section h2 { font-size: 26px; margin: 0 0 8px; }
+section p.sub { color: var(--muted); margin: 0 0 24px; }
+
+.features { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 16px; }
+.card { background: var(--bg-soft); border: 1px solid var(--line); border-radius: 10px; padding: 18px; }
+.card h3 { margin: 0 0 6px; font-size: 17px; }
+.card p { margin: 0; color: var(--muted); font-size: 15px; }
+
+pre {
+  background: var(--code-bg); color: var(--code-fg);
+  border-radius: 10px; padding: 18px; overflow-x: auto;
+  font-size: 14px; line-height: 1.55; margin: 0 0 16px;
+}
+pre .c { color: var(--code-comment); }
+pre .s { color: var(--code-string); }
+pre .n { color: var(--code-number); }
+pre .y { color: var(--code-symbol); }
+
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
+table { border-collapse: collapse; width: 100%; font-size: 15px; }
+th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { background: var(--bg-soft); font-weight: 600; }
+tr:last-child td { border-bottom: 0; }
+td code { white-space: nowrap; }
+
+.platforms { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+
+footer { padding: 32px 0 48px; color: var(--muted); font-size: 15px; }
+footer .row { display: flex; gap: 24px; flex-wrap: wrap; justify-content: space-between; }
+footer a { color: var(--muted); }
+.note { background: var(--bg-soft); border-left: 3px solid var(--accent); padding: 14px 18px; border-radius: 6px; }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="logo-dark-400.png">
+      <img src="logo-400.png" width="400" height="335" alt="Nihil">
+    </picture>
+    <h1>A programming language with no keywords at all</h1>
+    <p class="lead">No <code>if</code>, no <code>while</code>, no <code>return</code>: only symbols.
+      Nihil compiles straight to native machine code, with no libc, no linker and no virtual machine,
+      and its compiler is written in Nihil itself.</p>
+    <div class="actions">
+      <a class="btn primary" href="#taste">See the code</a>
+      <a class="btn" href="https://github.com/nihillang">GitHub</a>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section>
+    <div class="wrap">
+      <h2>Why Nihil</h2>
+      <p class="sub">The name is Latin for <em>nothing</em>, and <code>_</code> is the value that is not there.</p>
+      <div class="features">
+        <div class="card"><h3>Self-hosted</h3><p>A first compiler in assembly bootstraps a second one written in Nihil, which compiles itself to a fixed point.</p></div>
+        <div class="card"><h3>Typed, without annotations</h3><p>Types come from values and defaults, settled across several passes. Missing values are explicit optionals.</p></div>
+        <div class="card"><h3>Batteries for data</h3><p>Files of fixed-width records with an on-disk key index, and queries like <code>rows.where(price &gt; 10.0).sort(name)</code>.</p></div>
+        <div class="card"><h3>Tiny native binaries</h3><p>A small runtime with a garbage collector is embedded in each executable. A "hello world" is 6 KB.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="taste">
+    <div class="wrap">
+      <h2>A taste</h2>
+      <p class="sub">A <code>BOOL</code> before <code>{</code> is an if, <code>*</code> is a while loop, <code>:</code> returns.</p>
+<pre class="nihil">fib(n = 0) {
+    n &lt; 2 { : n; }                 // a BOOL before "{" is an if; ":" returns
+    : fib(n - 1) + fib(n - 2);
+}
+
+find(v = [0], x = 0) {
+    i = 0;
+    * i &lt; #v {                     // "*" is a while loop
+        v[i] == x { : i; }
+        i = i + 1;
+    }
+    : _;                           // "_" is "no value": find returns INT?
+}
+
+&gt;&gt; fib(30); &gt;&gt; "\n";               // 832040
+pos = find([5, 8, 13], 8) || -1;   // "||" takes the value, or the fallback
+3 { &gt;&gt; pos; }                      // an INT before "{" repeats the block: 111
+&gt;&gt; "\n";
+&gt;&gt; 0.1 + 0.2; &gt;&gt; "\n";             // 0.30000000000000004
+words = "  pear, apple, fig ".trim().split(", ");
+&gt;&gt; words.sort().join(" &lt; ") + "\n";  // apple &lt; fig &lt; pear</pre>
+
+      <p class="sub" style="margin-top:28px">And a small table on disk, read and written by key:</p>
+<pre class="nihil">PRODUCT = @[#code: INT(4); name: STRING(12); price: FLOAT(6)];   // a data model; # marks the key
+FILE = "products.dat";
+
+@{}&gt;&gt; FILE, PRODUCT(1, "Coffee", 12.5);    // write by key: adds it, or replaces it in place
+@{}&gt;&gt; FILE, PRODUCT(2, "Tea", 8.0);
+@{}&gt;&gt; FILE, PRODUCT(3, "Cake", 15.0);
+
+p = PRODUCT @{2} FILE;                      // one record by its key (a hash index on disk)
+p.price = 7.5;
+@{}&gt;&gt; FILE, p;
+
+rows = PRODUCT @ FILE;                      // the whole table: an ARRAY of PRODUCT
+&gt;&gt; $rows.where(price &lt; 13.0).sort(name);    // a query; $ turns records into table lines
+&gt;&gt; "total: " + $rows.sum(price) + "\n";     // total: 35.0
+PRODUCT @{3} FILE = _;                      // delete by key</pre>
+      <p>The table is plain text, one record per line, readable in any editor.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>The language at a glance</h2>
+      <p class="sub">The names after a <code>.</code> exist only there, so they never take a name from your program.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Write</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td><code>x = 1;</code></td><td>a variable; its type comes from the value</td></tr>
+            <tr><td><code>cond { … } || { … }</code></td><td>if / else (<code>cond</code> is a BOOL)</td></tr>
+            <tr><td><code>* cond { … }</code></td><td>while</td></tr>
+            <tr><td><code>n { … }</code></td><td>repeat <code>n</code> times</td></tr>
+            <tr><td><code>f(a = 0, s = "") { … }</code></td><td>a method; every parameter has a default, which gives its type</td></tr>
+            <tr><td><code>: value;</code></td><td>return</td></tr>
+            <tr><td><code>&gt;&gt; x;</code> / <code>&lt;&lt; x;</code></td><td>write to standard output / read a line</td></tr>
+            <tr><td><code>x? = 5;</code>, <code>x || 0</code>, <code>x == _</code></td><td>optionals: a value that may be missing</td></tr>
+            <tr><td><code>@ path</code>, <code>@&gt;&gt; path, text;</code></td><td>read a file, replace it atomically</td></tr>
+            <tr><td><code>m = {"ana": 30}</code></td><td>a map: values by key, in memory</td></tr>
+            <tr><td><code>@ "std:json.nihil";</code></td><td>include a library that ships with the compiler</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>Where it runs</h2>
+      <p class="sub">The compiler writes the executable by itself, one pass at a time, until the types settle.</p>
+      <div class="platforms">
+        <div class="card"><h3>Linux x86_64</h3><p>Native ELF executables, no libc and no linker. The reference platform, with the full test suite and a fixed-point check on every change.</p></div>
+        <div class="card"><h3>macOS on Apple silicon</h3><p>Native executables through an instruction-by-instruction translator to ARM64. The compiler itself runs natively on the Mac.</p></div>
+        <div class="card"><h3>A web IDE, in Nihil</h3><p>An editor with a color terminal, the generated machine code one click away, and a table view for record files of any size.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>Status</h2>
+      <p class="note">Nihil is open source under the MIT license. The source code will be published soon at
+        <a href="https://github.com/nihillang">github.com/nihillang</a>. To follow the project or ask a question,
+        write to <a href="mailto:contact@nihil-lang.dev">contact@nihil-lang.dev</a>.</p>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap row">
+    <span>Nihil · MIT License</span>
+    <span>
+      <a href="mailto:contact@nihil-lang.dev">contact@nihil-lang.dev</a> ·
+      Security: <a href="mailto:security@nihil-lang.dev">security@nihil-lang.dev</a> ·
+      <a href="https://github.com/nihillang">GitHub</a>
+    </span>
+  </div>
+</footer>
+
+<script>
+// a small highlighter for the Nihil samples: comments, strings, numbers and the symbols that replace keywords
+document.querySelectorAll("pre.nihil").forEach(function (pre) {
+  var text = pre.textContent;
+  var out = "";
+  var esc = function (s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); };
+  var re = /(\/\/[^\n]*)|("(?:\\.|[^"\\])*")|(\b\d+(?:\.\d+)?\b)|(@\{\d*\}>>|@\{\d*\}|@>>|@\+>>|@\[|@|>>|<<|::|\|\||\*(?= )|\b_\b|#(?=\w))/g;
+  var last = 0, m;
+  while ((m = re.exec(text)) !== null) {
+    out += esc(text.slice(last, m.index));
+    var cls = m[1] ? "c" : m[2] ? "s" : m[3] ? "n" : "y";
+    out += '<span class="' + cls + '">' + esc(m[0]) + "</span>";
+    last = re.lastIndex;
+  }
+  out += esc(text.slice(last));
+  pre.innerHTML = out;
+});
+</script>
+</body>
+</html>
