@@ -1,0 +1,7 @@
+// =============================================================================
+// std/json.nihil — small helpers for writing JSON. Include it with @ "std:json.nihil"; (SPEC §16).
+// =============================================================================
+
+json_bool(b = false) { b { : "true"; } : "false"; }
+json_text(t = "") { : t.json_quote(); }
+json_text_or_null(t = "") { #t == 0 { : "null"; } : t.json_quote(); }

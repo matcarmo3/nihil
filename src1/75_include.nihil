@@ -30,7 +30,7 @@ read_raw(k = 0) {
     i = 0;
     name_len[k] { path[i] = names[name_start[k] + i]; i = i + 1; }
     contents = "";
-    k == index_prelude { contents = PRELUDE_TEXT; } || { contents = @$path; }
+    k == index_prelude { contents = PRELUDE_TEXT; } || is_std_name(k) { contents = std_text(std_part(k)); } || { contents = @$path; }
     n = #contents;
     size_raw + n >= SIZE_RAW - 1 { error_large(k); }
     start = size_raw;
@@ -119,6 +119,25 @@ normalize_path(start = 0, w = 0) {
     : o;
 }
 
+// "std:name.nihil" (SPEC §16): a library of the language, kept inside the compiler (std/*.nihil,
+// made into build/std_text.nihil by make). Its path is that text itself.
+is_std_name(k = 0) {
+    a = name_start[k];
+    : name_len[k] > 4 && names[a] == 's' && names[a + 1] == 't' && names[a + 2] == 'd' && names[a + 3] == ':';
+}
+
+is_std_cst(pathc = 0) {
+    : size_cst(pathc) > 4 && cst[pathc] == 's' && cst[pathc + 1] == 't' && cst[pathc + 2] == 'd' && cst[pathc + 3] == ':';
+}
+
+// the library's name in "std:name.nihil" (file k)
+std_part(k = 0) {
+    sname = [0 ; name_len[k] - 4];
+    i = 0;
+    name_len[k] - 4 { sname[i] = names[name_start[k] + 4 + i]; i = i + 1; }
+    : $sname;
+}
+
 // path of file k + included path (constant pathc) → index of the path;
 // resolve_new = false if it had already been included
 resolve_path(k = 0, pathc = 0) {
@@ -126,7 +145,14 @@ resolve_path(k = 0, pathc = 0) {
     n + 4096 + size_names >= SIZE_NAMES { error("too many included files"); }
     start = size_names;
     w = start;
-    cst[pathc] != '/' {
+    to_std = is_std_cst(pathc);
+    // inside a library, a relative path names another library
+    !to_std && cst[pathc] != '/' && is_std_name(k) {
+        names[w] = 's'; names[w + 1] = 't'; names[w + 2] = 'd'; names[w + 3] = ':';
+        w = w + 4;
+        to_std = true;
+    }
+    cst[pathc] != '/' && !to_std {
         // directory of the including file: up to the last "/", inclusive
         a = name_start[k];
         last = -1;
@@ -225,6 +251,16 @@ expand(k = 0, depth = 0) {
             copy_source(copy_from, pli);     // what comes before the directive's line
             copy_from = q;
             new = resolve_path(k, pathc);
+            resolve_new && is_std_name(new) && #std_text(std_part(new)) == 0 {
+                restore_pos(pi, pl, pn, pli);
+                error_start();
+                put_str("no library '");
+                put_name(new);
+                put_str("' (the libraries: ");
+                put_str(STD_LIST);
+                put_str(")");
+                error_end();
+            }
             resolve_new {
                 depth >= 64 {
                     restore_pos(pi, pl, pn, pli);

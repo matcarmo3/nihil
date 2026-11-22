@@ -1,0 +1,20 @@
+// the standard library (SPEC §16): @ "std:name.nihil" includes a library kept inside the compiler
+@ "std:json.nihil";
+@ "std:env.nihil";
+@ "std:mcp.nihil";
+@ "std:json.nihil";                 // included once, as any file
+
+// mcp.nihil calls these two
+mcp_tools() { : "[]"; }
+mcp_call(name = "", arguments = "") { : name; }
+
+// globals with the names the libraries use inside their methods stay untouched
+i = 7;
+lines = "mine";
+
+>> json_bool(true) + " " + json_text("a\"b") + " " + json_text_or_null("") + "\n";
+>> env("NIHIL_STD_TEST_UNSET", "fallback") + "\n";
+>> $env_int("NIHIL_STD_TEST_UNSET", 42) + "\n";
+>> $arg_int("{\"n\": \"12\"}", "n", 0) + " " + arg_text("{\"s\": \"x\"}", "s", "") + "\n";
+>> mcp_version("2024-11-05") + " " + mcp_version("1999-01-01") + "\n";
+>> $i + " " + lines + "\n";

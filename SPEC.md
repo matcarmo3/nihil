@@ -745,6 +745,16 @@ inclusions (§16). `build/runtime.nihil` is generated from `runtime.bin`, and
   cancels out, so `api/../services/../models/m.nihil` and `models/m.nihil`
   are one file; a `..` with nothing before it stays (`../x.nihil`). Symbolic
   links are not followed.
+- **The standard library** (stage 1, v4.2): a path starting with `std:` names a
+  library that ships inside the compiler, wherever the program is:
+  `@ "std:mcp.nihil";`. The libraries are the files of `std/` in the language's
+  repository, made into text inside `nihilc1` at build time (as the prelude, §18), so
+  nothing has to be installed next to the program. A relative inclusion inside a
+  library names another library. An unknown name is a compile error that lists the
+  libraries. Today: `std:env.nihil` (the `.env` file and the environment: `env(key,
+  default)`, `env_int`), `std:json.nihil` (`json_bool`, `json_text`,
+  `json_text_or_null`) and `std:mcp.nihil` (an MCP server over stdio: `mcp_serve`,
+  `arg_int`, `arg_text`; §27). Their locals start with `__` (§18).
 - Error messages point to the original file and line, e.g.
   `nihilc: src1/lexer.nihil:12:5: …` and `it is created on line 2 in util.nihil`.
 - Implementation: each file is read into the raw-files arena and copied into the
@@ -1443,7 +1453,7 @@ passes to the table reader: `__nihil_r_to_json(schema, names, record)` and
 > v4.0: `tests/stage1/tools.nihil` and the `tests/stage1/errors/tools_*` tests.
 
 The methods whose names start with a prefix can be listed and called by name, for an MCP
-server (§23, `lib/mcp.nihil`): their parameters already have names, types (from the
+server (`std:mcp.nihil`, §16): their parameters already have names, types (from the
 defaults) and defaults, and the comment above them describes them.
 
 ```text
@@ -1519,6 +1529,7 @@ branch per tool, reading its parameters with the JSON library.
 | **v1.9:** saved registers learned between passes | The prologue comes before the body; using the count from the previous pass avoids saving registers for nothing |
 | **v2.1:** `... ms;` waits | Animations need a fixed speed; a busy loop depends on the machine. The ellipsis reads as a pause and cannot start any valid expression |
 | **v2.2:** renamed from Ket to Nihil | Latin for *nothing*: no keywords, and `_` for the missing value |
+| **v4.2:** the standard library: `@ "std:name.nihil";` (§16), kept inside the compiler | Libraries every program needs (configuration, JSON, MCP) were copied into each project; now they ship with the language |
 | **v4.1:** inclusions compared by their normalized path (`.`, empty segments and `dir/..` removed) | A program and a server that share files reached each one by a different relative path (`api/../services/../models/x.nihil`, `database/../models/x.nihil`): the same file was included twice and its models clashed |
 | **v4.0:** protected calls `?f()` and `?!`; `x.to_json()`, `MODEL.from_json(text)`, `MODEL.from_json_items(text)`; `tools("prefix")` and `call_tool("prefix", name, arguments)` | The planogram's MCP server showed what a server in Nihil lacks (docs/v4.0-mcp.md): one bad request ended the whole server, every answer was JSON assembled by hand, and every tool was declared twice (its method and its schema). A runtime error can now be a missing value, any value can be written as JSON and read back into a record, and the tools come from the methods themselves |
 | **v3.12:** `c.read()`, `url.http_open(method, type, body)` | Showing an answer while it is written: a local model takes a minute for a long answer, and the screen should not stay still. The headers are read one byte at a time, so nothing of the body is taken before the program reads it |

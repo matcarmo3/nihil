@@ -1,0 +1,97 @@
+// =============================================================================
+// std/mcp.nihil — a Model Context Protocol server over stdio: one JSON-RPC 2.0 message per
+// line on the standard input, one answer per line on the standard output (the output is
+// flushed before every read, so each answer leaves before the next message is awaited).
+// Logs go to the standard error only: the output is the protocol's channel.
+// Include it with @ "std:mcp.nihil"; (SPEC §16).
+//
+// The program that includes it defines two methods, called from here:
+//   mcp_tools()                → the JSON array of its tools (name, description, inputSchema);
+//                                tools("prefix") makes it from the methods (SPEC §27)
+//   mcp_call(name, arguments)  → the text the tool answers; it sets MCP_FAILED = true when the
+//                                text describes an error (the call itself still succeeds)
+// and runs mcp_serve(name, version). Each message is handled as a protected call (SPEC §25): a
+// runtime error while answering one is an error answer to that message, and the server goes on.
+// =============================================================================
+
+MCP_FAILED = false;
+MCP_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
+
+mcp_send(text = "") {
+    >> text + "\n";
+}
+
+mcp_result(id = "", result = "") {
+    mcp_send("{\"jsonrpc\": \"2.0\", \"id\": " + id + ", \"result\": " + result + "}");
+}
+
+mcp_error(id = "", code = 0, message = "") {
+    mcp_send("{\"jsonrpc\": \"2.0\", \"id\": " + id + ", \"error\": {\"code\": " + $code + ", \"message\": " + message.json_quote() + "}}");
+}
+
+// the protocol version to answer with: the client's when it is one we know, else our newest
+mcp_version(asked = "") {
+    __i = 0;
+    * __i < #MCP_VERSIONS { MCP_VERSIONS[__i] == asked { : asked; } __i = __i + 1; }
+    : MCP_VERSIONS[0];
+}
+
+// a JSON text argument as INT (a number, or a string with one), or the default
+arg_int(args = "", key = "", default = 0) {
+    __raw? = args.json(key);
+    __raw == _ { : default; }
+    __n? = (__raw || "").trim().int();
+    __n != _ { : __n || 0; }
+    : ((__raw || "").json_text() || "").trim().int() || default;
+}
+
+arg_text(args = "", key = "", default = "") {
+    __raw? = args.json(key);
+    __raw == _ { : default; }
+    : (__raw || "").json_text() || default;
+}
+
+mcp_handle(msg = "", name = "", version = "") {
+    __method = (msg.json("method") || "\"\"").json_text() || "";
+    __id? = msg.json("id");
+    __id == _ { :; }                                  // a notification (initialized, cancelled …): no answer
+    __rid = __id || "null";
+    __method == "" { mcp_error(__rid, -32600, "not a request"); :; }
+    __params = msg.json("params") || "{}";
+    __method == "initialize" {
+        __asked = (__params.json("protocolVersion") || "\"\"").json_text() || "";
+        mcp_result(__rid, "{\"protocolVersion\": " + mcp_version(__asked).json_quote() + ", \"capabilities\": {\"tools\": {}}, "
+                        + "\"serverInfo\": {\"name\": " + name.json_quote() + ", \"version\": " + version.json_quote() + "}}");
+        :;
+    }
+    __method == "ping" { mcp_result(__rid, "{}"); :; }
+    __method == "tools/list" { mcp_result(__rid, "{\"tools\": " + mcp_tools() + "}"); :; }
+    __method == "tools/call" {
+        __tool_name = (__params.json("name") || "\"\"").json_text() || "";
+        MCP_FAILED = false;
+        __text = mcp_call(__tool_name, __params.json("arguments") || "{}");
+        __failed = "false";
+        MCP_FAILED { __failed = "true"; }
+        mcp_result(__rid, "{\"content\": [{\"type\": \"text\", \"text\": " + __text.json_quote() + "}], \"isError\": " + __failed + "}");
+        :;
+    }
+    mcp_error(__rid, -32601, "unknown method: " + __method);
+}
+
+mcp_serve(name = "", version = "") {
+    !>> name + " " + version + ": MCP over stdio\n";
+    __line? = "";
+    << __line;
+    * __line != _ {
+        __l = (__line || "").trim();
+        #__l > 0 {
+            ?mcp_handle(__l, name, version);
+            #?! > 0 {
+                !>> "error: " + ?! + "\n";
+                __id? = __l.json("id");
+                __id != _ { mcp_error(__id || "null", -32603, "internal error: " + ?!); }
+            }
+        }
+        << __line;
+    }
+}

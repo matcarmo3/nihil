@@ -3,7 +3,7 @@
 # each test (tests/stage1/NAME) compiled with it and compared with its .out / .err
 set -u
 cd "$(dirname "$0")/.."
-make -s build/prelude_text.nihil || exit 1
+make -s build/prelude_text.nihil build/std_text.nihil || exit 1
 w=build/macos/dev; mkdir -p $w
 printf '%s\n' "-map $PWD/src1/nihilc1.nihil" | build/macos/nihilc1-native > $w/c.x86 2> $w/c.map || { grep -v nihil-map $w/c.map; exit 1; }
 python3 macos/translate.py $w/c.x86 $w/c.map $w/c.s 2>/dev/null && clang -arch arm64 -o build/macos/nihilc1-dev $w/c.s build/macos/rt.o || exit 1

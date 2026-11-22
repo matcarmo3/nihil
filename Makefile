@@ -2,6 +2,7 @@
 NASM := $(shell command -v nasm 2>/dev/null || echo $(HOME)/.local/bin/nasm)
 NASMFLAGS := -w+all -w-reloc-rel-dword -w-reloc-abs-qword -I src/ -I build/
 SOURCES1 := $(sort $(wildcard src1/*.nihil))
+comma := ,
 
 all: build/nihilc build/nihilc1
 
@@ -29,7 +30,20 @@ build/prelude_text.nihil: $(PRELUDE)
 	  cat $(PRELUDE) | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | awk '{ printf "%s\\n", $$0 }'; \
 	  printf '";\n'; } > $@
 
-build/nihilc1: build/nihilc build/runtime.nihil build/prelude_text.nihil $(SOURCES1)
+# the standard library (std/*.nihil, SPEC §16): each file becomes a STRING inside nihilc1,
+# included by programs as @ "std:name.nihil";
+STD := $(sort $(wildcard std/*.nihil))
+build/std_text.nihil: $(STD)
+	@mkdir -p build
+	{ printf '// generated from std/*.nihil — do not edit\nSTD_LIST = "%s";\nstd_text(name = "") {\n' "$(subst $(eval) ,$(comma) ,$(notdir $(STD)))"; \
+	  for f in $(STD); do \
+	    printf '    name == "%s" { : "' "$$(basename $$f)"; \
+	    sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' $$f | awk '{ printf "%s\\n", $$0 }'; \
+	    printf '"; }\n'; \
+	  done; \
+	  printf '    : "";\n}\n'; } > $@
+
+build/nihilc1: build/nihilc build/runtime.nihil build/prelude_text.nihil build/std_text.nihil $(SOURCES1)
 	build/nihilc src1/nihilc1.nihil $@
 
 # ---- tests ----
