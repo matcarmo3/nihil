@@ -84,7 +84,7 @@ floatcheck: build/nihilc
 # whatever is in use, runs the stage 1 suite, the fixed point and floatcheck
 gcstress:
 	rm -rf build/stress && mkdir -p build/stress
-	cp -r src src1 tests Makefile nihilc1.sh build/stress/
+	cp -r src src1 std tests Makefile nihilc1.sh build/stress/
 	$(MAKE) -C build/stress NASMFLAGS="$(NASMFLAGS) -DGC_STRESS" test1 fixedpoint floatcheck
 
 # the IDE server, written in Nihil (SPEC §24): ./build/ide-server, then http://127.0.0.1:8730
