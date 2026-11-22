@@ -4,6 +4,13 @@ What each version of the language added, and why. Appendix A of
 [SPEC.md](SPEC.md) keeps the same history together with the design decisions made
 before v2.0.
 
+## v4.2.1
+
+- `nihil ide`: the IDE comes with the packages and opens in an app window; its workspace is `~/Nihil`, with the examples
+  - *Why:* An installed Nihil had only the compiler: the IDE ran only from a clone of the repository
+- the `nihil` command (`nihil PROGRAM.nihil`, `nihil run`, `nihil version`), packages for Linux x86_64 and macOS arm64, and `install.sh`
+  - *Why:* A Mac could not install Nihil without building it on Linux first
+
 ## v4.2.0
 
 - the standard library: `@ "std:name.nihil";` (§16), kept inside the compiler
