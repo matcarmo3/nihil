@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nihil Library Reference</title>
+<meta name="description" content="Every call of the Nihil library: texts, arrays, queries on tables, JSON, maps, files and the standard library.">
+<link rel="icon" type="image/png" href="icon-64.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<nav class="top"><div class="wrap">
+  <a class="brand" href="index.html"><img src="icon-64.png" alt="">Nihil</a>
+  <a href="learn.html">Learn</a>
+  <a class="here" href="library.html">Library</a>
+  <a href="https://github.com/nihillang">GitHub</a>
+</div></nav>
+<main class="doc"><div class="wrap">
+<h1>Library reference</h1>
+<p>The library is called on a value: <code>value.name(arguments)</code>. The names exist only after a
+<code>.</code>, so they never take a name from your program, and the language keeps no reserved words.
+Every result is a new value: nothing changes the text or the array it is called on. Only what a
+program uses goes into its executable. The full reference is §21 of
+<a href="https://github.com/nihillang/nihil/blob/main/SPEC.md">SPEC.md</a>.</p>
+<ol class="toc">
+  <li><a href="#text">Text (STRING)</a></li>
+  <li><a href="#arrays">Arrays</a></li>
+  <li><a href="#queries">Queries on tables</a></li>
+  <li><a href="#json">JSON</a></li>
+  <li><a href="#maps">Maps</a></li>
+  <li><a href="#io">Input, output and files</a></li>
+  <li><a href="#conversions">Conversions</a></li>
+  <li><a href="#std">The standard library (std:)</a></li>
+</ol>
+
+<h2 id="text">Text (STRING)</h2>
+<pre class="nihil">words = "  pear, apple, fig  ".trim().split(", ");   // ["pear", "apple", "fig"]
+&gt;&gt; words.sort().join(" &lt; ");                        // apple &lt; fig &lt; pear
+n = "42".int() || 0;                                // "4x".int() is _</pre>
+<div class="table-wrap"><table>
+<thead><tr><th>Call</th><th>Result</th></tr></thead>
+<tbody>
+<tr><td><code>s.find(t)</code>, <code>s.find(t, from)</code></td><td><code>INT?</code>: the first position of <code>t</code> (from <code>from</code>), or <code>_</code></td></tr>
+<tr><td><code>s.contains(t)</code></td><td><code>BOOL</code>: <code>t</code> appears in <code>s</code></td></tr>
+<tr><td><code>s.starts_with(t)</code>, <code>s.ends_with(t)</code></td><td><code>BOOL</code></td></tr>
+<tr><td><code>s.slice(a)</code>, <code>s.slice(a, b)</code></td><td>the bytes <code>a</code> … <code>b - 1</code> (to the end without <code>b</code>); negative counts from the end</td></tr>
+<tr><td><code>s.split(sep)</code></td><td>ARRAY of STRING: the parts between each <code>sep</code> (<code>""</code> gives single bytes)</td></tr>
+<tr><td><code>s.replace(a, b)</code></td><td>every <code>a</code> replaced by <code>b</code></td></tr>
+<tr><td><code>s.trim()</code></td><td>without spaces, tabs and line breaks at both ends</td></tr>
+<tr><td><code>s.upper()</code>, <code>s.lower()</code></td><td>ASCII and Latin-1 letters changed (<code>"ação".upper()</code> is <code>"AÇÃO"</code>)</td></tr>
+<tr><td><code>s.repeat(n)</code></td><td><code>s</code> repeated <code>n</code> times</td></tr>
+<tr><td><code>s.int()</code>, <code>s.float()</code></td><td><code>INT?</code> / <code>FLOAT?</code>: the number in <code>s</code>, or <code>_</code> if it is not one</td></tr>
+<tr><td><code>#s</code>, <code>s[i]</code>, <code>a + b</code></td><td>length in bytes, the byte at <code>i</code> (an INT), joining</td></tr>
+</tbody></table></div>
+
+<h2 id="arrays">Arrays</h2>
+<p>For ARRAYs of INT, FLOAT or STRING. <code>[0 ; n]</code> makes <code>n</code> copies of a value; <code>a + b</code> joins two arrays.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Call</th><th>Result</th></tr></thead>
+<tbody>
+<tr><td><code>v.sort()</code></td><td>a new ARRAY in increasing order (stable, <i>n</i> log <i>n</i>; STRING byte by byte)</td></tr>
+<tr><td><code>v.find(x)</code></td><td><code>INT?</code>: the first position of <code>x</code>, or <code>_</code></td></tr>
+<tr><td><code>v.contains(x)</code></td><td><code>BOOL</code></td></tr>
+<tr><td><code>v.reverse()</code></td><td>a new ARRAY, last element first</td></tr>
+<tr><td><code>v.sum()</code>, <code>v.min()</code>, <code>v.max()</code></td><td>INT and FLOAT only: the total (0 for none); the smallest and largest as optionals</td></tr>
+<tr><td><code>parts.join(sep)</code></td><td>ARRAY of STRING only: one STRING with <code>sep</code> between the parts</td></tr>
+</tbody></table></div>
+
+<h2 id="queries">Queries on tables</h2>
+<p>On an ARRAY of records the argument is an expression of the fields: inside it, the model's field
+names stand for the fields of each record in turn. It can also use any other name of the program.</p>
+<pre class="nihil">rows = PRODUCT @ "products.dat";
+cheap = rows.where(price &lt;= limit &amp;&amp; active);
+best? = rows.sort(-price).first(active);           // the most expensive active one
+total = rows.where(active).sum(price);</pre>
+<div class="table-wrap"><table>
+<thead><tr><th>Call</th><th>Result</th></tr></thead>
+<tbody>
+<tr><td><code>rows.where(cond)</code></td><td>a new ARRAY with the records for which <code>cond</code> is true, in order</td></tr>
+<tr><td><code>rows.count(cond)</code></td><td><code>INT</code>: how many</td></tr>
+<tr><td><code>rows.first(cond)</code></td><td>the first one, as an optional</td></tr>
+<tr><td><code>rows.sort(key)</code></td><td>a new ARRAY in increasing order of <code>key</code> (<code>-key</code> for a number: decreasing)</td></tr>
+<tr><td><code>rows.sum(expr)</code></td><td>the total of an INT or FLOAT expression</td></tr>
+<tr><td><code>$rows</code>, <code>$record</code></td><td>the records as table lines</td></tr>
+</tbody></table></div>
+<p>Tables on disk (a data model is <code>NAME = @[#key: INT(4); name: STRING(12); …];</code>):</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Write</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>NAME @ path</code></td><td>the whole table: an ARRAY of NAME</td></tr>
+<tr><td><code>NAME @{k} path</code>, <code>NAME @?{k} path</code></td><td>one record by its key (through a hash index on disk); <code>@?</code> gives <code>_</code> when it is not there</td></tr>
+<tr><td><code>@{}&gt;&gt; path, r;</code></td><td>writes <code>r</code> under its key: replaces it, or adds it</td></tr>
+<tr><td><code>NAME @{k} path = _;</code></td><td>deletes the record with key <code>k</code></td></tr>
+<tr><td><code>NAME @[i] path</code>, <code>@[i]&gt;&gt; path, r;</code></td><td>record number <code>i</code>, read or changed in place</td></tr>
+</tbody></table></div>
+
+<h2 id="json">JSON</h2>
+<p>A JSON value stays text: each call finds a part of it and gives that part's text. Numbers become INT or FLOAT with <code>.int()</code> and <code>.float()</code>.</p>
+<pre class="nihil">name = (item.json("name") || "\"\"").json_text() || "";
+price = (item.json("price") || "0").float() || 0.0;
+tags = (item.json("tags") || "[]").json_items();
+&gt;&gt; name.json_quote();                                // back to a JSON string</pre>
+<div class="table-wrap"><table>
+<thead><tr><th>Call</th><th>Result</th></tr></thead>
+<tbody>
+<tr><td><code>s.json(key)</code></td><td><code>STRING?</code>: the text of the value of <code>key</code> in the object <code>s</code></td></tr>
+<tr><td><code>s.json_items()</code></td><td>ARRAY of STRING: the items of the array <code>s</code></td></tr>
+<tr><td><code>s.json_keys()</code>, <code>s.json_values()</code></td><td>the keys and the values of the object <code>s</code>, in order</td></tr>
+<tr><td><code>s.json_text()</code></td><td><code>STRING?</code>: the decoded text of the JSON string <code>s</code></td></tr>
+<tr><td><code>s.json_quote()</code></td><td><code>s</code> as a JSON string, with quotes and escapes</td></tr>
+<tr><td><code>x.to_json()</code>, <code>NAME.from_json(text)</code></td><td>any value (records included) to JSON, and a record from a JSON object</td></tr>
+</tbody></table></div>
+
+<h2 id="maps">Maps</h2>
+<pre class="nihil">age = {"ana": 30, "bob": 25};          // the types come from the first pair
+sales = {0: 0.0 ; 100000};             // empty, with room for 100,000 keys
+sales[k] = (sales[k] || 0.0) + q;      // m[k] is an optional
+age["bob"] = _;                        // deletes</pre>
+<div class="table-wrap"><table>
+<thead><tr><th>Call</th><th>Result</th></tr></thead>
+<tbody>
+<tr><td><code>m[k]</code></td><td>the value, as an optional (<code>_</code> when the key is not there)</td></tr>
+<tr><td><code>m[k] = v;</code>, <code>m[k] = _;</code></td><td>adds or replaces; deletes</td></tr>
+<tr><td><code>#m</code></td><td>how many keys</td></tr>
+<tr><td><code>m.keys()</code>, <code>m.values()</code></td><td>new ARRAYs, in the table's order (sort them when the order matters)</td></tr>
+<tr><td><code>m.contains(k)</code></td><td><code>BOOL</code></td></tr>
+</tbody></table></div>
+
+<h2 id="io">Input, output and files</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Write</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>&gt;&gt; x;</code>, <code>!&gt;&gt; x;</code></td><td>writes to the standard output, or to the standard error (no line break is added)</td></tr>
+<tr><td><code>&lt;&lt; x;</code></td><td>reads a line into <code>x</code>, converted to its type</td></tr>
+<tr><td><code>&gt;&gt;&gt; b;</code>, <code>&lt;&lt;&lt; b;</code></td><td>one raw byte out, or in (<code>-1</code> at the end)</td></tr>
+<tr><td><code>@ path</code>, <code>@? path</code></td><td>a whole file as text; <code>@?</code> gives <code>_</code> if it cannot be read</td></tr>
+<tr><td><code>@&gt;&gt; path, text;</code></td><td>replaces a file atomically (a crash leaves the old one or the new one)</td></tr>
+<tr><td><code>@+&gt;&gt; path, text;</code></td><td>appends to a file</td></tr>
+<tr><td><code>:: code;</code></td><td>ends the program, from anywhere, with an exit code</td></tr>
+<tr><td><code>... ms;</code></td><td>waits <code>ms</code> milliseconds</td></tr>
+</tbody></table></div>
+<p>The library also has directories and processes, a TCP server and HTTP (server and client), and
+protected calls that turn a runtime error into <code>_</code>: see §23–§25 of the SPEC.</p>
+
+<h2 id="conversions">Conversions</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Write</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>$x</code></td><td>the text of a number, a BOOL or records</td></tr>
+<tr><td><code>$bytes</code></td><td>a STRING from an ARRAY of INT (one byte each): <code>$[72, 105]</code> is <code>"Hi"</code></td></tr>
+<tr><td><code>.n</code></td><td>INT to FLOAT: <code>price * .count</code></td></tr>
+<tr><td><code>#f</code></td><td>FLOAT to INT, toward zero</td></tr>
+<tr><td><code>s.int()</code>, <code>s.float()</code></td><td>text to number, as an optional</td></tr>
+<tr><td><code>x || fallback</code></td><td>the value of an optional, or the fallback</td></tr>
+</tbody></table></div>
+
+<h2 id="std">The standard library (<code>std:</code>)</h2>
+<p>Libraries that ship inside the compiler, wherever your program is:</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Include</th><th>Gives</th></tr></thead>
+<tbody>
+<tr><td><code>@ "std:env.nihil";</code></td><td><code>env(key, default)</code>, <code>env_int(key, default)</code>: the <code>.env</code> file of the current folder, and over it the process's environment</td></tr>
+<tr><td><code>@ "std:json.nihil";</code></td><td><code>json_bool(b)</code>, <code>json_text(t)</code>, <code>json_text_or_null(t)</code>: helpers for writing JSON</td></tr>
+<tr><td><code>@ "std:mcp.nihil";</code></td><td>an MCP server over stdio for AI agents: define <code>mcp_tools()</code> and <code>mcp_call(name, arguments)</code>, then call <code>mcp_serve(name, version)</code>; <code>arg_int</code> and <code>arg_text</code> read the arguments. <code>tools("prefix")</code> builds the tool list from your methods</td></tr>
+</tbody></table></div>
+</div></main>
+<footer><div class="wrap row"><span>Nihil · MIT License</span><span><a href="index.html">nihil-lang.dev</a></span></div></footer>
+<script src="nihil.js"></script>
+</body>
+</html>

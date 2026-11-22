@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Learn Nihil</title>
+<meta name="description" content="Nihil in eleven short chapters: values, control without keywords, methods, arrays, optionals, maps, files, tables on disk and the standard library.">
+<link rel="icon" type="image/png" href="icon-64.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<nav class="top"><div class="wrap">
+  <a class="brand" href="index.html"><img src="icon-64.png" alt="">Nihil</a>
+  <a class="here" href="learn.html">Learn</a>
+  <a href="library.html">Library</a>
+  <a href="https://github.com/nihillang">GitHub</a>
+</div></nav>
+<main class="doc"><div class="wrap">
+<h1>Learn Nihil</h1>
+<p>Eleven short chapters. Every example is a complete program, and the output under it is what it prints.
+The full reference is <a href="https://github.com/nihillang/nihil/blob/main/SPEC.md">SPEC.md</a>.</p>
+<ol class="toc">
+<li><a href="#hello">Hello</a></li>
+<li><a href="#values">Values and types</a></li>
+<li><a href="#control">Conditions and loops</a></li>
+<li><a href="#methods">Methods</a></li>
+<li><a href="#arrays">Arrays, text and the library</a></li>
+<li><a href="#optionals">Optionals: the value that is not there</a></li>
+<li><a href="#maps">Maps</a></li>
+<li><a href="#files">Files and input</a></li>
+<li><a href="#tables">Tables on disk</a></li>
+<li><a href="#std">The standard library</a></li>
+<li><a href="#globals">Globals and locals: the one rule to remember</a></li>
+</ol>
+<h2 id="hello">1. Hello</h2>
+<p>Install Nihil (see the <a href="index.html#install">home page</a>), save this as <code>hello.nihil</code> and run <code>nihil run hello.nihil</code>. <code>&gt;&gt;</code> writes to the standard output and adds no line break of its own. <code>nihil hello.nihil</code> compiles it into a native executable, <code>./hello</code>, instead.</p>
+<pre class="nihil">&gt;&gt; &quot;Hello, Nihil!\n&quot;;</pre>
+<p class="out">Output:</p>
+<pre class="output">Hello, Nihil!</pre>
+<h2 id="values">2. Values and types</h2>
+<p>There are no declarations: a variable is created by its first assignment, and its type comes from the value and stays. The four basic types are INT, FLOAT, BOOL and STRING. Nothing converts implicitly: <code>$</code> makes text, <code>.n</code> turns an INT into a FLOAT, <code>#f</code> a FLOAT into an INT (and <code>#</code> of a STRING or an ARRAY is its length).</p>
+<pre class="nihil">count = 3;                      // INT
+price = 2.5;                    // FLOAT
+ready = true;                   // BOOL
+name = &quot;tea&quot;;                   // STRING
+total = price * .count;         // .n turns an INT into a FLOAT
+&gt;&gt; name + &quot;: &quot; + $count + &quot; x &quot; + $price + &quot; = &quot; + $total + &quot;\n&quot;;
+&gt;&gt; &quot;whole part: &quot; + $#total + &quot;\n&quot;;     // #f turns a FLOAT into an INT
+&gt;&gt; &quot;letters: &quot; + $#name + &quot;\n&quot;;         // # of a STRING is its length
+&gt;&gt; &quot;ready: &quot; + $ready + &quot;\n&quot;;           // $ turns a value into text
+n = &quot;42&quot;.int() || 0;                    // text to number (or 0 if it is not one)
+&gt;&gt; $(n + 1) + &quot;\n&quot;;</pre>
+<p class="out">Output:</p>
+<pre class="output">tea: 3 x 2.5 = 7.5
+whole part: 7
+letters: 3
+ready: true
+43</pre>
+<h2 id="control">3. Conditions and loops</h2>
+<p>There are no keywords: the expression before a <code>{</code> decides what the block does. A BOOL makes it an if, and <code>} || … {</code> continues as else if or else. An INT repeats the block that many times. A <code>*</code> before a BOOL makes it a while loop.</p>
+<pre class="nihil">x = 7;
+x &gt; 10 {
+    &gt;&gt; &quot;large\n&quot;;
+} || x &gt; 5 {
+    &gt;&gt; &quot;medium\n&quot;;
+} || {
+    &gt;&gt; &quot;small\n&quot;;
+}
+
+3 { &gt;&gt; &quot;hip &quot;; }                // an INT before { repeats the block
+&gt;&gt; &quot;hooray\n&quot;;
+
+i = 1;
+* i &lt;= 5 {                      // * is a while loop
+    &gt;&gt; $(i * i) + &quot; &quot;;
+    i = i + 1;
+}
+&gt;&gt; &quot;\n&quot;;</pre>
+<p class="out">Output:</p>
+<pre class="output">medium
+hip hip hip hooray
+1 4 9 16 25 </pre>
+<h2 id="methods">4. Methods</h2>
+<p>A method is a name, parameters and a block. Every parameter has a default, which gives its type, so calls may leave arguments out. <code>:</code> returns a value, and the type of the result is worked out from what is returned.</p>
+<pre class="nihil">// every parameter has a default, and the default gives its type
+greet(name = &quot;world&quot;, times = 1) {
+    times { &gt;&gt; &quot;Hello, &quot; + name + &quot;! &quot;; }
+    &gt;&gt; &quot;\n&quot;;
+}
+
+// &quot;:&quot; returns a value
+square(n = 0) { : n * n; }
+
+fib(n = 0) {
+    n &lt; 2 { : n; }
+    : fib(n - 1) + fib(n - 2);
+}
+
+greet();
+greet(&quot;Nihil&quot;, 2);
+&gt;&gt; $square(12) + &quot; &quot; + $fib(20) + &quot;\n&quot;;</pre>
+<p class="out">Output:</p>
+<pre class="output">Hello, world! 
+Hello, Nihil! Hello, Nihil! 
+144 6765</pre>
+<h2 id="arrays">5. Arrays, text and the library</h2>
+<p>An ARRAY holds values of one type; <code>[0 ; n]</code> makes <code>n</code> copies. The library is called on a value after a <code>.</code>, so its names never take one from your program. <code>$</code> of an ARRAY of INT makes text from its bytes, which is why <code>show</code> builds the text itself.</p>
+<pre class="nihil">// a method to show an ARRAY of INT ($ of an array of INT makes text from its bytes)
+show(v = [0]) {
+    parts = [&quot;&quot; ; #v];
+    i = 0;
+    * i &lt; #v { parts[i] = $v[i]; i = i + 1; }
+    : &quot;[&quot; + parts.join(&quot;, &quot;) + &quot;]&quot;;
+}
+
+nums = [5, 3, 8, 1];
+&gt;&gt; $#nums + &quot; numbers, the first is &quot; + $nums[0] + &quot;\n&quot;;
+nums = nums + [13];                     // joining makes a new array
+&gt;&gt; show(nums.sort()) + &quot;\n&quot;;
+&gt;&gt; &quot;sum &quot; + $nums.sum() + &quot;, max &quot; + $(nums.max() || 0) + &quot;\n&quot;;
+
+zeros = [0 ; 4];                        // 4 copies of 0
+zeros[2] = 9;
+&gt;&gt; show(zeros) + &quot;\n&quot;;
+&gt;&gt; $[72, 105] + &quot;\n&quot;;                   // bytes to text: Hi
+
+line = &quot;  pear, apple, fig &quot;;
+words = line.trim().split(&quot;, &quot;);        // an ARRAY of STRING
+&gt;&gt; words.sort().join(&quot; &lt; &quot;) + &quot;\n&quot;;
+&gt;&gt; line.trim().upper() + &quot;\n&quot;;
+&gt;&gt; $line.contains(&quot;apple&quot;) + &quot;\n&quot;;</pre>
+<p class="out">Output:</p>
+<pre class="output">4 numbers, the first is 5
+[1, 3, 5, 8, 13]
+sum 30, max 13
+[0, 0, 9, 0]
+Hi
+apple &lt; fig &lt; pear
+PEAR, APPLE, FIG
+true</pre>
+<h2 id="optionals">6. Optionals: the value that is not there</h2>
+<p><code>_</code> is the absence of a value. A variable created with a <code>?</code> may hold it; an ordinary one never does. The only way to take the value out is <code>||</code> with a fallback, so a missing value can never be used by accident.</p>
+<pre class="nihil">// &quot;_&quot; is the value that is not there; a &quot;?&quot; when a variable is created lets it hold _
+find(v = [0], x = 0) {
+    i = 0;
+    * i &lt; #v {
+        v[i] == x { : i; }
+        i = i + 1;
+    }
+    : _;                                // so find returns INT?
+}
+
+nums = [5, 8, 13];
+at? = find(nums, 8);
+&gt;&gt; at;                                  // an optional prints its value, or _
+&gt;&gt; &quot;\n&quot;;
+at = find(nums, 99);
+at == _ { &gt;&gt; &quot;99 is not there\n&quot;; }
+pos = find(nums, 13) || -1;             // || takes the value, or the fallback
+&gt;&gt; &quot;13 is at &quot; + $pos + &quot;\n&quot;;
+n = &quot;12x&quot;.int() || 0;                   // the library returns optionals too
+&gt;&gt; $n + &quot;\n&quot;;</pre>
+<p class="out">Output:</p>
+<pre class="output">1
+99 is not there
+13 is at 2
+0</pre>
+<h2 id="maps">7. Maps</h2>
+<p>A MAP holds values by key, in memory. Reading a key gives an optional, because the key may not be there; assigning <code>_</code> deletes it.</p>
+<pre class="nihil">age = {&quot;ana&quot;: 30, &quot;bob&quot;: 25};
+age[&quot;carla&quot;] = 41;                      // adds or replaces
+age[&quot;bob&quot;] = _;                         // deletes
+&gt;&gt; $#age + &quot; people\n&quot;;
+&gt;&gt; &quot;ana is &quot; + $(age[&quot;ana&quot;] || 0) + &quot;\n&quot;;
+&gt;&gt; &quot;dan is &quot; + $(age[&quot;dan&quot;] || 0) + &quot;\n&quot;;   // m[k] is _ when the key is not there
+
+// counting words
+counts = {&quot;&quot;: 0 ; 16};                  // an empty map of STRING to INT
+words = &quot;the cat and the hat and the bat&quot;.split(&quot; &quot;);
+i = 0;
+* i &lt; #words {
+    w = words[i];
+    counts[w] = (counts[w] || 0) + 1;
+    i = i + 1;
+}
+keys = counts.keys().sort();
+i = 0;
+* i &lt; #keys { &gt;&gt; keys[i] + &quot;=&quot; + $(counts[keys[i]] || 0) + &quot; &quot;; i = i + 1; }
+&gt;&gt; &quot;\n&quot;;</pre>
+<p class="out">Output:</p>
+<pre class="output">2 people
+ana is 30
+dan is 0
+and=2 bat=1 cat=1 hat=1 the=3 </pre>
+<h2 id="files">8. Files and input</h2>
+<p><code>@</code> reads a whole file, <code>@&gt;&gt;</code> replaces it atomically and <code>@+&gt;&gt;</code> appends to it. <code>@?</code> gives <code>_</code> instead of an error when the file is not there. <code>&lt;&lt;</code> reads a line from the input into a variable of any basic type. (The output below is with <code>Ana</code> typed as the input.)</p>
+<pre class="nihil">@&gt;&gt; &quot;notes.txt&quot;, &quot;first line\n&quot;;        // write a file (atomically)
+@+&gt;&gt; &quot;notes.txt&quot;, &quot;second line\n&quot;;      // append to it
+text = @ &quot;notes.txt&quot;;                   // read it whole
+lines = text.trim().split(&quot;\n&quot;);
+&gt;&gt; $#lines + &quot; lines; the last: &quot; + lines[#lines - 1] + &quot;\n&quot;;
+missing? = @? &quot;nope.txt&quot;;               // @? gives _ instead of an error
+missing == _ { &gt;&gt; &quot;nope.txt is not there\n&quot;; }
+
+&gt;&gt; &quot;Your name? &quot;;
+name = &quot;&quot;;
+&lt;&lt; name;                                // reads a line from the input
+&gt;&gt; &quot;Hello, &quot; + name + &quot;!\n&quot;;</pre>
+<p class="out">Output:</p>
+<pre class="output">2 lines; the last: second line
+nope.txt is not there
+Your name? Hello, Ana!</pre>
+<h2 id="tables">9. Tables on disk</h2>
+<p>A data model describes a record of fixed width; <code>#</code> marks its key. A table is a plain text file, one record per line, with a hash index on disk for reading, writing and deleting by key. Queries like <code>where</code>, <code>sort</code> and <code>sum</code> take an expression of the fields.</p>
+<pre class="nihil">PRODUCT = @[#code: INT(4); name: STRING(12); price: FLOAT(6)];   // a data model; # marks the key
+FILE = &quot;products.dat&quot;;
+
+@{}&gt;&gt; FILE, PRODUCT(1, &quot;Coffee&quot;, 12.5);    // write by key: adds it, or replaces it
+@{}&gt;&gt; FILE, PRODUCT(2, &quot;Tea&quot;, 8.0);
+@{}&gt;&gt; FILE, PRODUCT(3, &quot;Cake&quot;, 15.0);
+
+p = PRODUCT @{2} FILE;                      // one record by its key
+p.price = 7.5;
+@{}&gt;&gt; FILE, p;
+
+rows = PRODUCT @ FILE;                      // the whole table
+&gt;&gt; $rows.where(price &lt; 13.0).sort(name);    // a query; $ turns records into table lines
+&gt;&gt; &quot;total: &quot; + $rows.sum(price) + &quot;\n&quot;;
+PRODUCT @{3} FILE = _;                      // delete by key
+&gt;&gt; $#(PRODUCT @ FILE) + &quot; records left\n&quot;;</pre>
+<p class="out">Output:</p>
+<pre class="output">   1Coffee        12.5
+   2Tea            7.5
+total: 35.0
+2 records left</pre>
+<h2 id="std">10. The standard library</h2>
+<p>Libraries that ship with the compiler are included with <code>@ "std:name.nihil";</code>: <code>std:env.nihil</code> (configuration from <code>.env</code> and the environment), <code>std:json.nihil</code> (writing JSON) and <code>std:mcp.nihil</code> (an MCP server for AI agents). Reading JSON is built into the library: a JSON value stays text, and each call takes a part of it.</p>
+<pre class="nihil">@ &quot;std:env.nihil&quot;;                          // libraries that ship with the compiler
+@ &quot;std:json.nihil&quot;;
+
+port = env_int(&quot;PORT&quot;, 8080);               // the .env file or the environment, or the default
+user = env(&quot;USER&quot;, &quot;nobody&quot;);
+
+item = &quot;{\&quot;name\&quot;: \&quot;Tea\&quot;, \&quot;price\&quot;: 7.5, \&quot;tags\&quot;: [\&quot;hot\&quot;, \&quot;green\&quot;]}&quot;;
+name = (item.json(&quot;name&quot;) || &quot;\&quot;\&quot;&quot;).json_text() || &quot;&quot;;
+price = (item.json(&quot;price&quot;) || &quot;0&quot;).float() || 0.0;
+tags = (item.json(&quot;tags&quot;) || &quot;[]&quot;).json_items();
+&gt;&gt; name + &quot; costs &quot; + $price + &quot;, &quot; + $#tags + &quot; tags\n&quot;;
+&gt;&gt; &quot;{\&quot;port\&quot;: &quot; + $port + &quot;, \&quot;ok\&quot;: &quot; + json_bool(port &gt; 0) + &quot;}\n&quot;;</pre>
+<p class="out">Output:</p>
+<pre class="output">Tea costs 7.5, 2 tags
+{&quot;port&quot;: 8080, &quot;ok&quot;: true}</pre>
+<h2 id="globals">11. Globals and locals: the one rule to remember</h2>
+<p>Variables assigned at the top level are <b>globals</b>, and a name that belongs to a global always means that global, even inside a method: there, <code>total = …</code> changes the global instead of creating a local. Give locals names no global uses. Only a parameter may share a global's name, and then it hides the global inside its method.</p>
+<pre class="nihil">total = 0;                      // a global: assigned at the top level
+
+add(n = 0) {
+    total = total + n;          // changes the global: a name that is global is always the global
+}
+
+reset_counter() {
+    i = 0;                      // a local: no global is called i
+    * i &lt; 3 { i = i + 1; }
+}
+
+add(5);
+add(7);
+&gt;&gt; &quot;total: &quot; + $total + &quot;\n&quot;;   // 12
+
+// a parameter may have a global&#x27;s name, and then it hides the global inside its method
+double(total = 0) { : total * 2; }
+&gt;&gt; $double(21) + &quot; &quot; + $total + &quot;\n&quot;;</pre>
+<p class="out">Output:</p>
+<pre class="output">total: 12
+42 12</pre>
+<h2 id="next">Next</h2>
+<p>The <a href="library.html">library reference</a> lists every call on texts, arrays, tables, JSON and maps.
+Questions: <a href="mailto:contact@nihil-lang.dev">contact@nihil-lang.dev</a>.</p>
+</div></main>
+<footer><div class="wrap row"><span>Nihil · MIT License</span><span><a href="index.html">nihil-lang.dev</a></span></div></footer>
+<script src="nihil.js"></script>
+</body>
+</html>
