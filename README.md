@@ -82,7 +82,26 @@ editor:
    2Tea            7.5
 ```
 
-## Quick start
+## Install
+
+```sh
+curl -fsSL https://nihil-lang.dev/install.sh | sh
+```
+
+It installs the latest release in `~/.nihil` and links `~/.local/bin/nihil`, with
+no sudo. Supported: **Linux on x86_64**, and **macOS on Apple silicon** with the
+Xcode Command Line Tools (`xcode-select --install`). On Windows, use WSL.
+
+```sh
+printf '%s\n' '>> "Hello, Nihil!\n";' > hello.nihil
+nihil run hello.nihil        # compile and run: Hello, Nihil!
+nihil hello.nihil            # or compile into ./hello, a native executable
+nihil version
+```
+
+Releases and checksums: [github.com/nihillang/nihil/releases](https://github.com/nihillang/nihil/releases).
+
+## Building from source
 
 You need Linux on x86_64, `nasm`, `ld` (binutils) and `make`. `python3` is only
 used by `make floatcheck` and the IDE.
@@ -90,12 +109,14 @@ used by `make floatcheck` and the IDE.
 ```sh
 git clone https://github.com/nihillang/nihil.git && cd nihil
 make                                        # both compilers, in build/
-echo '>> "Hello, Nihil!\n";' > hello.nihil
+printf '%s\n' '>> "Hello, Nihil!\n";' > hello.nihil
 ./nihilc1.sh hello.nihil hello && ./hello   # Hello, Nihil!
 ```
 
 On macOS (Apple silicon), `./nihilc1.sh` builds native executables through a
 translator to ARM64 (`macos/nihil`; see [docs/macos-arm64.md](docs/macos-arm64.md)).
+A Mac builds its first compiler from the Linux one (the release workflow does it in
+`.github/workflows/release.yml`), and rebuilds it by itself after that.
 
 `./nihilc1.sh` is the current compiler. `build/nihilc`, the one in assembly, is
 frozen and only bootstraps; it accepts the language as it was when it first

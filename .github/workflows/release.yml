@@ -1,0 +1,129 @@
+# A release: on a tag vX.Y.Z (the same as VERSION), the packages for Linux x86_64 and macOS
+# arm64 are built, tested and published on GitHub Releases, where site/install.sh finds them.
+#
+# The Mac's compiler comes from the Linux one: stage 1 built on Linux emits its own x86-64 code
+# with a map, and the macOS job translates it to ARM64 (docs/macos-arm64.md). The macOS job then
+# checks the fixed point (the translated compiler emits the same bytes as the Linux one) and
+# runs the test suite natively.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: The tag is the version in VERSION
+        run: test "v$(cat VERSION)" = "$GITHUB_REF_NAME"
+
+      - name: Install nasm
+        run: sudo apt-get update -q && sudo apt-get install -y -q nasm
+
+      - name: Build and test
+        run: make && make test1 && make fixedpoint
+
+      - name: The compiler's own code and map, for the Mac
+        run: printf -- '-map %s/src1/nihilc1.nihil\n' "$PWD" | build/nihilc1 > build/nihilc1.x86 2> build/nihilc1.map
+
+      - name: Package
+        run: dist/package.sh linux-x86_64 dist/out build/nihilc1
+
+      - name: The package installs and compiles a program
+        run: |
+          NIHIL_URL="file://$PWD/dist/out/nihil-linux-x86_64.tar.gz" NIHIL_HOME="$RUNNER_TEMP/nihil" NIHIL_BIN="$RUNNER_TEMP/bin" sh site/install.sh
+          printf '%s\n' '@ "std:json.nihil";' '>> json_bool(true) + " Hello, Nihil!\n";' > "$RUNNER_TEMP/hello.nihil"
+          test "$("$RUNNER_TEMP/bin/nihil" run "$RUNNER_TEMP/hello.nihil")" = "true Hello, Nihil!"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: |
+            dist/out/
+            build/nihilc1.x86
+            build/nihilc1.map
+            build/runtime.nihil
+            build/prelude_text.nihil
+            build/std_text.nihil
+
+  macos:
+    needs: linux
+    runs-on: macos-14
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux
+          path: linux
+
+      - name: The compiler translated to ARM64
+        run: |
+          mkdir -p build/macos
+          cp linux/build/runtime.nihil linux/build/prelude_text.nihil linux/build/std_text.nihil build/
+          python3 macos/translate.py linux/build/nihilc1.x86 linux/build/nihilc1.map build/macos/nihilc1.s
+          clang -O2 -arch arm64 -Wno-unused-result -c arm64/rt.c -o build/macos/rt.o
+          clang -arch arm64 -o build/macos/nihilc1-native build/macos/nihilc1.s build/macos/rt.o
+
+      - name: Fixed point (the Mac's compiler emits the same bytes as Linux's)
+        run: |
+          printf -- '-map %s/src1/nihilc1.nihil\n' "$PWD" | build/macos/nihilc1-native > build/macos/c2.x86 2> /dev/null
+          cmp linux/build/nihilc1.x86 build/macos/c2.x86
+
+      - name: Tests, natively
+        run: |
+          bash macos/test-native.sh | tee build/macos/tests.txt
+          grep -q ' 0 failed' build/macos/tests.txt
+
+      - name: Package
+        run: dist/package.sh macos-arm64 dist/out build/macos/nihilc1-native build/macos/rt.o
+
+      - name: The package installs and compiles a program
+        run: |
+          NIHIL_URL="file://$PWD/dist/out/nihil-macos-arm64.tar.gz" NIHIL_HOME="$RUNNER_TEMP/nihil" NIHIL_BIN="$RUNNER_TEMP/bin" sh site/install.sh
+          printf '%s\n' '@ "std:json.nihil";' '>> json_bool(true) + " Hello, Nihil!\n";' > "$RUNNER_TEMP/hello.nihil"
+          test "$("$RUNNER_TEMP/bin/nihil" run "$RUNNER_TEMP/hello.nihil")" = "true Hello, Nihil!"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/out/
+
+  publish:
+    needs: [linux, macos]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: "The release notes, from this version's part of CHANGELOG.md"
+        run: |
+          awk -v v="## $GITHUB_REF_NAME" '$0 == v { on = 1; next } /^## / { on = 0 } on' CHANGELOG.md > notes.md
+          {
+            echo
+            echo '## Install'
+            echo
+            echo '```sh'
+            echo 'curl -fsSL https://nihil-lang.dev/install.sh | sh'
+            echo '```'
+            echo
+            echo 'Linux x86_64, and macOS on Apple silicon (with the Xcode Command Line Tools).'
+          } >> notes.md
+          cat notes.md
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --verify-tag --title "Nihil $GITHUB_REF_NAME" --notes-file notes.md \
+            artifacts/linux/dist/out/* artifacts/macos/*

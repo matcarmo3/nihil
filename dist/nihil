@@ -1,0 +1,88 @@
+#!/bin/sh
+# nihil — the command line of the Nihil compiler (https://nihil-lang.dev)
+#
+#   nihil PROGRAM.nihil [OUT]        compile into a native executable (OUT: PROGRAM without .nihil)
+#   nihil run PROGRAM.nihil [ARG…]   compile into a temporary file and run it
+#   nihil version                    the version installed
+#
+#   NIHIL_O0=1   no optimizations
+#
+# The same script for every platform: on Linux x86_64 the compiler writes the executable itself;
+# on macOS (Apple silicon) its x86-64 code is translated to ARM64 and linked by clang with the
+# runtime (docs/macos-arm64.md), which needs the Xcode Command Line Tools (clang, objdump, python3).
+set -eu
+
+# where this installation is: bin/nihil, resolving the symbolic link that put it on the PATH
+self=$0
+while [ -L "$self" ]; do
+    link=$(readlink "$self")
+    case $link in
+        /*) self=$link ;;
+        *) self=$(dirname "$self")/$link ;;
+    esac
+done
+home=$(cd "$(dirname "$self")/.." && pwd -P)
+lib=$home/libexec/nihil
+
+usage() {
+    echo "usage: nihil PROGRAM.nihil [OUT] | nihil run PROGRAM.nihil [ARG…] | nihil version" >&2
+    exit 2
+}
+
+# compile SRC into OUT
+compile() {
+    src=$1
+    out=$2
+    [ -f "$src" ] && [ -r "$src" ] || { echo "nihil: could not open $src" >&2; exit 1; }
+    option=""
+    [ "${NIHIL_O0:-0}" = 1 ] && option="-O0 "
+    work=$(mktemp -d)
+    trap 'rm -rf "$work"' EXIT
+    if [ -x "$lib/nihilc1-native" ]; then
+        # macOS: the compiler emits x86-64 code and a map; translate.py makes ARM64 assembly of it
+        if ! printf '%s\n' "$option-map $src" | "$lib/nihilc1-native" > "$work/p.x86" 2> "$work/p.map"; then
+            grep -v '^nihil-map' "$work/p.map" >&2 || true
+            exit 1
+        fi
+        grep -v '^nihil-map' "$work/p.map" >&2 || true
+        python3 "$lib/translate.py" "$work/p.x86" "$work/p.map" "$work/p.s" 2> "$work/t.err" || { cat "$work/t.err" >&2; exit 1; }
+        clang -arch arm64 -o "$out" "$work/p.s" "$lib/rt.o"
+    else
+        # Linux x86_64: the compiler writes the ELF executable to its standard output
+        printf '%s\n' "$option$src" | "$lib/nihilc1" > "$work/p.out" || exit 1
+        cat "$work/p.out" > "$out" 2>/dev/null && chmod 755 "$out" 2>/dev/null || { echo "nihil: could not create $out" >&2; exit 1; }
+    fi
+    rm -rf "$work"
+    trap - EXIT
+}
+
+[ $# -ge 1 ] || usage
+case $1 in
+    version|--version|-v)
+        echo "nihil $(cat "$home/VERSION" 2>/dev/null || echo unknown)"
+        ;;
+    help|--help|-h)
+        sed -n '2,8p' "$self" | sed 's/^# \{0,1\}//'
+        ;;
+    run)
+        [ $# -ge 2 ] || usage
+        src=$2
+        shift 2
+        dir=$(mktemp -d)
+        compile "$src" "$dir/program"
+        set +e
+        "$dir/program" "$@"
+        code=$?
+        rm -rf "$dir"
+        exit $code
+        ;;
+    -*)
+        usage
+        ;;
+    *)
+        src=$1
+        out=${2:-${1%.nihil}}
+        [ "$out" != "$src" ] || out=$src.out
+        compile "$src" "$out"
+        ;;
+esac
