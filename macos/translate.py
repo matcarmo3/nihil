@@ -158,13 +158,24 @@ class Translator:
         o = int(off, 0) if off else 0
         return (self.reg(base), o, self.reg(index) if index else None, int(scale) if scale else 1)
 
+    def addr_reg(self, base, off):
+        """x15 = base + off, for an address ARM cannot reach with an immediate. x15 holds nothing
+        else: x16 and x17 carry values (a constant to store, an operand), and computing the address
+        in them overwrote the value before the store; a local past the 32nd of a method (offset
+        below -256) then got its address instead of its value (e.g. a query's sum started there)"""
+        if -4095 <= off <= 4095:
+            self.add_imm('x15', base, off)
+        else:
+            self.imm('x15', off)
+            self.emit(f'add x15, {base}, x15')
+        return 'x15'
+
     def mem(self, operand, size=8):
-        """an ARM memory operand for a load/store of size bytes, computing into x16 when needed"""
+        """an ARM memory operand for a load/store of size bytes, computing the address into x15 when needed"""
         base, off, index, scale = self.address(operand)
         if index:
             if off:
-                self.add_imm('x16', base, off)
-                base = 'x16'
+                base = self.addr_reg(base, off)
             shift = {1: 0, 2: 1, 4: 2, 8: 3}[scale]
             if shift and shift != {8: 3, 1: 0, 4: 2, 2: 1}[size]:
                 self.emit(f'add x17, {base}, {index}, lsl #{shift}')
@@ -174,8 +185,7 @@ class Translator:
             return f'[{base}, #{off}]' if off else f'[{base}]'
         if -256 <= off <= 255:
             return ('U', f'[{base}, #{off}]')
-        self.add_imm('x16', base, off)
-        return '[x16]'
+        return f'[{self.addr_reg(base, off)}]'
 
     def load(self, dst, operand, size=8, signed=False):
         m = self.mem(operand, size)
