@@ -5,7 +5,7 @@
   </picture>
 </p>
 
-<p align="center"><a href="https://github.com/wnmonzine/nihil/actions/workflows/tests.yml"><img src="https://github.com/wnmonzine/nihil/actions/workflows/tests.yml/badge.svg" alt="tests"></a></p>
+<p align="center"><a href="https://github.com/nihillang/nihil/actions/workflows/tests.yml"><img src="https://github.com/nihillang/nihil/actions/workflows/tests.yml/badge.svg" alt="tests"></a></p>
 
 # Nihil
 
@@ -26,7 +26,7 @@ there.
 - **Memory is managed.** A conservative garbage collector lives in the small
   runtime embedded in each executable. A "hello world" is 6 KB.
 
-The full specification is in [SPEC.md](SPEC.md).
+The full specification is in [SPEC.md](SPEC.md). Website: [nihil-lang.dev](https://nihil-lang.dev).
 
 ## A taste
 
@@ -88,11 +88,14 @@ You need Linux on x86_64, `nasm`, `ld` (binutils) and `make`. `python3` is only
 used by `make floatcheck` and the IDE.
 
 ```sh
-git clone https://github.com/wnmonzine/nihil.git && cd nihil
+git clone https://github.com/nihillang/nihil.git && cd nihil
 make                                        # both compilers, in build/
 echo '>> "Hello, Nihil!\n";' > hello.nihil
 ./nihilc1.sh hello.nihil hello && ./hello   # Hello, Nihil!
 ```
+
+On macOS (Apple silicon), `./nihilc1.sh` builds native executables through a
+translator to ARM64 (`macos/nihil`; see [docs/macos-arm64.md](docs/macos-arm64.md)).
 
 `./nihilc1.sh` is the current compiler. `build/nihilc`, the one in assembly, is
 frozen and only bootstraps; it accepts the language as it was when it first
@@ -175,6 +178,11 @@ make gcstress        # the suite and the fixed point with a collection every 256
 ```
 
 GitHub Actions runs all of them on every push, on a clean Ubuntu.
+
+## Contributing and security
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). To report a vulnerability, write to
+security@nihil-lang.dev ([SECURITY.md](SECURITY.md)).
 
 ## License
 
