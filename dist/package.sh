@@ -1,9 +1,11 @@
 #!/bin/sh
 # dist/package.sh — builds a release package of Nihil for one platform:
 #
-#   dist/package.sh linux-x86_64 OUTDIR NIHILC1
-#   dist/package.sh macos-arm64  OUTDIR NIHILC1_NATIVE RT_O
+#   dist/package.sh linux-x86_64 OUTDIR NIHILC1 IDE_SERVER
+#   dist/package.sh macos-arm64  OUTDIR NIHILC1_NATIVE RT_O IDE_SERVER
 #
+# IDE_SERVER is ide/server.nihil compiled for the platform (`nihil ide`); with the IDE go its
+# page, SPEC.md and the examples, in share/nihil.
 # writes OUTDIR/nihil-PLATFORM.tar.gz (the name stays the same in every release, so
 # releases/latest/download/nihil-PLATFORM.tar.gz is always the newest) and its .sha256.
 # Inside: nihil-VERSION/{bin/nihil, libexec/nihil/…, VERSION, LICENSE, README.md, CHANGELOG.md}.
@@ -17,19 +19,28 @@ mkdir -p "$outdir"
 stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT
 root=$stage/nihil-$version
-mkdir -p "$root/bin" "$root/libexec/nihil"
+mkdir -p "$root/bin" "$root/libexec/nihil" "$root/share/nihil/ide"
 cp dist/nihil "$root/bin/nihil"
 chmod 755 "$root/bin/nihil"
 cp VERSION LICENSE README.md CHANGELOG.md "$root/"
+cp SPEC.md "$root/share/nihil/"
+cp -R ide/static "$root/share/nihil/ide/static"
+mkdir -p "$root/share/nihil/examples"
+cp examples/*.nihil "$root/share/nihil/examples/"
+cp -R examples/learn "$root/share/nihil/examples/learn"
+rm -f "$root/share/nihil/examples/learn/"*.dat* "$root/share/nihil/examples/learn/notes.txt"
 case $platform in
     linux-x86_64)
+        [ $# -ge 4 ] || { echo "linux-x86_64 needs NIHILC1 and IDE_SERVER" >&2; exit 2; }
         cp "$3" "$root/libexec/nihil/nihilc1"
-        chmod 755 "$root/libexec/nihil/nihilc1"
+        cp "$4" "$root/libexec/nihil/ide-server"
+        chmod 755 "$root/libexec/nihil/nihilc1" "$root/libexec/nihil/ide-server"
         ;;
     macos-arm64)
-        [ $# -ge 4 ] || { echo "macos-arm64 needs NIHILC1_NATIVE and RT_O" >&2; exit 2; }
+        [ $# -ge 5 ] || { echo "macos-arm64 needs NIHILC1_NATIVE, RT_O and IDE_SERVER" >&2; exit 2; }
         cp "$3" "$root/libexec/nihil/nihilc1-native"
-        chmod 755 "$root/libexec/nihil/nihilc1-native"
+        cp "$5" "$root/libexec/nihil/ide-server"
+        chmod 755 "$root/libexec/nihil/nihilc1-native" "$root/libexec/nihil/ide-server"
         cp "$4" "$root/libexec/nihil/rt.o"
         cp macos/translate.py "$root/libexec/nihil/translate.py"
         ;;

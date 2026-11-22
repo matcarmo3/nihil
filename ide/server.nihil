@@ -2,6 +2,7 @@
 // ide/server.nihil — the Nihil IDE server, written in Nihil (it replaces server.py).
 //
 //   make ide        (builds build/ide-server)      then   ./build/ide-server
+//   nihil ide       an installed Nihil (dist/nihil): the workspace is ~/Nihil
 //
 // Open http://127.0.0.1:8730 (through an SSH tunnel from another machine). The server
 // keeps a list of projects (folders), lists their programs and tables, saves files,
@@ -17,8 +18,16 @@ RUNS_DIR = "";                  // build/runs: the programs and their output (no
                                 // another user could put a link with the name before us)
 SKIP = ["build", "node_modules", "__pycache__", "venv", "gerado_antes"];
 
-ROOT = "";                      // the Nihil repository (the folder the server starts in)
+ROOT = "";                      // the Nihil repository (the folder the server starts in), or the workspace
 HOME = "";
+// started by `nihil ide` from an installed Nihil (NIHIL_IDE_INSTALL): ROOT is then the user's
+// workspace (~/Nihil), a project like any other, and the compiler, the page, the SPEC and the
+// examples come from the installation
+REPO = true;
+INSTALL = "";
+COMPILER = "";                  // nihilc1.sh in the repository, bin/nihil when installed
+STATIC_DIR = "";                // the page
+DOCS = "";                      // where SPEC.md and examples/ are
 // a secret drawn at every start: the page carries it and sends it with every /api/ call, so a
 // page of another site (which cannot read this page) cannot use the API
 TOKEN = "";
@@ -98,7 +107,8 @@ projects_json() {
     i = 0;
     * i < #ps {
         name = base_name(ps[i]);
-        ps[i] == ROOT { name = "nihil (the language)"; }
+        ps[i] == ROOT && REPO { name = "nihil (the language)"; }
+        ps[i] == ROOT && !REPO { name = "Nihil (workspace)"; }
         parts[i] = "{\"name\": " + q(name) + ", \"path\": " + q(ps[i]) + ", \"ok\": " + $ps[i].is_dir() + "}";
         i = i + 1;
     }
@@ -180,7 +190,7 @@ DIRS = ["" ; 0];                // the folders walked (empty ones too), relative
 // the folders that are listed and can be saved: the whole project, or for the language
 // repository only the workspace and the examples (its sources are not edited from here)
 roots_of(project = "") {
-    project == ROOT { : ["ide/workspace", "examples"]; }
+    REPO && project == ROOT { : ["ide/workspace", "examples"]; }
     : [""];
 }
 
@@ -188,13 +198,13 @@ roots_of(project = "") {
 // only inside ide/workspace or examples
 folder_ok(project = "", rel = "") {
     !safe_rel(rel) || rel == "build" || rel.starts_with("build/") { : false; }
-    project != ROOT { : true; }
+    project != ROOT || !REPO { : true; }
     : rel.starts_with("ide/workspace/") || rel.starts_with("examples/");
 }
 
 editable(project = "", rel = "") {
     !safe_rel(rel) || !rel.ends_with(".nihil") || rel.starts_with("build/") { : false; }
-    project != ROOT { : true; }
+    project != ROOT || !REPO { : true; }
     : rel.starts_with("ide/workspace/") || rel.starts_with("examples/");
 }
 
@@ -501,7 +511,7 @@ COMPILE_ERRORS = "";        // a JSON array
 // compiles project/rel into bin; true if it worked
 compile(project = "", rel = "", bin = "", optimize = true, base = "") {
     t0 = now_ms();
-    cmd = [ROOT + "/nihilc1.sh", rel, bin];
+    cmd = [COMPILER, rel, bin];
     !optimize { cmd = ["env", "NIHIL_O0=1"] + cmd; }
     p? = cmd.start(base + ".cout", base + ".cerr", project);
     code = -1;
@@ -688,9 +698,9 @@ claude_prompt(project = "", shell = false) {
     run = "You cannot run commands: the IDE compiles and runs the programs (the user presses Run). ";
     shell { run = "You may run shell commands on this Mac (Bash, starting in the project folder; long ones in the background, "
                   + "which the IDE shows live). Say what you run, keep to the project, and do not change anything outside it "
-                  + "unless asked. A Nihil program is compiled with " + ROOT + "/nihilc1.sh FILE.nihil OUTPUT. "; }
+                  + "unless asked. A Nihil program is compiled with " + COMPILER + " FILE.nihil OUTPUT. "; }
     : "You are working inside the Nihil IDE, in the project folder " + project + ". Nihil is a small programming language "
-      + "without keywords (symbols only); its specification is " + ROOT + "/SPEC.md and there are examples in " + ROOT
+      + "without keywords (symbols only); its specification is " + DOCS + "/SPEC.md and there are examples in " + DOCS
       + "/examples: read the parts of the SPEC you need before you write or explain Nihil code, and do not assume it works "
       + "like another language. The user's message may be followed by an <ide> block with what is open in the IDE: the "
       + "active file and the cursor, the selected text, the open tabs, unsaved text and the last compile errors; \"this\" "
@@ -740,7 +750,7 @@ claude_json(project = "", body = "") {
     mode == "auto" { pm = "auto"; }
     model = (body.json("model") || "\"\"").json_text() || "";
     // reading and searching inside the project are allowed by default; outside it, only the SPEC and examples
-    tools = ["Read(./**)", "Read(/" + ROOT + "/SPEC.md)", "Read(/" + ROOT + "/examples/**)"];
+    tools = ["Read(./**)", "Read(/" + DOCS + "/SPEC.md)", "Read(/" + DOCS + "/examples/**)"];
     // MCP: the servers the project's .env trusts in every mode (CLAUDE_MCP=mcp__a mcp__b, for
     // servers that only read); other servers when the tab allowed them ("allow": "mcp__server
     // mcp__other", from the button on a refusal)
@@ -874,7 +884,7 @@ activity_json() {
 send_static(c = 0, name = "") {
     ok = #name > 0 && !name.contains("..") && !name.contains("/");
     t? = "";
-    ok { t = @? (ROOT + "/ide/static/" + name); }
+    ok { t = @? (STATIC_DIR + "/" + name); }
     !ok || t == _ { c.respond(404, "application/json", "{\"error\": \"not found\"}"); :; }
     kind = "application/octet-stream";
     name.ends_with(".html") { kind = "text/html; charset=utf-8"; }
@@ -1031,20 +1041,39 @@ main() {
         env[i].starts_with("HOME=") { HOME = env[i].slice(5); }
         env[i].starts_with("NIHIL_IDE_PORT=") { PORT = env[i].slice(15).int() || PORT; }
         env[i].starts_with("NIHIL_IDE_CLAUDE_DIR=") { CLAUDE_DIR = env[i].slice(21); }
+        env[i].starts_with("NIHIL_IDE_INSTALL=") { INSTALL = env[i].slice(18); }
+        env[i].starts_with("NIHIL_IDE_ROOT=") { ROOT = env[i].slice(15); }
         i = i + 1;
     }
     #CLAUDE_DIR == 0 { CLAUDE_DIR = HOME + "/.claude-ide"; }
-    !(ROOT + "/nihilc1.sh").is_file() { !>> "nihil ide: start it in the Nihil repository (no nihilc1.sh in " + ROOT + ")\n"; :: 1; }
     MAC = "/System/Library/CoreServices/SystemVersion.plist".is_file();
-    PROJECTS_FILE = ROOT + "/ide/projects.txt";
     TOKEN = ((@ "/proc/sys/kernel/random/uuid") + (@ "/proc/sys/kernel/random/uuid")).replace("\n", "").replace("-", "");
-    (ROOT + "/ide/workspace").make_dir();
-    RUNS_DIR = ROOT + "/build/runs";
+    #INSTALL > 0 {
+        REPO = false;
+        COMPILER = INSTALL + "/bin/nihil";
+        STATIC_DIR = INSTALL + "/share/nihil/ide/static";
+        DOCS = INSTALL + "/share/nihil";
+        !COMPILER.is_file() { !>> "nihil ide: no compiler in " + INSTALL + "/bin\n"; :: 1; }
+        ROOT.make_dir();
+        (ROOT + "/.nihil-ide").make_dir();
+        PROJECTS_FILE = ROOT + "/.nihil-ide/projects.txt";
+        RUNS_DIR = ROOT + "/.nihil-ide/runs";
+    } || {
+        COMPILER = ROOT + "/nihilc1.sh";
+        STATIC_DIR = ROOT + "/ide/static";
+        DOCS = ROOT;
+        !COMPILER.is_file() { !>> "nihil ide: start it in the Nihil repository (no nihilc1.sh in " + ROOT + ")\n"; :: 1; }
+        PROJECTS_FILE = ROOT + "/ide/projects.txt";
+        (ROOT + "/ide/workspace").make_dir();
+        RUNS_DIR = ROOT + "/build/runs";
+    }
     RUNS_DIR.make_dir();
     s? = PORT.listen();
     s == _ { !>> "nihil ide: port " + $PORT + " is taken\n"; :: 1; }
     srv = s || -1;
-    >> "Nihil IDE on http://127.0.0.1:" + $PORT + "  (repository: " + ROOT + ")\n";
+    where = "repository";
+    !REPO { where = "workspace"; }
+    >> "Nihil IDE on http://127.0.0.1:" + $PORT + "  (" + where + ": " + ROOT + ")\n";
     * true {
         a? = srv.accept();
         c = a || -1;

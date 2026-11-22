@@ -30,14 +30,20 @@ jobs:
       - name: The compiler's own code and map, for the Mac
         run: printf -- '-map %s/src1/nihilc1.nihil\n' "$PWD" | build/nihilc1 > build/nihilc1.x86 2> build/nihilc1.map
 
+      - name: The IDE server
+        run: ./nihilc1.sh ide/server.nihil build/ide-server
+
       - name: Package
-        run: dist/package.sh linux-x86_64 dist/out build/nihilc1
+        run: dist/package.sh linux-x86_64 dist/out build/nihilc1 build/ide-server
 
       - name: The package installs and compiles a program
         run: |
           NIHIL_URL="file://$PWD/dist/out/nihil-linux-x86_64.tar.gz" NIHIL_HOME="$RUNNER_TEMP/nihil" NIHIL_BIN="$RUNNER_TEMP/bin" sh site/install.sh
           printf '%s\n' '@ "std:json.nihil";' '>> json_bool(true) + " Hello, Nihil!\n";' > "$RUNNER_TEMP/hello.nihil"
           test "$("$RUNNER_TEMP/bin/nihil" run "$RUNNER_TEMP/hello.nihil")" = "true Hello, Nihil!"
+
+      - name: The installed IDE compiles and runs a program
+        run: dist/test-ide.sh "$RUNNER_TEMP/bin/nihil"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -80,14 +86,20 @@ jobs:
           bash macos/test-native.sh | tee build/macos/tests.txt
           grep -q ' 0 failed' build/macos/tests.txt
 
+      - name: The IDE server
+        run: macos/nihil ide/server.nihil build/macos/ide-server
+
       - name: Package
-        run: dist/package.sh macos-arm64 dist/out build/macos/nihilc1-native build/macos/rt.o
+        run: dist/package.sh macos-arm64 dist/out build/macos/nihilc1-native build/macos/rt.o build/macos/ide-server
 
       - name: The package installs and compiles a program
         run: |
           NIHIL_URL="file://$PWD/dist/out/nihil-macos-arm64.tar.gz" NIHIL_HOME="$RUNNER_TEMP/nihil" NIHIL_BIN="$RUNNER_TEMP/bin" sh site/install.sh
           printf '%s\n' '@ "std:json.nihil";' '>> json_bool(true) + " Hello, Nihil!\n";' > "$RUNNER_TEMP/hello.nihil"
           test "$("$RUNNER_TEMP/bin/nihil" run "$RUNNER_TEMP/hello.nihil")" = "true Hello, Nihil!"
+
+      - name: The installed IDE compiles and runs a program
+        run: dist/test-ide.sh "$RUNNER_TEMP/bin/nihil"
 
       - uses: actions/upload-artifact@v4
         with:

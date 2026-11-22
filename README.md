@@ -97,6 +97,7 @@ printf '%s\n' '>> "Hello, Nihil!\n";' > hello.nihil
 nihil run hello.nihil        # compile and run: Hello, Nihil!
 nihil hello.nihil            # or compile into ./hello, a native executable
 nihil version
+nihil ide                    # the IDE, in an app window (your workspace: ~/Nihil)
 ```
 
 Releases and checksums: [github.com/nihillang/nihil/releases](https://github.com/nihillang/nihil/releases).
@@ -149,7 +150,10 @@ program.
 
 ## The IDE
 
-`ide/` is a small web IDE whose server is written in Nihil (`ide/server.nihil`):
+`ide/` is a small IDE whose server is written in Nihil (`ide/server.nihil`). With Nihil
+installed, `nihil ide` starts it and opens it in an app window (Chrome, Edge, Brave or
+Chromium with `--app`; the default browser otherwise). Its workspace is `~/Nihil`, where
+the examples are copied the first time. From the repository:
 
 ```sh
 make ide && ./build/ide-server             # then open http://127.0.0.1:8730

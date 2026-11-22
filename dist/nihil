@@ -3,6 +3,7 @@
 #
 #   nihil PROGRAM.nihil [OUT]        compile into a native executable (OUT: PROGRAM without .nihil)
 #   nihil run PROGRAM.nihil [ARG…]   compile into a temporary file and run it
+#   nihil ide [--no-window]          the IDE, in an app window (workspace: ~/Nihil)
 #   nihil version                    the version installed
 #
 #   NIHIL_O0=1   no optimizations
@@ -25,8 +26,70 @@ home=$(cd "$(dirname "$self")/.." && pwd -P)
 lib=$home/libexec/nihil
 
 usage() {
-    echo "usage: nihil PROGRAM.nihil [OUT] | nihil run PROGRAM.nihil [ARG…] | nihil version" >&2
+    echo "usage: nihil PROGRAM.nihil [OUT] | nihil run PROGRAM.nihil [ARG…] | nihil ide | nihil version" >&2
     exit 2
+}
+
+# opens URL in an app window (a browser with --app: no tabs, no address bar), or in the default browser
+open_window() {
+    url=$1
+    if [ "$(uname -s)" = Darwin ]; then
+        for app in "Google Chrome" "Microsoft Edge" "Brave Browser" "Chromium"; do
+            if [ -d "/Applications/$app.app" ] || [ -d "$HOME/Applications/$app.app" ]; then
+                open -na "$app" --args --app="$url" --new-window
+                return
+            fi
+        done
+        open "$url"
+        return
+    fi
+    if [ -z "${DISPLAY:-}" ] && [ -z "${WAYLAND_DISPLAY:-}" ]; then
+        echo "No display: open $url in a browser (through an SSH tunnel from another machine)"
+        return
+    fi
+    for b in google-chrome google-chrome-stable chromium chromium-browser microsoft-edge brave-browser; do
+        if command -v "$b" >/dev/null 2>&1; then
+            "$b" --app="$url" --new-window >/dev/null 2>&1 &
+            return
+        fi
+    done
+    if command -v xdg-open >/dev/null 2>&1; then
+        xdg-open "$url" >/dev/null 2>&1 &
+    else
+        echo "Open $url in a browser"
+    fi
+}
+
+# the IDE: its server (in Nihil) in the foreground, the window opened once it answers
+ide() {
+    server=$lib/ide-server
+    [ -x "$server" ] || { echo "nihil: this installation has no IDE" >&2; exit 1; }
+    window=true
+    [ "${1:-}" = "--no-window" ] && window=false
+    ws=${NIHIL_WORKSPACE:-$HOME/Nihil}
+    port=${NIHIL_IDE_PORT:-8730}
+    url=http://127.0.0.1:$port/
+    mkdir -p "$ws"
+    # the examples are copied once, so they are the user's to change
+    [ -e "$ws/examples" ] || cp -R "$home/share/nihil/examples" "$ws/examples"
+    if curl -fs -o /dev/null "$url" 2>/dev/null; then
+        echo "The IDE is already running: $url"
+        "$window" && open_window "$url"
+        exit 0
+    fi
+    if "$window"; then
+        (
+            i=0
+            while [ $i -lt 50 ]; do
+                if curl -fs -o /dev/null "$url" 2>/dev/null; then open_window "$url"; exit 0; fi
+                sleep 0.2
+                i=$((i + 1))
+            done
+        ) &
+    fi
+    echo "Nihil IDE: $url   (workspace: $ws; Ctrl+C stops it)"
+    cd "$ws"
+    NIHIL_IDE_INSTALL=$home NIHIL_IDE_ROOT=$ws NIHIL_IDE_PORT=$port exec "$server"
 }
 
 # compile SRC into OUT
@@ -62,7 +125,11 @@ case $1 in
         echo "nihil $(cat "$home/VERSION" 2>/dev/null || echo unknown)"
         ;;
     help|--help|-h)
-        sed -n '2,8p' "$self" | sed 's/^# \{0,1\}//'
+        sed -n '2,9p' "$self" | sed 's/^# \{0,1\}//'
+        ;;
+    ide)
+        shift
+        ide "$@"
         ;;
     run)
         [ $# -ge 2 ] || usage
