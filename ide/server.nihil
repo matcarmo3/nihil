@@ -511,7 +511,8 @@ compile(project = "", rel = "", bin = "", optimize = true, base = "") {
     ls = (errs || "").split("\n");
     parts = ["" ; 0];
     i = 0;
-    * i < #ls { #ls[i].trim() > 0 { parts = parts + [error_json(rel, ls[i])]; } i = i + 1; }
+    // the native compiler of the Mac names files by their whole path: the page wants them relative to the project
+    * i < #ls { #ls[i].trim() > 0 { parts = parts + [error_json(rel, ls[i].replace(project + "/", ""))]; } i = i + 1; }
     p == _ { parts = parts + [error_json(rel, "could not start the compiler")]; }
     COMPILE_ERRORS = "[" + parts.join(", ") + "]";
     (base + ".cout").remove();
@@ -608,6 +609,27 @@ run_json(project = "", body = "", asm = false) {
     : "{\"ok\": true, \"errors\": " + COMPILE_ERRORS + ", \"compile_ms\": " + $COMPILE_MS + ", \"size\": " + $size + ", \"run\": " + $id + "}";
 }
 
+// the live check: the editor's text (saved or not) is compiled, not run, and its problems go back.
+// The text is written next to the file, as a hidden .check- file, because its @ includes are
+// relative to it; the file is removed at once.
+check_json(project = "", body = "") {
+    rel = (body.json("path") || "\"\"").json_text() || "";
+    content = (body.json("content") || "\"\"").json_text() || "";
+    !safe_rel(rel) || !rel.ends_with(".nihil") || !(project + "/" + rel).is_file() { : "{\"ok\": false, \"errors\": []}"; }
+    last = 0;
+    i = 0;
+    * i < #rel { rel[i] == '/' { last = i + 1; } i = i + 1; }
+    tmp = rel.slice(0, last) + ".check-" + rel.slice(last);
+    @>> (project + "/" + tmp), content;
+    id = NEXT_RUN;
+    NEXT_RUN = NEXT_RUN + 1;
+    base = RUNS_DIR + "/check" + $id;
+    ok = compile(project, tmp, base + ".bin", true, base);
+    (project + "/" + tmp).remove();
+    (base + ".bin").remove();
+    : "{\"ok\": " + $ok + ", \"errors\": " + COMPILE_ERRORS.replace(tmp, rel) + ", \"compile_ms\": " + $COMPILE_MS + "}";
+}
+
 // what the program wrote since the offsets the page has, and its exit code once it ended
 output_json(req = "") {
     id = (req.http_param("id") || "0").int() || 0;
@@ -633,6 +655,15 @@ output_json(req = "") {
     : j;
 }
 
+// The IDE's Claude Code has its own folder (CLAUDE_CONFIG_DIR): its own sign-in, settings,
+// MCP servers and sessions, apart from the terminal's ~/.claude. NIHIL_IDE_CLAUDE_DIR chooses
+// another folder; "shared" uses the terminal's.
+CLAUDE_DIR = "";
+claude(args = [""]) {
+    CLAUDE_DIR == "shared" { : ["claude"] + args; }
+    : ["env", "CLAUDE_CONFIG_DIR=" + CLAUDE_DIR, "claude"] + args;
+}
+
 // ---- Claude Code (the chat panel) ---------------------------------------------------------
 // The panel's message runs `claude -p` (Claude Code without its screen) in the project's folder,
 // like a program: its answer, one JSON event per line (stream-json), goes to build/runs/N.out
@@ -653,15 +684,40 @@ session_ok(s = "") {
     : true;
 }
 
-claude_prompt(project = "") {
+claude_prompt(project = "", shell = false) {
+    run = "You cannot run commands: the IDE compiles and runs the programs (the user presses Run). ";
+    shell { run = "You may run shell commands on this Mac (Bash, starting in the project folder; long ones in the background, "
+                  + "which the IDE shows live). Say what you run, keep to the project, and do not change anything outside it "
+                  + "unless asked. A Nihil program is compiled with " + ROOT + "/nihilc1.sh FILE.nihil OUTPUT. "; }
     : "You are working inside the Nihil IDE, in the project folder " + project + ". Nihil is a small programming language "
       + "without keywords (symbols only); its specification is " + ROOT + "/SPEC.md and there are examples in " + ROOT
       + "/examples: read the parts of the SPEC you need before you write or explain Nihil code, and do not assume it works "
       + "like another language. The user's message may be followed by an <ide> block with what is open in the IDE: the "
       + "active file and the cursor, the selected text, the open tabs, unsaved text and the last compile errors; \"this\" "
-      + "or \"here\" means the selection, or else the active file. You cannot run commands: the IDE compiles and runs the "
-      + "programs (the user presses Run). Change files only inside the project folder, and only when asked. Answer in "
+      + "or \"here\" means the selection, or else the active file. " + run
+      + "Change files only inside the project folder, and only when asked. Answer in "
       + "the language the user writes in, briefly.";
+}
+
+// how many runs (programs, conversations, sign-ins) have not finished
+running_runs() {
+    running = 0;
+    ids = RUN_PROC.keys();
+    k = 0;
+    * k < #ids { RUN_CODE.contains(ids[k]) == false { running = running + 1; } k = k + 1; }
+    : running;
+}
+
+// "mcp__server": letters, digits, "_" and "-" (it goes on a command line)
+mcp_ok(s = "") {
+    !s.starts_with("mcp__") || #s > 100 { : false; }
+    i = 0;
+    * i < #s {
+        ch = s[i];
+        !((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '-' || ch == '_') { : false; }
+        i = i + 1;
+    }
+    : true;
 }
 
 claude_json(project = "", body = "") {
@@ -670,22 +726,45 @@ claude_json(project = "", body = "") {
     session = (body.json("session") || "\"\"").json_text() || "";
     edits = (body.json("edits") || "false") == "true";
     #msg.trim() == 0 { : "{\"ok\": false, \"error\": \"write a message\"}"; }
-    running = 0;
-    ids = RUN_PROC.keys();
-    k = 0;
-    * k < #ids { RUN_CODE.contains(ids[k]) == false { running = running + 1; } k = k + 1; }
-    running >= MAX_RUNS { : "{\"ok\": false, \"error\": " + q($MAX_RUNS + " programs are running: stop one first") + "}"; }
+    running_runs() >= MAX_RUNS { : "{\"ok\": false, \"error\": " + q($MAX_RUNS + " programs are running: stop one first") + "}"; }
     id = NEXT_RUN;
     NEXT_RUN = NEXT_RUN + 1;
     base = RUNS_DIR + "/" + $id;
+    // the tab's mode: "ask" (reads only), "edits" (changes files in the project), "plan" (a plan
+    // first, nothing changes) or "auto" (Claude Code's auto mode, with the same edits allowed)
+    mode = (body.json("mode") || "\"\"").json_text() || "";
+    #mode == 0 { mode = "ask"; edits { mode = "edits"; } }
+    pm = "default";
+    mode == "edits" { pm = "acceptEdits"; }
+    mode == "plan" { pm = "plan"; }
+    mode == "auto" { pm = "auto"; }
+    model = (body.json("model") || "\"\"").json_text() || "";
     // reading and searching inside the project are allowed by default; outside it, only the SPEC and examples
     tools = ["Read(./**)", "Read(/" + ROOT + "/SPEC.md)", "Read(/" + ROOT + "/examples/**)"];
-    edits { tools = tools + ["Edit(./**)", "Write(./**)"]; }
-    cmd = ["claude", "-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
-           "--permission-mode", "default", "--append-system-prompt", claude_prompt(project)];
+    // MCP: the servers the project's .env trusts in every mode (CLAUDE_MCP=mcp__a mcp__b, for
+    // servers that only read); other servers when the tab allowed them ("allow": "mcp__server
+    // mcp__other", from the button on a refusal)
+    trusted = project_env(project, "CLAUDE_MCP").replace("\"", "").split(" ");
+    t = 0;
+    * t < #trusted { mcp_ok(trusted[t]) { tools = tools + [trusted[t]]; } t = t + 1; }
+    allow = ((body.json("allow") || "\"\"").json_text() || "").split(" ");
+    a = 0;
+    * a < #allow { mcp_ok(allow[a]) { tools = tools + [allow[a]]; } a = a + 1; }
+    // edits and auto also run commands (Bash, in the background too, and monitors); ask and plan do not
+    shell = mode == "edits" || mode == "auto";
+    shell { tools = tools + ["Edit(./**)", "Write(./**)", "Bash", "Monitor", "TaskStop"]; }
+    cmd = claude(["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
+                  "--permission-mode", pm, "--append-system-prompt", claude_prompt(project, shell)]);
     session_ok(session) { cmd = cmd + ["--resume", session]; }
-    // no commands (not even the read-only ones Claude Code allows by default) and no web
-    cmd = cmd + ["--disallowedTools", "Bash", "WebFetch", "WebSearch", "--allowedTools"] + tools;
+    session_ok(model) { cmd = cmd + ["--model", model]; }
+    // the tab's name names the session too (as in Claude Code's /resume); it is one argument, not a shell line
+    name = ((body.json("name") || "\"\"").json_text() || "").replace("\n", " ").trim();
+    #name > 60 { name = name.slice(0, 60); name = name.slice(0, utf8_whole(name)); }
+    #name > 0 && !name.starts_with("-") { cmd = cmd + ["--name", name]; }     // an alias (opus, sonnet…) or a model's name
+    // no web; and in ask and plan no commands (not even the read-only ones Claude Code allows by default)
+    blocked = ["WebFetch", "WebSearch"];
+    !shell { blocked = ["Bash", "Monitor"] + blocked; }
+    cmd = cmd + ["--disallowedTools"] + blocked + ["--allowedTools"] + tools;
     p? = cmd.start(base + ".out", base + ".err", project);
     p == _ { : "{\"ok\": false, \"error\": " + q("could not start claude: is Claude Code installed, and on the PATH of the IDE's server?") + "}"; }
     pr = p || 0;
@@ -700,6 +779,73 @@ claude_json(project = "", body = "") {
     label = msg.trim().replace("\n", " ");
     #label > 80 { label = label.slice(0, 80) + "…"; }
     RUN_KIND[id] = "claude"; RUN_LABEL[id] = label; RUN_PROJECT[id] = project;
+    : "{\"ok\": true, \"run\": " + $id + "}";
+}
+
+// ---- the account Claude Code uses (the panel's /login, /logout and /status) ----------------
+// `claude -p` cannot sign in, but `claude auth login` can without a screen: it opens the browser
+// on this machine, prints the sign-in link, and reads the code from its input when the page asks
+// for one. It runs like a program (kind "login"): the page reads its output with /api/output,
+// sends the code with /api/stdin and stops it with /api/stop.
+
+NO_CLAUDE = "could not start claude: is Claude Code installed, and on the PATH of the IDE's server?";
+
+// `claude auth status --json` as it is, inside {"ok": true, "status": …}
+claude_auth_json() {
+    out = RUNS_DIR + "/auth-status.out";
+    p? = claude(["auth", "status", "--json"]).start(out, "", "");
+    p == _ { : "{\"ok\": false, \"error\": " + q(NO_CLAUDE) + "}"; }
+    (p || 0).close_input();
+    (p || 0).wait();
+    t? = @? out;
+    out.remove();
+    s = (t || "").trim();
+    #s == 0 { s = "claude auth status said nothing"; }
+    !s.starts_with("{") { : "{\"ok\": false, \"error\": " + q(s) + "}"; }
+    : "{\"ok\": true, \"status\": " + s + "}";
+}
+
+claude_logout_json() {
+    p? = claude(["auth", "logout"]).start(RUNS_DIR + "/auth-logout.out", RUNS_DIR + "/auth-logout.out", "");
+    p == _ { : "{\"ok\": false, \"error\": " + q(NO_CLAUDE) + "}"; }
+    (p || 0).close_input();
+    (p || 0).wait();
+    (RUNS_DIR + "/auth-logout.out").remove();
+    : claude_auth_json();
+}
+
+claude_login_json(project = "", body = "") {
+    running_runs() >= MAX_RUNS { : "{\"ok\": false, \"error\": " + q($MAX_RUNS + " programs are running: stop one first") + "}"; }
+    id = NEXT_RUN;
+    NEXT_RUN = NEXT_RUN + 1;
+    base = RUNS_DIR + "/" + $id;
+    cmd = claude(["auth", "login"]);
+    (body.json("console") || "false") == "true" { cmd = cmd + ["--console"]; }
+    p? = cmd.start(base + ".out", base + ".err", "");
+    p == _ { : "{\"ok\": false, \"error\": " + q(NO_CLAUDE) + "}"; }
+    RUN_PROC[id] = p || 0;                      // its input stays open: the code may come later
+    RUN_BASE[id] = base;
+    RUN_T0[id] = now_ms();
+    RUN_SEEN[id] = now_ms();
+    RUN_KIND[id] = "login"; RUN_LABEL[id] = "signing in to Claude"; RUN_PROJECT[id] = project;
+    : "{\"ok\": true, \"run\": " + $id + "}";
+}
+
+// /mcp: `claude mcp list` in the project (it checks each server, which takes a few seconds, so it
+// runs like a program and the page reads its output)
+claude_mcp_json(project = "") {
+    running_runs() >= MAX_RUNS { : "{\"ok\": false, \"error\": " + q($MAX_RUNS + " programs are running: stop one first") + "}"; }
+    id = NEXT_RUN;
+    NEXT_RUN = NEXT_RUN + 1;
+    base = RUNS_DIR + "/" + $id;
+    p? = claude(["mcp", "list"]).start(base + ".out", base + ".err", project);
+    p == _ { : "{\"ok\": false, \"error\": " + q(NO_CLAUDE) + "}"; }
+    (p || 0).close_input();
+    RUN_PROC[id] = p || 0;
+    RUN_BASE[id] = base;
+    RUN_T0[id] = now_ms();
+    RUN_SEEN[id] = now_ms();
+    RUN_KIND[id] = "mcp"; RUN_LABEL[id] = "MCP servers"; RUN_PROJECT[id] = project;
     : "{\"ok\": true, \"run\": " + $id + "}";
 }
 
@@ -834,6 +980,23 @@ handle(c = 0, req = "") {
     }
     path == "/api/activity" { c.respond(200, "application/json", activity_json()); :; }
     path == "/api/claude" { c.respond(200, "application/json", claude_json(project, body)); :; }
+    path == "/api/claude/auth" { c.respond(200, "application/json", claude_auth_json()); :; }
+    path == "/api/claude/login" { c.respond(200, "application/json", claude_login_json(project, body)); :; }
+    // the output of a command Claude runs in the background: the file Claude Code writes it to
+    path == "/api/claude/taskout" {
+        f = req.http_param("path") || "";
+        ok = f.ends_with(".output") && f.contains("/tasks/") && !f.contains("..")
+             && (f.starts_with("/private/tmp/claude-") || f.starts_with("/tmp/claude-"));
+        !ok { c.respond(400, "application/json", "{\"error\": \"not the output of a command\"}"); :; }
+        t = f.read_from((req.http_param("from") || "0").int() || 0) || "";
+        #t > 200000 { t = t.slice(0, 200000); }
+        t = t.slice(0, utf8_whole(t));
+        c.respond(200, "application/json", "{\"out\": " + q(t) + ", \"bytes\": " + $#t + "}");
+        :;
+    }
+    path == "/api/claude/mcp" { c.respond(200, "application/json", claude_mcp_json(project)); :; }
+    path == "/api/claude/logout" { c.respond(200, "application/json", claude_logout_json()); :; }
+    path == "/api/check" { c.respond(200, "application/json", check_json(project, body)); :; }
     path == "/api/run" || path == "/api/asm" { c.respond(200, "application/json", run_json(project, body, path == "/api/asm")); :; }
     path == "/api/output" {
         j = output_json(req);
@@ -867,8 +1030,10 @@ main() {
         env[i].starts_with("PWD=") { ROOT = env[i].slice(4); }
         env[i].starts_with("HOME=") { HOME = env[i].slice(5); }
         env[i].starts_with("NIHIL_IDE_PORT=") { PORT = env[i].slice(15).int() || PORT; }
+        env[i].starts_with("NIHIL_IDE_CLAUDE_DIR=") { CLAUDE_DIR = env[i].slice(21); }
         i = i + 1;
     }
+    #CLAUDE_DIR == 0 { CLAUDE_DIR = HOME + "/.claude-ide"; }
     !(ROOT + "/nihilc1.sh").is_file() { !>> "nihil ide: start it in the Nihil repository (no nihilc1.sh in " + ROOT + ")\n"; :: 1; }
     MAC = "/System/Library/CoreServices/SystemVersion.plist".is_file();
     PROJECTS_FILE = ROOT + "/ide/projects.txt";

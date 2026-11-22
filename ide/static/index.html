@@ -37,6 +37,8 @@ button { background: var(--panel2); color: var(--text); border: 1px solid var(--
 button:hover { border-color: var(--dim); }
 button.primary { background: var(--accent); color: #04191a; border-color: var(--accent); font-weight: 600; }
 button:disabled { opacity: .45; cursor: default; }
+#chatAccount { color: var(--dim); font-size: 12px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+#chatAccount.out { color: var(--err); }
 label.opt { display: flex; gap: 5px; align-items: center; color: var(--dim); margin-left: 6px; cursor: pointer; }
 .spacer { flex: 1; }
 #table .head .pager { display: inline-flex; gap: 4px; }
@@ -48,15 +50,61 @@ select { background: var(--panel2); color: var(--text); border: 1px solid var(--
 /* the Claude panel (right) */
 #chatResize { cursor: col-resize; background: var(--line); opacity: .5; }
 #chatResize:hover { background: var(--dim); }
-#chat { display: grid; grid-template-rows: auto auto auto auto 1fr auto; background: var(--panel); min-height: 0; min-width: 0; }
+#chat { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto auto auto auto 1fr auto; background: var(--panel); min-height: 0; min-width: 0; }
 #chat[hidden], #chatResize[hidden] { display: none; }
 #chat .chat-head { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--line); }
-#chat .chat-head b { color: var(--accent); }
+#chat .chat-head b { color: var(--accent); white-space: nowrap; flex-shrink: 0; }
 #chat .chat-ctx { padding: 4px 10px; color: var(--dim); font-size: 12px; display: flex; flex-wrap: wrap; gap: 4px 10px;
   border-bottom: 1px solid var(--line); }
 #chat .chat-ctx label { display: inline-flex; gap: 3px; align-items: center; cursor: pointer; }
-#chatLog { overflow: auto; padding: 8px 10px; min-height: 0; }
-#chatLog .empty { color: var(--dim); padding: 8px 0; }
+#chatPane { min-height: 0; min-width: 0; display: flex; flex-direction: column; }
+#chatLogs { min-height: 0; min-width: 0; flex: 1; display: flex; flex-direction: column; }
+#chat > * { min-width: 0; }
+#chatViews { display: flex; gap: 4px; padding: 4px 8px; border-bottom: 1px solid var(--line); overflow-x: auto; flex-shrink: 0; }
+#chatViews[hidden] { display: none; }
+#chatViews .vchip { font-size: 11px; padding: 2px 8px; border-radius: 10px; border: 1px solid var(--line); background: none; color: var(--dim);
+  white-space: nowrap; cursor: pointer; display: inline-flex; gap: 5px; align-items: center; flex-shrink: 0; }
+#chatViews .vchip:hover { color: var(--text); }
+#chatViews .vchip.on { color: var(--text); border-color: var(--accent); background: var(--panel2); }
+.view-head { position: sticky; top: -8px; background: var(--panel); padding: 5px 0 6px; display: flex; gap: 6px; align-items: center;
+  color: var(--dim); font-size: 12px; z-index: 1; border-bottom: 1px solid var(--line); margin-bottom: 6px; }
+.view-head .vt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shell-view pre { margin: 3px 0; padding: 6px 8px; background: #101116; border-radius: 5px; overflow: auto;
+  font: 12px/1.4 ui-monospace, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.shell-view pre.cmd { color: var(--accent); }
+.shell-view .st.running { color: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+.shell-view .st.done { color: var(--ok); } .shell-view .st.failed { color: var(--err); }
+.tool .open { color: var(--accent); cursor: pointer; margin-left: 6px; }
+.tool .open:hover, .shell .open:hover { text-decoration: underline; }
+.shell .open { color: var(--accent); margin-left: 6px; }
+.chat-log { flex: 1; overflow: auto; padding: 8px 10px; min-height: 0; }
+.chat-log[hidden] { display: none; }
+#chatTabs { display: flex; gap: 2px; padding: 4px 6px 0; border-bottom: 1px solid var(--line); overflow-x: auto; align-items: flex-end; }
+#chatTabs .ctab { display: flex; align-items: center; gap: 4px; padding: 3px 4px 4px 8px; border: 1px solid transparent; border-bottom: none;
+  border-radius: 6px 6px 0 0; cursor: pointer; color: var(--dim); font-size: 12px; max-width: 160px; white-space: nowrap; flex-shrink: 0; }
+#chatTabs .ctab .name { overflow: hidden; text-overflow: ellipsis; }
+#chatTabs .ctab.on { background: var(--panel2); color: var(--text); border-color: var(--line); }
+#chatTabs .ctab.unread .name { color: var(--accent); font-weight: 600; }
+#chatTabs .ctab .x { opacity: .45; padding: 0 3px; border-radius: 3px; }
+#chatTabs .ctab .x:hover { opacity: 1; color: var(--err); }
+#chatTabs .dot, #chatViews .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: pulse 1.2s ease-in-out infinite; flex-shrink: 0; }
+#chatTabs .ctab-new { padding: 1px 9px; margin: 0 0 3px 4px; flex-shrink: 0; }
+#chatState { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.chat-opts { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--dim); font-size: 12px; }
+.chat-opts label { display: inline-flex; gap: 5px; align-items: center; }
+.chat-opts select { padding: 2px 6px; font-size: 12px; }
+.shell { margin: 3px 0; font-size: 12px; }
+.shell summary { cursor: pointer; color: var(--dim); font: 12px ui-monospace, Menlo, monospace; }
+.shell summary:hover { color: var(--text); }
+.shell .st.running { color: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+.shell .st.done { color: var(--ok); } .shell .st.failed { color: var(--err); } .shell .st.stopped { color: var(--dim); }
+.shell pre { margin: 3px 0; padding: 4px 6px; background: #101116; border-radius: 5px; overflow: auto; max-height: 260px;
+  font: 12px/1.4 ui-monospace, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.shell pre.cmd { color: var(--accent); max-height: 120px; }
+.plan { border: 1px solid var(--accent); border-radius: 8px; padding: 6px 9px; margin: 6px 0; }
+.plan .plan-title { color: var(--accent); font-weight: 600; margin-bottom: 4px; }
+.plan button { margin-top: 6px; }
+.chat-log .empty { color: var(--dim); padding: 8px 0; }
 .msg { margin: 8px 0; line-height: 1.45; overflow-wrap: anywhere; }
 .msg.user { background: var(--sel); border-radius: 8px; padding: 6px 9px; white-space: pre-wrap; }
 .msg.error { color: var(--err); white-space: pre-wrap; }
@@ -72,7 +120,7 @@ select { background: var(--panel2); color: var(--text); border: 1px solid var(--
 .tool .del { color: var(--err); } .tool .add { color: var(--ok); }
 .denied { color: var(--err); font-size: 12px; }
 /* activity: what Claude and the IDE are doing */
-#activity { border-bottom: 1px solid var(--line); padding: 5px 10px; font-size: 12px; max-height: 34%; overflow: auto; }
+#activity { border-bottom: 1px solid var(--line); padding: 5px 10px; font-size: 12px; max-height: 38vh; overflow: auto; }
 #activity summary { cursor: pointer; color: var(--dim); user-select: none; }
 #activity summary .live { color: var(--accent); }
 #activity .row { display: flex; gap: 6px; align-items: baseline; margin: 3px 0; }
@@ -102,7 +150,15 @@ select { background: var(--panel2); color: var(--text); border: 1px solid var(--
 .etab.claude-read::before { content: "◦ "; color: var(--accent); }
 .etab.claude-edit::before { content: "✎ "; color: var(--accent); }
 .etab.claude-now { box-shadow: inset 0 -2px 0 var(--accent); }
-.chat-input { border-top: 1px solid var(--line); padding: 8px 10px; display: grid; grid-template-columns: 1fr auto; gap: 6px; }
+#cmdPop { position: absolute; left: 10px; right: 10px; bottom: calc(100% - 4px); max-height: 260px; overflow: auto; background: var(--panel2);
+  border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.35); z-index: 20; padding: 4px 0; font-size: 12px; }
+#cmdPop[hidden] { display: none; }
+#cmdPop .ci { display: flex; gap: 10px; padding: 4px 10px; cursor: pointer; align-items: baseline; }
+#cmdPop .ci b { font: 600 12px ui-monospace, Menlo, monospace; color: var(--text); white-space: nowrap; }
+#cmdPop .ci.panel b { color: var(--accent); }
+#cmdPop .ci span { color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#cmdPop .ci.on { background: var(--sel); }
+.chat-input { position: relative; border-top: 1px solid var(--line); padding: 8px 10px; display: grid; grid-template-columns: 1fr auto; gap: 6px; }
 .chat-input textarea { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px;
   padding: 6px 8px; font: inherit; resize: vertical; min-height: 44px; }
 .chat-input .chat-buttons { display: flex; flex-direction: column; gap: 4px; }
@@ -239,9 +295,8 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
     </div>
     <div id="chatResize" hidden title="Drag to resize the Claude panel"></div>
     <section id="chat" hidden>
-      <div class="chat-head"><b>✦ Claude</b><span id="chatState" class="tool"></span><div class="spacer"></div>
-        <label class="opt" title="Claude may change and create files inside this project (it never runs commands)"><input type="checkbox" id="chatEdits"> may edit</label>
-        <button id="chatNew" title="Forget this conversation and start a new one">New</button></div>
+      <div class="chat-head"><b>✦ Claude</b><span id="chatAccount" title="The account Claude Code uses (click to see it again; /login, /logout)">…</span><div class="spacer"></div><span id="chatState" class="tool"></span></div>
+      <div id="chatTabs"></div>
       <div id="usage" title="The plan's usage, from Claude's last answer (seeing it costs nothing)"></div>
       <div class="chat-ctx" title="What goes with each message">send along:
         <label><input type="checkbox" id="ctxSel" checked>selection</label>
@@ -249,10 +304,19 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
         <label><input type="checkbox" id="ctxTabs" checked>tabs</label>
         <label><input type="checkbox" id="ctxErr" checked>errors</label></div>
       <details id="activity" open><summary>Activity <span class="live" id="actSummary"></span></summary><div id="actBody"></div></details>
-      <div id="chatLog"><div class="empty">Ask about the code: "explain the selection", "why does this not compile?", "write a program that…". Claude reads the project and the language's SPEC; with "may edit" it can also change files.</div></div>
-      <div class="chat-input">
+      <div id="chatPane"><div id="chatViews" hidden></div><div id="chatLogs"><div id="shellView" class="chat-log shell-view" hidden></div></div></div>
+      <div class="chat-input"><div id="cmdPop" hidden></div>
         <textarea id="chatText" rows="3" placeholder="Message (Enter sends, Shift+Enter: new line)"></textarea>
-        <div class="chat-buttons"><button id="chatSend" class="primary">Send</button><button id="chatStop" disabled title="Stop Claude">■ Stop</button></div>
+        <div class="chat-buttons"><button id="chatSend" class="primary">Send</button><button id="chatStop" disabled title="Stop Claude in this tab">■ Stop</button></div>
+        <div class="chat-opts">
+          <label title="What Claude may do in this tab. Commands (shells) only in accept edits and auto.">mode <select id="chatMode">
+            <option value="ask" title="Reads and answers; no edits and no commands">ask (read only)</option>
+            <option value="edits" title="Changes and creates files inside this project and runs shell commands, without asking">accept edits</option>
+            <option value="plan" title="Reads and writes a plan; no edits and no commands until you accept it">plan</option>
+            <option value="auto" title="Claude Code's auto mode: it decides its steps, including edits in this project and shell commands">auto</option></select></label>
+          <label title="The model for this tab's next message">model <select id="chatModel">
+            <option value="">default</option><option value="fable">fable</option><option value="opus">opus</option>
+            <option value="sonnet">sonnet</option><option value="haiku">haiku</option></select></label></div>
       </div>
     </section>
   </main>
@@ -601,9 +665,9 @@ function renderTabs() {
   const bar = $('editorTabs'); bar.innerHTML = '';
   for (const t of tabs) {
     const el = document.createElement('div');
-    const cm = claudeFiles.get(t.path);
+    const cm = claudeMark(t.path);
     el.className = 'etab' + (t.path === current ? ' active' : '') + (t.dirty ? ' dirty' : '')
-      + (cm ? ' claude-' + cm : '') + (t.path === claudeNow ? ' claude-now' : '');
+      + (cm ? ' claude-' + cm : '') + (claudeIsNow(t.path) ? ' claude-now' : '');
     el.title = t.path + (t.editable ? '' : ' (read only)') + (cm === 'edit' ? ' — edited by Claude' : cm === 'read' ? ' — read by Claude' : '');
     const x = document.createElement('span'); x.className = 'x'; x.title = 'Close (middle click)';
     el.append(t.path.slice(t.path.lastIndexOf('/') + 1), x);
@@ -681,8 +745,10 @@ $('newDialog').addEventListener('close', async () => {
 $('btnSave').onclick = save;
 
 // ---------------------------------------------------------------- problems
+// (by line number: removeLineClass with the handles from eachLine leaves the class on, and a fixed
+// line kept its red background)
 function clearMarks() { for (const m of marks) m.clear(); marks = []; editor.clearGutter('errors');
-  editor.eachLine((l) => editor.removeLineClass(l, 'background', 'err-line')); }
+  editor.operation(() => { for (let i = 0, n = editor.lineCount(); i < n; i++) editor.removeLineClass(i, 'background', 'err-line'); }); }
 let lastErrors = [];                                // for the Claude panel
 function showProblems(errors) {
   lastErrors = errors;
@@ -707,6 +773,23 @@ function showProblems(errors) {
     }
   }
 }
+
+// the live check: a moment after typing stops (or a file opens), the editor's text is compiled,
+// not run, and its problems are marked as on Run
+let checkTimer = null, checkSeq = 0;
+function scheduleCheck() {
+  clearTimeout(checkTimer);
+  if (current && current.endsWith('.nihil')) checkTimer = setTimeout(runCheck, 600);
+}
+async function runCheck() {
+  if (!current || runId) return;
+  const seq = ++checkSeq, path = current, text = editor.getValue();
+  const r = await api('/api/check', { path, content: text }).catch(() => null);
+  if (!r || !r.errors || seq !== checkSeq || path !== current || editor.getValue() !== text) return;   // typed again meanwhile
+  showProblems(r.errors);
+}
+editor.on('change', scheduleCheck);
+editor.on('swapDoc', scheduleCheck);
 
 // ---------------------------------------------------------------- run
 function setRunning(on) { $('btnRun').disabled = on; $('btnStop').disabled = !on; }
@@ -821,54 +904,283 @@ addEventListener('keydown', (e) => {
 });
 
 // ---------------------------------------------------------------- Claude
-// The message goes to the server (/api/claude), which runs `claude -p` in the project; its answer,
-// one JSON event per line, is read with /api/output as it is written.
-let chatSession = '', chatRun = null;
-// activity: the step Claude is on, its helpers (subagents), the files it touched, and what runs
-let claudeStep = '', claudeNow = '', claudeAgents = [], claudeFiles = new Map(), runningNow = [];
-function setStep(text, file) { claudeStep = text; claudeNow = file || ''; renderActivity(); renderTabs(); }
-function touchFile(rel, kind) {
-  if (!rel || rel.startsWith('/')) return;
-  if (kind === 'edit' || claudeFiles.get(rel) !== 'edit') claudeFiles.set(rel, kind);
+// Each message goes to the server (/api/claude), which runs `claude -p` in the project; its answer,
+// one JSON event per line, is read with /api/output as it is written. The panel has tabs: each tab
+// is a conversation of its own (its session, its log, its mode and model), and they work at once.
+const MODES = { ask: 'ask (read only)', edits: 'accept edits', plan: 'plan', auto: 'auto' };
+const EMPTY_CHAT = '<div class="empty">Ask about the code: "explain the selection", "why does this not compile?", "write a program that…". '
+  + 'Claude reads the project and the language\'s SPEC. Mode: <b>ask</b> only reads; <b>accept edits</b> changes files in the project and runs commands; '
+  + '<b>plan</b> writes a plan first; <b>auto</b> lets Claude decide the steps (commands too). Every command it runs, and its output, shows here and in Activity. The <b>+</b> above opens another conversation that works at the same time.</div>';
+const chatsByProject = new Map();     // project → { tabs, active }: kept while the page is open
+let chats = { tabs: [], active: '' }, runningNow = [], nextChat = 1;
+const cur = () => chats.tabs.find((t) => t.id === chats.active) || chats.tabs[0];
+const chatTitle = (t) => t.title || 'new chat';
+function newChat(saved) {
+  const s = saved || {};
+  const log = document.createElement('div'); log.className = 'chat-log'; log.hidden = true; log.innerHTML = EMPTY_CHAT;
+  $('chatLogs').appendChild(log);
+  return { id: s.id || 'c' + Date.now().toString(36) + nextChat++, title: s.title || '', session: s.session || '',
+    mode: MODES[s.mode] ? s.mode : 'ask', model: s.model || '', usedModel: s.usedModel || '', allow: Array.isArray(s.allow) ? s.allow : [],
+    run: null, step: '', now: '', agents: [], files: new Map(), shells: new Map(), tasks: new Map(), log, project, unread: false, closed: false };
 }
+function chatKey(p = project) { return 'nihil-ide-claude:' + p; }
+function saveChatsOf(p) {
+  const c = chatsByProject.get(p); if (!c) return;
+  const data = { active: c.active, tabs: c.tabs.map((t) => ({ id: t.id, title: t.title, session: t.session, mode: t.mode, model: t.model, usedModel: t.usedModel, allow: t.allow })) };
+  try { localStorage.setItem(chatKey(p) + ':tabs', JSON.stringify(data)); } catch (e) {}
+}
+function loadChat() {
+  for (const el of $('chatLogs').children) el.hidden = true;     // the logs of other projects stay, hidden
+  let c = chatsByProject.get(project);
+  if (!c) {
+    c = { tabs: [], active: '' }; chatsByProject.set(project, c);
+    let saved = null; try { saved = JSON.parse(localStorage.getItem(chatKey() + ':tabs') || 'null'); } catch (e) {}
+    if (!saved) {                                               // the panel before tabs: one conversation per project
+      let s = '', ed = false; try { s = localStorage.getItem(chatKey()) || ''; ed = localStorage.getItem(chatKey() + ':edits') === '1'; } catch (e) {}
+      saved = { tabs: [{ session: s, mode: ed ? 'edits' : 'ask' }] };
+    }
+    for (const x of saved.tabs || []) c.tabs.push(newChat(x));
+    if (!c.tabs.length) c.tabs.push(newChat());
+    c.active = c.tabs.some((t) => t.id === saved.active) ? saved.active : c.tabs[0].id;
+  }
+  chats = c;
+  showChat();
+  if (chatOpen && project) showAccount();
+}
+// what the chat area shows for a tab: the conversation (view null), a helper's work, or a shell
+function setView(t, v) { t.view = v; if (t === cur()) applyView(); }
+let shownShell = null, viewsSig = '';
+function applyView() {
+  const t = cur(); if (!t) return;
+  for (const el of $('chatLogs').children) el.hidden = true;
+  const v = t.view;
+  const a = v && v.kind === 'agent' ? t.agents.find((x) => x.id === v.id) : null;
+  const s = v && v.kind === 'shell' ? t.shells.get(v.id) : null;
+  if (!a && !s) t.view = null;
+  shownShell = null;
+  if (a) { a.log.hidden = false; a.log.scrollTop = a.log.scrollHeight; }
+  else if (s) fillShellView(t, s);
+  else { t.log.hidden = false; t.log.scrollTop = t.log.scrollHeight; }
+  viewsSig = ''; renderViews();
+}
+function renderViews() {
+  const t = cur(), bar = $('chatViews'); if (!t || !bar) return;
+  const all = [...t.shells.values()];
+  const v = t.view, seen = (x) => fresh(x) || (v && v.id === x.id);
+  const shells = all.filter(seen), agents = t.agents.filter(seen);
+  const sig = [t.id, v ? v.kind + v.id : '', t.run ? 1 : 0].concat(agents.map((a) => a.id + a.state), shells.map((s) => s.id + s.state)).join('|');
+  if (sig === viewsSig) return;
+  viewsSig = sig;
+  bar.innerHTML = '';
+  if (!agents.length && !shells.length) { bar.hidden = true; return; }
+  bar.hidden = false;
+  const chip = (label, on, live, go, title) => {
+    const b = document.createElement('button'); b.className = 'vchip' + (on ? ' on' : ''); b.title = title;
+    if (live) { const d = document.createElement('span'); d.className = 'dot'; b.appendChild(d); }
+    b.append(label); b.onclick = go; bar.appendChild(b);
+  };
+  chip('conversation', !v, !!t.run, () => setView(t, null), 'The conversation with Claude');
+  for (const a of agents) chip('helper: ' + a.desc.slice(0, 32), v && v.kind === 'agent' && v.id === a.id, a.state === 'running',
+    () => setView(t, { kind: 'agent', id: a.id }), 'What this helper (subagent) is doing: ' + a.desc);
+  for (const s of shells) chip((s.tool === 'Monitor' ? 'monitor: ' : s.bg ? 'bg: ' : 'shell: ') + (s.desc || s.command).slice(0, 32),
+    v && v.kind === 'shell' && v.id === s.id, s.state === 'running', () => setView(t, { kind: 'shell', id: s.id }), '$ ' + s.command);
+}
+function fillShellView(t, s) {
+  const el = $('shellView'); shownShell = s;
+  el.innerHTML = '<div class="view-head"><button class="back">← conversation</button><span class="st"></span><span class="vt"></span></div>'
+    + '<pre class="cmd"></pre><pre class="out"></pre>';
+  el.querySelector('.back').onclick = () => setView(t, null);
+  el.querySelector('.cmd').textContent = '$ ' + s.command;
+  el.hidden = false; renderShell(s); watchShell(s);
+}
+// a helper (subagent): its own log, with the task it was given, what it does and its answer
+function addAgent(t, b) {
+  const inp = b.input || {};
+  const a = { id: b.id, desc: inp.description || (inp.prompt || '').slice(0, 60) || 'a helper', state: 'running', step: '', t0: Date.now() };
+  a.log = document.createElement('div'); a.log.className = 'chat-log'; a.log.hidden = true;
+  a.log.innerHTML = '<div class="view-head"><button class="back">← conversation</button><span class="vt"></span></div><div class="msg user"></div>';
+  a.log.querySelector('.vt').textContent = 'helper: ' + a.desc + (inp.subagent_type ? ' (' + inp.subagent_type + ')' : '');
+  a.log.querySelector('.msg.user').textContent = inp.prompt || '';
+  a.log.querySelector('.back').onclick = () => setView(t, null);
+  $('chatLogs').appendChild(a.log);
+  t.agents.push(a); if (t === cur()) renderViews();
+  return a;
+}
+function agentFinished(a, how, summary) {
+  if (a.state !== 'running') return;
+  a.state = how; a.step = ''; a.endedAt = Date.now();
+  const m = document.createElement('div'); m.className = 'meta';
+  m.textContent = (how === 'done' ? 'finished' : how) + (summary ? ' · ' + summary : '');
+  a.log.appendChild(m); scrollEl(m);
+}
+function agentLine(t, box, a) {
+  const el = document.createElement('div'); el.className = 'tool';
+  el.append('helper: ' + a.desc);
+  const o = document.createElement('span'); o.className = 'open'; o.textContent = 'see what it does ⤢';
+  o.onclick = () => setView(t, { kind: 'agent', id: a.id });
+  el.appendChild(o); box.appendChild(el); scrollEl(el);
+}
+function agentDone(t, b, d) {
+  const a = t.agents.find((x) => x.id === b.tool_use_id); if (!a) return;
+  const res = d && d.tool_use_result && typeof d.tool_use_result === 'object' ? d.tool_use_result : {};
+  if (res.isAsync || res.status === 'async_launched') {   // it works in the background: its end comes as task events
+    if (res.agentId) { a.task = res.agentId; t.tasks.set(res.agentId, a.id); }
+    return;
+  }
+  if (a.state === 'running') a.endedAt = Date.now();
+  a.state = 'done'; a.step = '';
+  const txt = textOf(b.content);
+  if (txt.trim()) {
+    const m = document.createElement('div'); m.className = 'msg assistant';
+    m.innerHTML = '<div class="plan-title">Its answer</div>' + md(txt); a.log.appendChild(m); scrollEl(m);
+  }
+}
+const scrollEl = (el) => { const l = el.closest('.chat-log'); if (l) l.scrollTop = l.scrollHeight; };
+function showChat() {
+  const t = cur(); if (!t) return;
+  applyView();
+  t.unread = false;
+  $('chatMode').value = t.mode; $('chatModel').value = t.model;
+  setChatBusy(!!t.run);
+  renderChatTabs(); renderChatInfo(); renderActivity(); renderTabs();
+}
+function renderChatTabs() {
+  const bar = $('chatTabs'); bar.innerHTML = '';
+  for (const t of chats.tabs) {
+    const b = document.createElement('div'); b.className = 'ctab' + (t.id === chats.active ? ' on' : '') + (t.unread ? ' unread' : '');
+    const sh = [...t.shells.values()].filter((s) => s.state === 'running').length;
+    b.title = (t.title || 'a new conversation') + ' · ' + MODES[t.mode] + (t.run ? ' · working' : t.unread ? ' · answered' : '') + (sh ? ` · ${sh} shell${sh > 1 ? 's' : ''} running` : '');
+    if (t.run) { const d = document.createElement('span'); d.className = 'dot'; b.appendChild(d); }
+    const n = document.createElement('span'); n.className = 'name'; n.textContent = chatTitle(t); b.appendChild(n);
+    const x = document.createElement('span'); x.className = 'x'; x.textContent = '×'; x.title = t.run ? 'Stop it and close' : 'Close this conversation';
+    x.onclick = (e) => { e.stopPropagation(); closeChat(t); };
+    b.appendChild(x);
+    b.onclick = () => { if (chats.active === t.id) return; chats.active = t.id; saveChatsOf(project); showChat(); $('chatText').focus(); };
+    b.ondblclick = () => { const n = prompt('Name of this tab (also the session name in Claude Code\'s /resume)', chatTitle(t)); if (n && n.trim()) renameChat(t, n); };
+    bar.appendChild(b);
+  }
+  const plus = document.createElement('button'); plus.className = 'ctab-new'; plus.textContent = '+';
+  plus.title = 'A new conversation in a new tab (the tabs work at the same time)';
+  plus.onclick = () => addChat(); bar.appendChild(plus);
+}
+// /rename, or a double click on the tab: the tab's name, which also names the session (--name)
+function renameChat(t, n) {
+  t.title = n.replace(/\s+/g, ' ').trim().slice(0, 60); saveChatsOf(t.project);
+  if (t.project === project) renderChatTabs();
+}
+function addChat() {
+  const c = cur(), t = newChat({ mode: c ? c.mode : 'ask', model: c ? c.model : '' });
+  chats.tabs.push(t); chats.active = t.id; saveChatsOf(project); showChat(); $('chatText').focus();
+}
+async function closeChat(t) {
+  if (t.run) { if (!confirm(`"${chatTitle(t)}" is still working: stop it and close?`)) return; await api('/api/stop', { id: t.run }); }
+  const i = chats.tabs.indexOf(t); if (i < 0) return;
+  chats.tabs.splice(i, 1); t.log.remove(); for (const a of t.agents) a.log.remove(); t.closed = true;
+  if (!chats.tabs.length) chats.tabs.push(newChat({ mode: t.mode, model: t.model }));
+  if (chats.active === t.id) chats.active = chats.tabs[Math.min(i, chats.tabs.length - 1)].id;
+  saveChatsOf(project); showChat();
+}
+// /clear: the same tab, a new conversation
+function clearChat(t) {
+  if (t.run) return;
+  for (const a of t.agents) a.log.remove(); t.view = null;
+  t.session = ''; t.title = ''; t.usedModel = ''; t.agents = []; t.files.clear(); t.shells.clear(); t.tasks.clear(); t.step = ''; t.now = '';
+  t.log.innerHTML = EMPTY_CHAT; saveChatsOf(t.project); showChat(); $('chatText').focus();
+}
+// "opus 5.5" for claude-opus-5-5
+const prettyModel = (m) => m.replace(/^claude-/, '').replace(/-(\d+)-(\d+)(-\d{8})?/, ' $1.$2').replace(/\[1m\]$/i, ' (1M)');
+function renderChatInfo() {
+  const t = cur(); if (!t) return;
+  const used = t.usedModel ? prettyModel(t.usedModel) : '';
+  const next = t.model && !(t.usedModel || '').includes(t.model) ? t.model + (used ? ' from the next message' : '') : '';
+  $('chatState').textContent = (next || used || 'default model') + ' · ' + MODES[t.mode];
+  $('chatState').title = (t.usedModel ? 'Model of the last answer: ' + t.usedModel : 'The model is confirmed by the first answer')
+    + (t.session ? ' · conversation ' + t.session.slice(0, 8) : '');
+}
+function setSession(t, id) {
+  t.session = id || ''; saveChatsOf(t.project);
+  if (t === cur()) renderChatInfo();
+}
+function setChatBusy(on) { $('chatSend').disabled = on; $('chatStop').disabled = !on; }
+
+// activity: the step the tab's Claude is on, its helpers (subagents), the files it touched, and what runs
+function setStep(t, text, file) {
+  t.step = text; t.now = file || '';
+  if (t.project === project) { renderActivity(); renderTabs(); }
+}
+function touchFile(t, rel, kind) {
+  if (!rel || rel.startsWith('/')) return;
+  if (kind === 'edit' || t.files.get(rel) !== 'edit') t.files.set(rel, kind);
+}
+// for the editor's tabs: what the conversations of this project did with a file
+function claudeMark(p) { let m = ''; for (const t of chats.tabs) { const k = t.files.get(p); if (k === 'edit') return 'edit'; if (k) m = k; } return m; }
+const claudeIsNow = (p) => chats.tabs.some((t) => t.run && t.now === p);
 const fmtMs = (ms) => ms < 60000 ? Math.round(ms / 1000) + ' s' : Math.floor(ms / 60000) + ' min ' + Math.round(ms % 60000 / 1000) + ' s';
 function fileLink(rel) {
   const a = document.createElement('span'); a.className = 'f'; a.textContent = rel;
   if (rel.endsWith('.nihil')) a.onclick = () => open(rel);
   return a;
 }
+function chatOfRun(run) { for (const c of chatsByProject.values()) for (const t of c.tabs) if (t.run === run) return t; return null; }
 function renderActivity() {
   const body = $('actBody'); if (!body) return; body.innerHTML = '';
+  const t = cur() || { agents: [], files: new Map() };
   const row = (k, fill) => { const r = document.createElement('div'); r.className = 'row';
     const kk = document.createElement('span'); kk.className = 'k'; kk.textContent = k; const v = document.createElement('span'); v.className = 'v';
     fill(v); r.append(kk, v); body.appendChild(r); };
   row('Claude', (v) => {
-    if (chatRun) { const d = document.createElement('span'); d.className = 'dot'; v.append(d, claudeStep || 'starting…');
-      if (claudeNow) { v.append(' '); v.appendChild(fileLink(claudeNow)); } }
-    else v.append(chatSession ? 'idle (the conversation goes on)' : 'idle');
+    if (t.run) { const d = document.createElement('span'); d.className = 'dot'; v.append(d, t.step || 'starting…');
+      if (t.now) { v.append(' '); v.appendChild(fileLink(t.now)); } }
+    else v.append(t.session ? 'idle (the conversation goes on)' : 'idle');
   });
-  for (const a of claudeAgents) row('helper', (v) => {
+  for (const a of t.agents.filter(fresh)) row('helper', (v) => {
+    v.style.cursor = 'pointer'; v.title = 'See what this helper does'; v.onclick = () => setView(t, { kind: 'agent', id: a.id });
     if (a.state === 'running') { const d = document.createElement('span'); d.className = 'dot'; v.appendChild(d); }
     v.append(a.desc + (a.step ? ' — ' + a.step : '')); if (a.state !== 'running') v.classList.add('done');
     if (a.state !== 'running') v.append(' (done)');
   });
-  const reads = [...claudeFiles].filter(([, k]) => k === 'read').map(([f]) => f), edits = [...claudeFiles].filter(([, k]) => k === 'edit').map(([f]) => f);
+  const reads = [...t.files].filter(([, k]) => k === 'read').map(([f]) => f), edits = [...t.files].filter(([, k]) => k === 'edit').map(([f]) => f);
   if (reads.length || edits.length) row('files', (v) => {
     if (edits.length) { v.append('edited '); edits.forEach((f, i) => { if (i) v.append(', '); v.appendChild(fileLink(f)); }); }
     if (reads.length) { if (edits.length) v.append('; '); v.append('read '); reads.forEach((f, i) => { if (i) v.append(', '); v.appendChild(fileLink(f)); }); }
   });
-  row('tabs', (v) => { v.textContent = tabs.length ? tabs.map((t) => t.path.slice(t.path.lastIndexOf('/') + 1) + (t.dirty ? ' ●' : '')).join(', ') : 'none open'; });
-  const progs = runningNow.filter((r) => r.kind === 'program'), chats = runningNow.filter((r) => r.kind === 'claude' && r.run !== chatRun);
+  row('tabs', (v) => { v.textContent = tabs.length ? tabs.map((x) => x.path.slice(x.path.lastIndexOf('/') + 1) + (x.dirty ? ' ●' : '')).join(', ') : 'none open'; });
+  const progs = runningNow.filter((r) => r.kind === 'program'), others = runningNow.filter((r) => r.kind === 'claude' && r.run !== t.run);
   row('programs', (v) => {
     if (!progs.length) { v.textContent = 'none running'; return; }
     progs.forEach((r, i) => { if (i) v.append(', '); const d = document.createElement('span'); d.className = 'dot'; v.appendChild(d);
       v.appendChild(fileLink(r.label)); v.append(` (${fmtMs(r.ms)}${r.project !== project ? ', ' + r.project.split('/').pop() : ''})`); });
   });
-  if (chats.length) row('other chats', (v) => { v.textContent = chats.map((r) => `"${r.label}" (${fmtMs(r.ms)})`).join(', '); });
-  row('shells', (v) => { v.textContent = 'none: the panel runs no commands (Bash is blocked), so there are no shells or monitors'; });
+  if (others.length) row('other chats', (v) => {
+    others.forEach((r, i) => {
+      if (i) v.append(', ');
+      const o = chatOfRun(r.run), s = document.createElement('span');
+      s.textContent = `"${o ? chatTitle(o) : r.label}" (${fmtMs(r.ms)}${r.project !== project ? ', ' + r.project.split('/').pop() : ''})`;
+      if (o && o.project === project) { s.className = 'f'; s.title = 'Go to this conversation'; s.onclick = () => { chats.active = o.id; showChat(); }; }
+      v.appendChild(s);
+    });
+  });
+  row('shells', (v) => {
+    const all = [...t.shells.values()], live = all.filter((s) => s.state === 'running');
+    let elsewhere = 0; for (const c of chatsByProject.values()) for (const x of c.tabs) if (x !== t) for (const s of x.shells.values()) if (s.state === 'running') elsewhere++;
+    const other = elsewhere ? ` · ${elsewhere} running in other tabs` : '';
+    if (!all.length) { v.textContent = (t.mode === 'edits' || t.mode === 'auto' ? 'none yet in this conversation' : `none: in ${MODES[t.mode]} Claude runs no commands (accept edits and auto do)`) + other; return; }
+    const show = all.filter(fresh), before = all.length - live.length;
+    v.append(`${live.length} running${before ? ` · ${before} finished (in the conversation, ⤢ opens them)` : ''}${other}${show.length ? ': ' : ''}`);
+    show.forEach((s, i) => {
+      if (i) v.append(', ');
+      if (s.state === 'running') { const d = document.createElement('span'); d.className = 'dot'; v.appendChild(d); }
+      const a = document.createElement('span'); a.className = 'f'; a.title = s.command + '\n(click to see its output)';
+      a.textContent = (s.tool === 'Monitor' ? 'monitor: ' : s.bg ? 'bg: ' : '') + (s.desc || s.command.slice(0, 40)) + (s.state === 'running' ? ` (${fmtMs(Date.now() - s.t0)})` : '');
+      a.onclick = () => showShell(s); v.appendChild(a);
+    });
+  });
   renderUsage();
-  const live = (chatRun ? 1 : 0) + claudeAgents.filter((a) => a.state === 'running').length + progs.length;
+  let live = progs.length;
+  for (const x of chats.tabs) live += (x.run ? 1 : 0) + x.agents.filter((a) => a.state === 'running').length
+    + [...x.shells.values()].filter((s) => s.state === 'running').length;
   $('actSummary').textContent = live ? `· ${live} working` : '';
+  renderViews();
 }
 // the plan's usage: every answer carries a rate_limit_event (the 5-hour and the 7-day windows,
 // how much of each is used and when it renews); the last one is kept, so seeing it costs nothing
@@ -876,13 +1188,13 @@ function saveUsage(info) {
   try { localStorage.setItem('nihil-ide-claude-usage', JSON.stringify({ at: Date.now(), info })); } catch (e) {}
 }
 function loadUsage() { try { return JSON.parse(localStorage.getItem('nihil-ide-claude-usage') || 'null'); } catch (e) { return null; } }
-function addCost(usd) {
-  if (!usd || !chatSession) return;
-  const k = chatKey() + ':cost:' + chatSession;
+function addCost(t, usd) {
+  if (!usd || !t.session) return;
+  const k = chatKey(t.project) + ':cost:' + t.session;
   let c = 0; try { c = parseFloat(localStorage.getItem(k)) || 0; } catch (e) {}
   try { localStorage.setItem(k, String(c + usd)); } catch (e) {}
 }
-function sessionCost() { try { return parseFloat(localStorage.getItem(chatKey() + ':cost:' + chatSession)) || 0; } catch (e) { return 0; } }
+function sessionCost(t) { try { return parseFloat(localStorage.getItem(chatKey(t.project) + ':cost:' + t.session)) || 0; } catch (e) { return 0; } }
 const until = (t) => { const m = Math.max(0, Math.round((t * 1000 - Date.now()) / 60000));
   return m < 60 ? `${m} min` : m < 1440 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${Math.floor(m / 1440)} d ${Math.floor(m % 1440 / 60)} h`; };
 const when = (t) => { const d = new Date(t * 1000), now = new Date();
@@ -915,7 +1227,8 @@ function renderUsage() {
   const left = document.createElement('span'); left.textContent = 'as of ' + (age < 1 ? 'now' : age < 60 ? age + ' min ago' : Math.floor(age / 60) + ' h ago');
   const right = document.createElement('span');
   if (u.info.overageStatus === 'rejected') { right.className = 'alert'; right.textContent = 'no extra usage (' + (u.info.overageDisabledReason || 'off').replace(/_/g, ' ') + ')'; }
-  if (chatSession && sessionCost()) right.textContent = (right.textContent ? right.textContent + ' · ' : '') + `conversation US$ ${sessionCost().toFixed(2)}`;
+  const t = cur();
+  if (t && t.session && sessionCost(t)) right.textContent = (right.textContent ? right.textContent + ' · ' : '') + `conversation US$ ${sessionCost(t).toFixed(2)}`;
   foot.append(left, right); box.appendChild(foot);
 }
 
@@ -928,26 +1241,20 @@ async function pollActivity() {
 }
 setTimeout(pollActivity, 500);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-function chatKey() { return 'nihil-ide-claude:' + project; }
-function loadChat() {
-  try { chatSession = localStorage.getItem(chatKey()) || ''; } catch (e) { chatSession = ''; }
-  try { $('chatEdits').checked = localStorage.getItem(chatKey() + ':edits') === '1'; } catch (e) {}
-  $('chatState').textContent = chatSession ? 'conversation ' + chatSession.slice(0, 8) : '';
-}
-function setSession(id) {
-  chatSession = id || '';
-  try { localStorage.setItem(chatKey(), chatSession); } catch (e) {}
-  $('chatState').textContent = chatSession ? 'conversation ' + chatSession.slice(0, 8) : '';
-}
 function toggleChat(on) {
   chatOpen = on === undefined ? !chatOpen : on;
   try { localStorage.setItem('nihil-ide-chat-open', chatOpen ? '1' : '0'); } catch (e) {}
-  layout(); if (chatOpen) $('chatText').focus();
+  layout(); if (chatOpen) { $('chatText').focus(); showAccount(); }
 }
 { const w = recall('nihil-ide-chat-width'); if (w >= 260) chatW = w;
   let o = null; try { o = localStorage.getItem('nihil-ide-chat-open'); } catch (e) {}
   chatOpen = o === '1'; layout(); }
 $('btnClaude').onclick = () => toggleChat();
+$('chatAccount').onclick = async () => {
+  const s = await showAccount(), t = cur();
+  if (s && s.ok && !s.status.loggedIn && t && !t.run) { chatAdd('user', '/login', t); chatLogin(t, false); }
+};
+
 $('chatResize').onmousedown = (e) => {
   e.preventDefault();
   const right = document.querySelector('main').getBoundingClientRect().right;
@@ -955,12 +1262,52 @@ $('chatResize').onmousedown = (e) => {
   const up = () => { removeEventListener('mousemove', move); removeEventListener('mouseup', up); };
   addEventListener('mousemove', move); addEventListener('mouseup', up);
 };
-$('chatEdits').onchange = () => { try { localStorage.setItem(chatKey() + ':edits', $('chatEdits').checked ? '1' : '0'); } catch (e) {} };
-$('chatNew').onclick = () => { if (chatRun) return; setSession(''); $('chatLog').innerHTML = ''; claudeFiles.clear(); claudeAgents = [];
-  renderTabs(); renderActivity(); $('chatText').focus(); };
+$('chatMode').onchange = () => { const t = cur(); t.mode = $('chatMode').value; saveChatsOf(t.project); renderChatInfo(); renderChatTabs(); };
+$('chatModel').onchange = () => { const t = cur(); t.model = $('chatModel').value; saveChatsOf(t.project); renderChatInfo(); };
 $('chatText').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); chatSend(); } });
+// ↑ and ↓ in the message box: the messages sent before (per project, the last 100), as in a terminal.
+// They change the message only from its first line (↑) or its last line (↓); ↓ past the newest
+// gives back what was being written.
+const HIST_MAX = 100;
+let histPos = -1, histDraft = '';
+const histKey = () => chatKey() + ':history';
+function loadHist() { try { return JSON.parse(localStorage.getItem(histKey()) || '[]'); } catch (e) { return []; } }
+function pushHist(text) {
+  const h = loadHist().filter((x) => x !== text); h.push(text);
+  try { localStorage.setItem(histKey(), JSON.stringify(h.slice(-HIST_MAX))); } catch (e) {}
+  histPos = -1; histDraft = '';
+}
+$('chatText').addEventListener('keydown', (e) => {
+  if ((e.key !== 'ArrowUp' && e.key !== 'ArrowDown') || e.shiftKey || e.altKey || e.metaKey || e.ctrlKey || e.isComposing) return;
+  const ta = $('chatText'), v = ta.value, up = e.key === 'ArrowUp';
+  if (up ? v.lastIndexOf('\n', ta.selectionStart - 1) !== -1 : v.indexOf('\n', ta.selectionEnd) !== -1) return;
+  const h = loadHist(); if (!h.length) return;
+  if (up) { if (histPos === -1) { histDraft = v; histPos = h.length; } if (histPos === 0) return; histPos--; }
+  else { if (histPos === -1) return; histPos++; }
+  e.preventDefault();
+  if (histPos >= h.length) { histPos = -1; ta.value = histDraft; } else ta.value = h[histPos];
+  ta.setSelectionRange(ta.value.length, ta.value.length);
+});
+$('chatText').addEventListener('input', () => { histPos = -1; updatePop(); });
+$('chatText').addEventListener('keydown', (e) => {
+  if ($('cmdPop').hidden || !pop.items.length || e.isComposing) return;
+  const n = pop.items.length;
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { pop.sel = (pop.sel + (e.key === 'ArrowDown' ? 1 : -1) + n) % n; pop.moved = true; renderPop(); }
+  else if (e.key === 'Tab') pickPop(pop.sel);
+  else if (e.key === 'Enter' && !e.shiftKey) {
+    // Enter completes only a suggestion that starts with what was typed (or one chosen with the arrows);
+    // otherwise, and when the command is already whole, it sends what was typed
+    const it = pop.items[pop.sel].name;
+    if ($('chatText').value.trim() === '/' + it || !(pop.moved || it.toLowerCase().startsWith(pop.q))) { hidePop(); return; }
+    pickPop(pop.sel);
+  }
+  else if (e.key === 'Escape') hidePop();
+  else return;
+  e.preventDefault(); e.stopImmediatePropagation();
+}, true);
+$('chatText').addEventListener('blur', () => setTimeout(hidePop, 150));
 $('chatSend').onclick = () => chatSend();
-$('chatStop').onclick = async () => { if (chatRun) await api('/api/stop', { id: chatRun }); };
+$('chatStop').onclick = async () => { const t = cur(); if (t && t.run) await api('/api/stop', { id: t.run }); };
 
 // what is open in the IDE, for the message
 function ideContext() {
@@ -993,13 +1340,14 @@ function md(t) {
   });
   return out.join('');
 }
-function chatAdd(cls, html) {
-  const log = $('chatLog'); const e = log.querySelector('.empty'); if (e) e.remove();
-  const el = document.createElement('div'); el.className = 'msg ' + cls; el.innerHTML = html; log.appendChild(el);
-  log.scrollTop = log.scrollHeight; return el;
+const scrollDown = (t) => { t.log.scrollTop = t.log.scrollHeight; };
+function chatAdd(cls, html, t = cur()) {
+  const e = t.log.querySelector('.empty'); if (e) e.remove();
+  const el = document.createElement('div'); el.className = 'msg ' + cls; el.innerHTML = html; t.log.appendChild(el);
+  scrollDown(t); return el;
 }
 const relPath = (p) => p && project && p.startsWith(project + '/') ? p.slice(project.length + 1) : p || '';
-function toolLine(box, b) {
+function toolLine(t, box, b) {
   const inp = b.input || {}, el = document.createElement('div'); el.className = 'tool';
   const verb = { Read: 'read', Edit: 'edited', Write: 'wrote', Grep: 'searched', Glob: 'listed' }[b.name] || b.name;
   const target = inp.file_path ? relPath(inp.file_path) : inp.pattern || '';
@@ -1013,7 +1361,83 @@ function toolLine(box, b) {
     d.innerHTML = lines.slice(0, 60).join('\n') + (lines.length > 60 ? '\n…' : ''); el.appendChild(d);
   }
   if (b.name === 'Write' && inp.content) el.append(` (${inp.content.split('\n').length} lines)`);
-  box.appendChild(el); $('chatLog').scrollTop = $('chatLog').scrollHeight;
+  box.appendChild(el); scrollEl(el);
+}
+// shells: the commands Claude runs (Bash), in front or in the background, and its monitors. Each one
+// is a line in the answer that opens to show the command and its output; a background one is
+// followed live from the file Claude Code writes its output to (/api/claude/taskout).
+const textOf = (c) => typeof c === 'string' ? c : Array.isArray(c) ? c.map((x) => x && x.type === 'text' ? x.text : '').join('') : '';
+function shellLine(t, box, b) {
+  const inp = b.input || {};
+  const s = { id: b.id, tool: b.name, command: inp.command || inp.prompt || JSON.stringify(inp), desc: inp.description || '',
+    bg: !!inp.run_in_background || b.name === 'Monitor', state: 'running', out: '', file: '', task: '', bytes: 0, t0: Date.now(), chat: t };
+  const el = document.createElement('details'); el.className = 'shell';
+  el.innerHTML = '<summary><span class="st"></span> <span class="what"></span><span class="open" title="Show it in the whole panel">⤢</span></summary><pre class="cmd"></pre><pre class="out"></pre>';
+  el.querySelector('.open').onclick = (e) => { e.preventDefault(); setView(t, { kind: 'shell', id: s.id }); };
+  el.querySelector('.cmd').textContent = '$ ' + s.command;
+  el.ontoggle = () => { if (el.open) watchShell(s); };
+  s.el = el; t.shells.set(s.id, s); box.appendChild(el); renderShell(s); scrollEl(el);
+  return s;
+}
+function renderShell(s) {
+  const st = s.el.querySelector('.st'); st.className = 'st ' + s.state;
+  st.textContent = { running: '●', done: '✓', failed: '✗' }[s.state] || '■';
+  s.el.querySelector('.what').textContent = (s.tool === 'Monitor' ? 'monitor: ' : s.bg ? 'background: ' : 'ran: ')
+    + (s.desc || s.command.split('\n')[0].slice(0, 80)) + (s.state === 'running' ? ' (running)' : s.state === 'stopped' ? ' (stopped)' : s.state === 'failed' ? ' (failed)' : '');
+  const o = s.el.querySelector('.out');
+  o.textContent = s.out || (s.state === 'running' ? (s.file ? 'waiting for its output…' : s.bg ? '…' : 'running… its output shows when it ends') : '(no output)');
+  o.scrollTop = o.scrollHeight;
+  if (shownShell === s) {
+    const v = $('shellView'), vo = v.querySelector('.out'), atEnd = vo.scrollTop + vo.clientHeight >= vo.scrollHeight - 4;
+    v.querySelector('.st').className = 'st ' + s.state; v.querySelector('.st').textContent = st.textContent;
+    v.querySelector('.vt').textContent = s.el.querySelector('.what').textContent;
+    vo.textContent = o.textContent; if (atEnd) v.scrollTop = v.scrollHeight;
+  }
+  renderViews();
+}
+async function watchShell(s) {
+  if (!s.file || s.watching) return;
+  s.watching = true;
+  try {
+    for (;;) {
+      const r = await api(`/api/claude/taskout?path=${encodeURIComponent(s.file)}&from=${s.bytes}`).catch(() => null);
+      if (!r || r.error) break;
+      if (r.bytes) { s.out += r.out; s.bytes += r.bytes; renderShell(s); }
+      if ((s.state !== 'running' && !r.bytes) || !((s.el.open && s.el.isConnected) || shownShell === s)) break;
+      await sleep(1000);
+    }
+  } finally { s.watching = false; }
+}
+function shellResult(t, d, b) {
+  const s = t.shells.get(b.tool_use_id);
+  const res = d.tool_use_result && typeof d.tool_use_result === 'object' ? d.tool_use_result : {}, txt = textOf(b.content);
+  if (res.backgroundTaskId || /running in background/i.test(txt)) {      // it goes on: its output is in a file
+    s.bg = true; s.task = res.backgroundTaskId || s.task || ((/ID: ([\w-]+)/.exec(txt) || [])[1] || '');
+    if (s.task) t.tasks.set(s.task, s.id);
+    const m = /written to: (\S+?\.output)/.exec(txt); if (m) s.file = m[1];
+    renderShell(s);
+  } else {
+    s.out = typeof res.stdout === 'string' ? res.stdout + (res.stderr ? (res.stdout ? '\n' : '') + res.stderr : '') : txt;
+    shellEnded(s, b.is_error ? 'failed' : res.interrupted ? 'stopped' : 'done');
+  }
+  if (t.project === project) renderActivity();
+}
+function showShell(s) {
+  const t = s.chat; t.view = { kind: 'shell', id: s.id };
+  if (t !== cur()) { chats.active = t.id; showChat(); } else applyView();
+}
+// running, or finished a moment ago (it shows ✓ for a few seconds, then leaves the strip and Activity)
+const LINGER_MS = 4000;
+const fresh = (x) => x.state === 'running' || Date.now() - (x.endedAt || 0) < LINGER_MS;
+function shellEnded(s, how) { if (s.state === 'running') s.endedAt = Date.now(); s.state = how; renderShell(s); if (s.el.open) watchShell(s); }
+// plan mode: the plan Claude proposes (ExitPlanMode), with a button to carry it out
+function planBox(t, box, plan) {
+  const el = document.createElement('div'); el.className = 'plan';
+  el.innerHTML = '<div class="plan-title">Plan</div>' + md(plan);
+  const go = document.createElement('button'); go.textContent = 'Accept the plan and edit';
+  go.title = 'Switches this tab to "accept edits" and asks Claude to carry out the plan';
+  go.onclick = () => { go.remove(); followUp(t, 'edits', 'The plan is accepted: carry it out now.'); };
+  el.appendChild(go); box.appendChild(el); scrollDown(t);
 }
 // a tab Claude changed: its new text from the disk (unless it has unsaved changes here)
 async function reloadTab(t) {
@@ -1027,21 +1451,236 @@ async function reloadTab(t) {
   if (c) editor.setCursor(c);
   renderTabs();
 }
-function setChatBusy(on) { $('chatSend').disabled = on; $('chatStop').disabled = !on; $('chatNew').disabled = on; }
 
-async function chatSend() {
-  const text = $('chatText').value.trim();
-  if (!text || chatRun) return;
-  $('chatText').value = '';
-  chatAdd('user', esc(text));
-  const r = await api('/api/claude', { message: text, context: ideContext(), session: chatSession, edits: $('chatEdits').checked });
-  if (!r.ok) { chatAdd('error', esc(r.error || 'could not start Claude')); return; }
-  chatRun = r.run; setChatBusy(true);
-  const box = chatAdd('assistant', '');
-  let textEl = null, raw = '', out = 0, err = 0, buf = '', errText = '', result = null;
+// the account in the panel's header
+async function showAccount() {
+  const el = $('chatAccount'), s = await api('/api/claude/auth').catch(() => null), st = s && s.ok && s.status;
+  el.classList.toggle('out', !(st && st.loggedIn));
+  el.textContent = !s || !s.ok ? '' : !st.loggedIn ? 'not signed in · /login'
+    : (st.email || st.authMethod || 'signed in') + (st.subscriptionType ? ' · ' + st.subscriptionType : '');
+  return s;
+}
+// the account, from `claude auth status --json`
+function accountLine(st) {
+  if (!st || !st.loggedIn) return 'Not signed in: type <code>/login</code>.';
+  const plan = st.subscriptionType ? ` · ${esc(st.subscriptionType)} plan` : st.authMethod ? ` · ${esc(st.authMethod)}` : '';
+  const until = st.loginExpiresAt ? ` · until ${esc(new Date(st.loginExpiresAt).toLocaleDateString())}` : '';
+  return `Signed in${st.email ? ' as <b>' + esc(st.email) + '</b>' : ''}${plan}${until}.`;
+}
+function runStarted(t, run, step) { t.run = run; if (t === cur()) setChatBusy(true); setStep(t, step); renderChatTabs(); }
+function runEnded(t) {
+  t.run = null; if (t === cur()) setChatBusy(false); else t.unread = true;
+  for (const a of t.agents) if (a.state === 'running') agentFinished(a, 'stopped', '');
+  for (const s of t.shells.values()) if (s.state === 'running') shellEnded(s, 'stopped');
+  setStep(t, '', ''); if (t.project === project) renderChatTabs();
+}
+
+// /login: `claude auth login` on the server's machine. It opens the browser there; the link is
+// also shown here, and, if the sign-in page gives a code, it is pasted here and goes to its input.
+async function chatLogin(t, useConsole) {
+  const r = await api('/api/claude/login', { console: useConsole });
+  if (!r.ok) { chatAdd('error', esc(r.error || 'could not start the sign-in'), t); return; }
+  runStarted(t, r.run, 'signing in');
+  const box = chatAdd('assistant', '', t);
+  box.innerHTML = '<div class="login-text">Opening the sign-in page in the browser…</div>'
+    + '<div class="login-link"></div>'
+    + '<div class="login-code" style="display:flex;gap:6px;margin-top:6px"><input placeholder="code from the sign-in page, if it shows one" style="flex:1">'
+    + '<button>Send code</button></div>';
+  const linkEl = box.querySelector('.login-link'), input = box.querySelector('.login-code input'), btn = box.querySelector('.login-code button');
+  const sendCode = async () => { const v = input.value.trim(); if (!v || !t.run) return; input.value = '';
+    await api('/api/stdin', { id: t.run, data: v + '\n' }); box.querySelector('.login-text').textContent = 'Code sent, checking…'; };
+  btn.onclick = sendCode;
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); sendCode(); } });
+  let out = 0, err = 0, all = '', code = null;
+  while (code === null) {
+    await sleep(700);
+    const o = await api(`/api/output?id=${r.run}&out=${out}&err=${err}`);
+    if (o.error) break;
+    out += o.out_bytes; err += o.err_bytes; all += o.out + o.err; code = o.code;
+    const url = /https:\/\/\S+/.exec(all.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, ''));
+    if (url && !linkEl.firstChild) {
+      const a = document.createElement('a'); a.href = url[0]; a.target = '_blank'; a.rel = 'noopener';
+      a.textContent = 'Open the sign-in page'; linkEl.append('If the browser did not open: ', a);
+    }
+  }
+  runEnded(t);
+  box.querySelector('.login-code').remove();
+  if (code === 0) {
+    const s = await api('/api/claude/auth');
+    box.innerHTML = s.ok ? accountLine(s.status) : 'Signed in.';
+    showAccount();
+  } else {
+    const msg = all.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').trim().split('\n').filter((l) => !/Paste code|visit:|^https:/.test(l)).pop();
+    box.className = 'msg error'; box.textContent = code === -1 ? 'Sign-in stopped.' : 'Sign-in failed' + (msg ? ': ' + msg : '.');
+  }
+}
+// /mcp: the MCP servers Claude Code has for this project (`claude mcp list`, with their health)
+async function chatMcp(t) {
+  const r = await api('/api/claude/mcp', {});
+  if (!r.ok) { chatAdd('error', esc(r.error || 'could not list the MCP servers'), t); return; }
+  const box = chatAdd('assistant', '<div class="tool">checking the MCP servers…</div>', t);
+  let out = 0, err = 0, all = '', code = null;
+  while (code === null) {
+    await sleep(500);
+    const o = await api(`/api/output?id=${r.run}&out=${out}&err=${err}`);
+    if (o.error) break;
+    out += o.out_bytes; err += o.err_bytes; all += o.out + o.err; code = o.code;
+  }
+  const lines = all.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').split('\n').map((l) => l.trim()).filter((l) => l && !/^Checking MCP server health/.test(l));
+  box.innerHTML = '<b>MCP servers</b> for this project:';
+  if (!lines.length) { box.append(' none.'); }
+  const ul = document.createElement('div'); ul.style.margin = '4px 0';
+  for (const l of lines) {
+    const m = /^(.*?): (.*) - (.*)$/.exec(l), row = document.createElement('div'); row.className = 'tool';
+    if (m) {
+      const ok = /✔|connected/i.test(m[3]), bad = /✘|✗|failed|error/i.test(m[3]);
+      row.innerHTML = `<span style="color:var(${ok ? '--ok' : bad ? '--err' : '--dim'})">${ok ? '✓' : bad ? '✗' : '!'}</span> <b></b> <span class="st"></span><div class="u" style="opacity:.7"></div>`;
+      row.querySelector('b').textContent = m[1]; row.querySelector('.st').textContent = m[3].replace(/^[✔✘✗!⏸]\s*/, ''); row.querySelector('.u').textContent = m[2];
+    } else row.textContent = l;
+    ul.appendChild(row);
+  }
+  box.appendChild(ul);
+  const note = document.createElement('div'); note.className = 'meta';
+  note.textContent = 'Add or remove servers in a terminal: claude mcp add / claude mcp remove. '
+    + 'In this panel Claude uses MCP tools only in auto mode; in ask, plan and accept edits they are not allowed.';
+  box.appendChild(note); scrollDown(t);
+}
+// ---- commands: the panel's own, and Claude Code's (from its init event), for "/" autocomplete
+const PANEL_CMDS = {
+  clear: 'a new conversation in this tab', new: 'a new tab', rename: 'rename this tab (and its session)',
+  model: 'the model of this tab: opus, sonnet, haiku, fable, default', mcp: 'the MCP servers and their state',
+  status: 'the account in use', login: 'sign in (/login console for an API account)', logout: 'sign out', help: 'what the panel answers itself',
+};
+const TERMINAL_ONLY = new Set(['doctor', 'color', 'focus', 'reload-plugins']);
+const CMDS_KEY = 'nihil-ide-claude-commands';
+function claudeCmds() { try { return JSON.parse(localStorage.getItem(CMDS_KEY) || 'null'); } catch (e) { return null; } }
+function saveCmds(init) {
+  if (!init.slash_commands) return;
+  const c = { at: Date.now(), slash: init.slash_commands, skills: init.skills || [], terminal: init.terminal_slash_commands || [] };
+  try { localStorage.setItem(CMDS_KEY, JSON.stringify(c)); } catch (e) {}
+}
+// no list yet (or a day old): ask Claude Code for it with /usage, which costs nothing, and keep only its init event
+let cmdsFetching = false;
+async function fetchCmds() {
+  const c = claudeCmds();
+  if (cmdsFetching || (c && Date.now() - c.at < 86400000) || !project) return;
+  cmdsFetching = true;
+  try {
+    const r = await api('/api/claude', { message: '/usage', context: '', session: '', mode: 'ask', model: '' });
+    if (!r.ok) return;
+    let out = 0, buf = '';
+    for (let i = 0; i < 60; i++) {
+      const o = await api(`/api/output?id=${r.run}&out=${out}&err=0`); if (o.error) break;
+      out += o.out_bytes; buf += o.out;
+      const init = buf.split('\n').map((l) => { try { return JSON.parse(l); } catch (e) { return null; } }).find((d) => d && d.type === 'system' && d.subtype === 'init');
+      if (init) { saveCmds(init); updatePop(); break; }
+      if (o.code !== null) break;
+      await sleep(300);
+    }
+    await api('/api/stop', { id: r.run });
+  } finally { cmdsFetching = false; }
+}
+function cmdList() {
+  const c = claudeCmds() || { slash: [], skills: [], terminal: [] }, skills = new Set(c.skills), seen = new Set(Object.keys(PANEL_CMDS));
+  const list = Object.entries(PANEL_CMDS).map(([name, desc]) => ({ name, desc, kind: 'panel' }));
+  for (const name of c.slash) {
+    if (seen.has(name) || name.startsWith('__') || TERMINAL_ONLY.has(name) || c.terminal.includes(name)) continue;
+    seen.add(name); list.push({ name, desc: skills.has(name) ? 'skill' : 'Claude Code', kind: skills.has(name) ? 'skill' : 'claude' });
+  }
+  return list;
+}
+const pop = { items: [], sel: 0, q: '', moved: false };
+function hidePop() { $('cmdPop').hidden = true; pop.items = []; }
+function updatePop() {
+  const m = /^\/([\w:.-]*)$/.exec($('chatText').value);
+  if (!m) { hidePop(); return; }
+  if (!claudeCmds()) fetchCmds();
+  const q = m[1].toLowerCase();
+  const items = cmdList().filter((c) => c.name.toLowerCase().includes(q))
+    .sort((a, b) => (b.name.toLowerCase().startsWith(q) ? 1 : 0) - (a.name.toLowerCase().startsWith(q) ? 1 : 0)).slice(0, 60);
+  if (!items.length) { hidePop(); return; }
+  pop.items = items; pop.sel = 0; pop.q = q; pop.moved = false; renderPop();
+}
+function renderPop() {
+  const box = $('cmdPop'); box.innerHTML = '';
+  pop.items.forEach((c, i) => {
+    const r = document.createElement('div'); r.className = 'ci' + (i === pop.sel ? ' on' : '') + ' ' + c.kind;
+    const b = document.createElement('b'); b.textContent = '/' + c.name; const s = document.createElement('span'); s.textContent = c.desc;
+    r.append(b, s); r.onmousedown = (e) => { e.preventDefault(); pickPop(i); }; box.appendChild(r);
+  });
+  if (!claudeCmds()) { const r = document.createElement('div'); r.className = 'ci'; r.innerHTML = '<span>loading Claude Code\'s commands…</span>'; box.appendChild(r); }
+  box.hidden = false;
+  const on = box.querySelector('.on'); if (on) on.scrollIntoView({ block: 'nearest' });
+}
+function pickPop(i) {
+  const ta = $('chatText'); ta.value = '/' + pop.items[i].name + ' '; hidePop(); ta.focus();
+  ta.setSelectionRange(ta.value.length, ta.value.length);
+}
+// a button in an answer that changes the tab's mode and sends a message in that tab
+function followUp(t, mode, text) {
+  t.mode = mode; saveChatsOf(t.project);
+  if (t === cur()) { $('chatMode').value = mode; renderChatInfo(); }
+  chatSend(t, text);
+}
+
+// the panel's commands that answer at once also work while the tab is busy
+const QUICK_CMDS = new Set(['rename', 'model', 'status', 'account', 'help', 'new', 'doctor', 'color', 'focus', 'reload-plugins']);
+async function chatSend(t = cur(), preset = '') {
+  if (!t) return;
+  const text = preset || $('chatText').value.trim();
+  if (!text) return;
+  const slash = /^\/([\w:.-]+)(?=\s|$)/.exec(text);
+  if (t.run && !(slash && QUICK_CMDS.has(slash[1].toLowerCase()))) return;
+  if (!preset) { $('chatText').value = ''; pushHist(text); }
+  // Claude Code's slash commands belong to its own screen: `claude -p` does not run them, so the
+  // panel answers the ones that make sense here and sends nothing to Claude
+  if (slash) {
+    const name = slash[1].toLowerCase();
+    if (name === 'clear' || name === 'reset') { clearChat(t); return; }
+    if (name === 'new') { addChat(); return; }
+    if (name === 'rename') {
+      const n = text.slice(slash[0].length).trim();
+      chatAdd('user', esc(text), t);
+      if (!n) { chatAdd('assistant', `This tab is called <b>${esc(chatTitle(t))}</b>. To rename it: <code>/rename a name</code>, or double-click the tab.`, t); return; }
+      renameChat(t, n);
+      chatAdd('assistant', `Renamed to <b>${esc(t.title)}</b>` + (t.session ? '; the session takes the name with the next message.' : '.'), t);
+      return;
+    }
+    chatAdd('user', esc(text), t);
+    if (name === 'login') return chatLogin(t, /\bconsole\b/i.test(text));
+    if (name === 'logout') { const s = await api('/api/claude/logout', {}); showAccount(); chatAdd(s.ok ? 'assistant' : 'error', s.ok ? accountLine(s.status) : esc(s.error), t); return; }
+    if (name === 'mcp') return chatMcp(t);
+    if (name === 'status' || name === 'account') { const s = await api('/api/claude/auth'); chatAdd(s.ok ? 'assistant' : 'error', s.ok ? accountLine(s.status) : esc(s.error), t); return; }
+    if (name === 'model') {
+      const m = text.slice(slash[0].length).trim().toLowerCase(), v = m === 'default' ? '' : m;
+      if (!m) { chatAdd('assistant', `This tab uses <b>${esc(t.model || 'the default model')}</b>` + (t.usedModel ? ` (last answer: ${esc(prettyModel(t.usedModel))})` : '') + '. To change it: <code>/model opus</code>, <code>sonnet</code>, <code>haiku</code>, <code>fable</code> or <code>default</code>.', t); return; }
+      if (!/^[a-z0-9-]+$/.test(v || 'x')) { chatAdd('error', 'A model is an alias (opus, sonnet, haiku, fable) or a name like claude-opus-5-5.', t); return; }
+      if (v && ![...$('chatModel').options].some((o) => o.value === v)) { const o = document.createElement('option'); o.value = o.textContent = v; $('chatModel').appendChild(o); }
+      t.model = v; saveChatsOf(t.project); if (t === cur()) { $('chatModel').value = v; renderChatInfo(); }
+      chatAdd('assistant', `Model of this tab: <b>${esc(v || 'default')}</b>, from the next message.`, t); return;
+    }
+    if (name === 'help') {
+      chatAdd('assistant', 'The panel itself answers ' + Object.keys(PANEL_CMDS).map((k) => '<code>/' + k + '</code>').join(', ')
+        + '. Any other command or skill (<code>/context</code>, <code>/usage</code>, <code>/compact</code>, <code>/simplify</code>…) goes to Claude Code; '
+        + 'type <code>/</code> to see them all.', t); return;
+    }
+    if (TERMINAL_ONLY.has(name) || (claudeCmds() || { terminal: [] }).terminal.includes(name)) {
+      chatAdd('assistant', `<code>/${esc(name)}</code> only works in a terminal, running <code>claude</code>.`, t); return;
+    }
+    t.log.lastChild.remove();     // the message is shown again below, as any other
+  }
+  if (!t.title) { t.title = text.replace(/\s+/g, ' ').slice(0, 28); saveChatsOf(t.project); }
+  if (t.view) setView(t, null);
+  chatAdd('user', esc(text), t);
+  // a command goes as it is (the IDE's context would become its arguments)
+  const r = await api('/api/claude', { message: text, context: slash ? '' : ideContext(), session: t.session, mode: t.mode, model: t.model, name: t.title, allow: t.allow.join(' ') });
+  if (!r.ok) { chatAdd('error', esc(r.error || 'could not start Claude'), t); renderChatTabs(); return; }
+  runStarted(t, r.run, 'starting…');
+  const run = r.run, mode = t.mode;
+  const box = chatAdd('assistant', '', t);
+  let textEl = null, raw = '', out = 0, err = 0, buf = '', errText = '', result = null, plan = '', streamed = false;
   const edited = new Set();
   const thinking = document.createElement('div'); thinking.className = 'tool'; thinking.textContent = 'thinking…'; box.appendChild(thinking);
-  claudeAgents = []; setStep('starting…');
   const describe = (b) => {
     const inp = b.input || {}, f = inp.file_path ? relPath(inp.file_path) : '';
     if (b.name === 'Read') return ['reading', f];
@@ -1049,60 +1688,101 @@ async function chatSend() {
     if (b.name === 'Write') return ['writing', f];
     if (b.name === 'Grep') return ['searching for ' + (inp.pattern || ''), ''];
     if (b.name === 'Glob') return ['listing ' + (inp.pattern || ''), ''];
+    if (b.name === 'ExitPlanMode') return ['proposing a plan', ''];
     return [b.name, f];
   };
   const handle = (line) => {
     let d; try { d = JSON.parse(line); } catch (e) { return; }
-    if (d.type === 'system' && d.subtype === 'init' && d.session_id) setSession(d.session_id);
-    if (d.parent_tool_use_id) {                       // a helper (subagent) at work
-      const a = claudeAgents.find((x) => x.id === d.parent_tool_use_id);
-      if (a && d.type === 'assistant' && d.message) for (const b of d.message.content || []) if (b.type === 'tool_use') {
-        const [verb, f] = describe(b); a.step = verb + (f ? ' ' + f : '');
-        if (f) touchFile(f, b.name === 'Edit' || b.name === 'Write' ? 'edit' : 'read');
-        renderActivity(); renderTabs();
+    if (d.type === 'system' && d.subtype === 'init') {
+      if (d.session_id) setSession(t, d.session_id);
+      if (d.model) { t.usedModel = d.model; saveChatsOf(t.project); if (t === cur()) renderChatInfo(); }
+      saveCmds(d);
+    }
+    if (d.type === 'system' && /^task_|^background_tasks/.test(d.subtype || '')) {   // commands in the background
+      if (d.task_id && d.tool_use_id) t.tasks.set(d.task_id, d.tool_use_id);
+      const key = d.tool_use_id || t.tasks.get(d.task_id);
+      const s = t.shells.get(key), ag = t.agents.find((x) => x.id === key);
+      const how = (d.patch && d.patch.status) || d.status;
+      const end = how && how !== 'running' && how !== 'pending' ? (how === 'completed' ? 'done' : how === 'failed' ? 'failed' : 'stopped') : '';
+      if (s && d.task_id && !s.task) s.task = d.task_id;
+      if (s && d.output_file) s.file = d.output_file;
+      if (s && end) shellEnded(s, end);
+      if (ag && d.task_id) ag.task = d.task_id;
+      if (ag && d.subtype === 'task_progress' && d.description) ag.step = d.description.replace(/^Running /, '');
+      if (ag && end) agentFinished(ag, end, d.summary || '');
+      if (d.subtype === 'background_tasks_changed') {
+        const open = new Set((d.tasks || []).map((x) => x.task_id));
+        for (const x of t.shells.values()) if (x.bg && x.task && x.state === 'running' && !open.has(x.task)) shellEnded(x, 'done');
+        for (const x of t.agents) if (x.task && x.state === 'running' && !open.has(x.task)) agentFinished(x, 'done', '');
       }
+      if (t.project === project) renderActivity();
+    }
+    if (d.parent_tool_use_id) {                       // a helper (subagent) at work: into its own log
+      const a = t.agents.find((x) => x.id === d.parent_tool_use_id);
+      if (!a) return;
+      if (d.type === 'assistant' && d.message) for (const b of d.message.content || []) {
+        if (b.type === 'text' && (b.text || '').trim()) {
+          const m = document.createElement('div'); m.className = 'msg assistant'; m.innerHTML = md(b.text); a.log.appendChild(m); scrollEl(m);
+        }
+        if (b.type !== 'tool_use') continue;
+        const [verb, f] = describe(b); a.step = verb + (f ? ' ' + f : '');
+        if (b.name === 'Bash' || b.name === 'Monitor') shellLine(t, a.log, b);
+        else if (b.name === 'Agent' || b.name === 'Task') addAgent(t, b);
+        else toolLine(t, a.log, b);
+        if (f) touchFile(t, f, b.name === 'Edit' || b.name === 'Write' ? 'edit' : 'read');
+      }
+      if (d.type === 'user' && d.message && Array.isArray(d.message.content)) for (const b of d.message.content) {
+        if (b && b.type === 'tool_result') { if (t.shells.has(b.tool_use_id)) shellResult(t, d, b); agentDone(t, b, d); }
+      }
+      if (t.project === project) { renderActivity(); renderTabs(); }
       return;
     }
     if (d.type === 'user' && d.message) for (const b of d.message.content || []) {
       if (b && b.type === 'tool_result') {
-        const a = claudeAgents.find((x) => x.id === b.tool_use_id); if (a) { a.state = 'done'; a.step = ''; }
-        setStep('thinking…');
+        agentDone(t, b, d);
+        if (t.shells.has(b.tool_use_id)) shellResult(t, d, b);
+        setStep(t, 'thinking…');
       }
     }
     if (d.type === 'stream_event') {
       const ev = d.event || {};
-      if (ev.type === 'content_block_start' && ev.content_block && ev.content_block.type === 'thinking') setStep('thinking…');
-      if (ev.type === 'content_block_start' && ev.content_block && ev.content_block.type === 'text') setStep('writing the answer');
+      if (ev.type === 'content_block_start' && ev.content_block && ev.content_block.type === 'thinking') setStep(t, 'thinking…');
       if (ev.type === 'content_block_start' && ev.content_block && ev.content_block.type === 'text') {
+        setStep(t, 'writing the answer');
         textEl = document.createElement('div'); box.appendChild(textEl); raw = '';
       }
       if (ev.type === 'content_block_delta' && ev.delta && ev.delta.type === 'text_delta') {
         if (!textEl) { textEl = document.createElement('div'); box.appendChild(textEl); raw = ''; }
-        raw += ev.delta.text; textEl.innerHTML = md(raw); thinking.remove();
-        $('chatLog').scrollTop = $('chatLog').scrollHeight;
+        raw += ev.delta.text; textEl.innerHTML = md(raw); thinking.remove(); streamed = true;
+        scrollDown(t);
       }
     }
     if (d.type === 'assistant' && d.message) {
       for (const b of d.message.content || []) {
-        if (b.type === 'tool_use') {
-          toolLine(box, b); thinking.remove();
-          if ((b.name === 'Edit' || b.name === 'Write') && b.input && b.input.file_path) edited.add(relPath(b.input.file_path));
-          if (b.name === 'Agent' || b.name === 'Task') {
-            claudeAgents.push({ id: b.id, desc: (b.input && (b.input.description || (b.input.prompt || '').slice(0, 60))) || 'a helper', state: 'running', step: '' });
-            setStep('waiting for its helpers');
-          } else {
-            const [verb, f] = describe(b); setStep(verb, f);
-            if (f) touchFile(f, b.name === 'Edit' || b.name === 'Write' ? 'edit' : 'read');
-          }
+        if (b.type === 'text' && !streamed && (b.text || '').trim()) {    // not streamed (a command's output): whole
+          const el = document.createElement('div'); el.innerHTML = md(b.text); box.appendChild(el); thinking.remove(); scrollDown(t);
         }
+        if (b.type !== 'tool_use') continue;
+        thinking.remove();
+        if (b.name === 'Bash' || b.name === 'Monitor') {
+          const s = shellLine(t, box, b);
+          setStep(t, (s.bg ? 'started in the background: ' : 'running ') + (s.desc || s.command.slice(0, 60)));
+          continue;
+        }
+        if (b.name === 'ExitPlanMode') { plan = (b.input && b.input.plan) || ''; if (plan) planBox(t, box, plan); setStep(t, 'proposing a plan'); continue; }
+        if (b.name === 'Agent' || b.name === 'Task') { agentLine(t, box, addAgent(t, b)); setStep(t, 'waiting for its helpers'); continue; }
+        toolLine(t, box, b);
+        if ((b.name === 'Edit' || b.name === 'Write') && b.input && b.input.file_path) edited.add(relPath(b.input.file_path));
+        const [verb, f] = describe(b); setStep(t, verb, f);
+        if (f) touchFile(t, f, b.name === 'Edit' || b.name === 'Write' ? 'edit' : 'read');
       }
-      textEl = null;
+      textEl = null; streamed = false;
     }
     if (d.type === 'rate_limit_event' && d.rate_limit_info) { saveUsage(d.rate_limit_info); renderActivity(); }
-    if (d.type === 'result') { result = d; addCost(d.total_cost_usd); }
+    if (d.type === 'result') { result = d; addCost(t, d.total_cost_usd); }
   };
   for (;;) {
-    const o = await api(`/api/output?id=${chatRun}&out=${out}&err=${err}`);
+    const o = await api(`/api/output?id=${run}&out=${out}&err=${err}`);
     if (o.error) break;
     out += o.out_bytes; err += o.err_bytes; errText += o.err; buf += o.out;
     let i; while ((i = buf.indexOf('\n')) >= 0) { handle(buf.slice(0, i)); buf = buf.slice(i + 1); }
@@ -1112,41 +1792,50 @@ async function chatSend() {
   if (buf.trim()) handle(buf);
   thinking.remove();
   if (result) {
-    if (result.session_id) setSession(result.session_id);
-    if (result.is_error) chatAdd('error', esc(result.result || result.subtype || 'Claude stopped with an error'));
-    const denied = result.permission_denials || [];
+    if (result.session_id) setSession(t, result.session_id);
+    if (result.is_error) chatAdd('error', esc(result.result || result.subtype || 'Claude stopped with an error'), t);
+    const denied = (result.permission_denials || []).filter((x) => x.tool_name !== 'ExitPlanMode');
     if (denied.length) {
       const el = document.createElement('div'); el.className = 'denied';
       const seen = [...new Set(denied.map((x) => x.tool_name + ' ' + relPath((x.tool_input || {}).file_path || (x.tool_input || {}).command || '')))];
       el.textContent = 'not allowed: ' + seen.join(', ');
-      if (!$('chatEdits').checked && denied.some((x) => x.tool_name === 'Edit' || x.tool_name === 'Write')) {
+      if (t.mode !== 'edits' && t.mode !== 'auto' && denied.some((x) => x.tool_name === 'Edit' || x.tool_name === 'Write')) {
         const go = document.createElement('button'); go.textContent = 'Allow edits and apply';
-        go.title = 'Checks "may edit" and asks Claude to make the changes it was not allowed to';
+        go.title = 'Switches this tab to "accept edits" and asks Claude to make the changes it was not allowed to';
+        go.style.marginLeft = '8px';
+        go.onclick = () => { go.remove(); followUp(t, 'edits', 'You may edit the files now: make the changes you were not allowed to make.'); };
+        el.appendChild(go);
+      }
+      // an MCP server it was not allowed to use: allow it in this tab, and ask again
+      const servers = [...new Set(denied.map((x) => (/^mcp__([^_]+(?:_[^_]+)*?)__/.exec(x.tool_name) || [])[1]).filter(Boolean))];
+      for (const sv of servers) {
+        const go = document.createElement('button'); go.textContent = `Allow ${sv} and retry`;
+        go.title = `Lets Claude use the tools of the MCP server "${sv}" in this tab, and asks again`;
         go.style.marginLeft = '8px';
         go.onclick = () => {
-          $('chatEdits').checked = true; $('chatEdits').onchange();
-          $('chatText').value = 'You may edit the files now: make the changes you were not allowed to make.';
-          go.remove(); chatSend();
+          go.remove();
+          if (!t.allow.includes('mcp__' + sv)) t.allow.push('mcp__' + sv);
+          saveChatsOf(t.project);
+          chatSend(t, `You may now use the tools of the MCP server ${sv}: try again what you could not do.`);
         };
         el.appendChild(go);
       }
       box.appendChild(el);
     }
     const meta = document.createElement('div'); meta.className = 'meta';
-    meta.textContent = `${((result.duration_ms || 0) / 1000).toFixed(1)} s` + (result.total_cost_usd ? ` · US$ ${result.total_cost_usd.toFixed(3)}` : '');
+    meta.textContent = [`${((result.duration_ms || 0) / 1000).toFixed(1)} s`, result.total_cost_usd ? `US$ ${result.total_cost_usd.toFixed(3)}` : '',
+      t.usedModel ? prettyModel(t.usedModel) : '', MODES[mode]].filter(Boolean).join(' · ');
     box.appendChild(meta);
   } else {
-    chatAdd('error', esc(errText.trim() || 'Claude stopped before answering'));
+    chatAdd('error', esc(errText.trim() || 'Claude stopped before answering'), t);
   }
-  chatRun = null; setChatBusy(false);
-  for (const a of claudeAgents) a.state = 'done';
-  setStep('', '');
-  if (edited.size) {
-    for (const p of edited) { const t = tabs.find((x) => x.path === p); if (t) await reloadTab(t); }
+  runEnded(t);
+  if (edited.size && t.project === project) {
+    for (const p of edited) { const x = tabs.find((y) => y.path === p); if (x) await reloadTab(x); }
     await loadFiles();
     status('Claude changed: ' + [...edited].join(', '));
   }
-  $('chatLog').scrollTop = $('chatLog').scrollHeight;
+  scrollDown(t);
 }
 
 // ---------------------------------------------------------------- projects
@@ -1169,7 +1858,7 @@ async function switchProject(path, target) {
   tabs = []; current = null; savedText = ''; savedHash = null;
   editor.swapDoc(CodeMirror.Doc('', 'nihil')); clearMarks(); renderTabs();
   selectedFolder = ''; loadCollapsed();
-  loadChat(); if (!chatRun) { $('chatLog').innerHTML = ''; claudeFiles.clear(); claudeAgents = []; }
+  loadChat();
   tableOpen = null; $('table').innerHTML = '<div class="empty">Click a table on the left to see its records.</div>';
   const files = await loadFiles();
   let saved = null; try { saved = JSON.parse(localStorage.getItem('nihil-ide-tabs:' + project) || 'null'); } catch (e) {}
