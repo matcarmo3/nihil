@@ -740,8 +740,11 @@ inclusions (§16). `build/runtime.nihil` is generated from `runtime.bin`, and
 - The path is **relative to the directory of the including file**, or absolute
   if it starts with `/`.
 - **Each file is included once.** A repeated inclusion of the same path is
-  ignored, so two files can include the same utility. Paths are compared as
-  written: `a/../b.nihil` and `b.nihil` count as different.
+  ignored, so two files can include the same utility. Paths are compared after
+  normalizing them (stage 1, v4.1): `.` and empty segments go and `dir/..`
+  cancels out, so `api/../services/../models/m.nihil` and `models/m.nihil`
+  are one file; a `..` with nothing before it stays (`../x.nihil`). Symbolic
+  links are not followed.
 - Error messages point to the original file and line, e.g.
   `nihilc: src1/lexer.nihil:12:5: …` and `it is created on line 2 in util.nihil`.
 - Implementation: each file is read into the raw-files arena and copied into the
@@ -1516,6 +1519,7 @@ branch per tool, reading its parameters with the JSON library.
 | **v1.9:** saved registers learned between passes | The prologue comes before the body; using the count from the previous pass avoids saving registers for nothing |
 | **v2.1:** `... ms;` waits | Animations need a fixed speed; a busy loop depends on the machine. The ellipsis reads as a pause and cannot start any valid expression |
 | **v2.2:** renamed from Ket to Nihil | Latin for *nothing*: no keywords, and `_` for the missing value |
+| **v4.1:** inclusions compared by their normalized path (`.`, empty segments and `dir/..` removed) | A program and a server that share files reached each one by a different relative path (`api/../services/../models/x.nihil`, `database/../models/x.nihil`): the same file was included twice and its models clashed |
 | **v4.0:** protected calls `?f()` and `?!`; `x.to_json()`, `MODEL.from_json(text)`, `MODEL.from_json_items(text)`; `tools("prefix")` and `call_tool("prefix", name, arguments)` | The planogram's MCP server showed what a server in Nihil lacks (docs/v4.0-mcp.md): one bad request ended the whole server, every answer was JSON assembled by hand, and every tool was declared twice (its method and its schema). A runtime error can now be a missing value, any value can be written as JSON and read back into a record, and the tools come from the methods themselves |
 | **v3.12:** `c.read()`, `url.http_open(method, type, body)` | Showing an answer while it is written: a local model takes a minute for a long answer, and the screen should not stay still. The headers are read one byte at a time, so nothing of the body is taken before the program reads it |
 | **v3.11:** the client side of the network: `host.connect(port)`, `url.http_get()`, `http_post`, `http_request`, `resp.http_status()` | A program can now ask other servers (an LLM served by Ollama, another planogram server) instead of only answering. The first use is an agent in Nihil that talks to a local model and calls the planogram's tools in the same process |

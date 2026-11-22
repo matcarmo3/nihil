@@ -1,0 +1,5 @@
+// included twice by the test include_normalized, through two spellings of its path
+NORM_COUNT = 41;
+norm_twice(x = 0) {
+    : x * 2;
+}

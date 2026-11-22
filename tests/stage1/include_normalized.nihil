@@ -1,0 +1,6 @@
+// a file included through two spellings of its path is included once (SPEC §16: paths are
+// normalized: "inc_norm/sub/../util.nihil" is "inc_norm/util.nihil")
+@ "inc_norm/util.nihil";
+@ "inc_norm/sub/../util.nihil";
+@ "./inc_norm/util.nihil";
+>> $norm_twice(NORM_COUNT + 1) + "\n";

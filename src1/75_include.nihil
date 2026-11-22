@@ -83,6 +83,42 @@ size_cst(o = 0) {
     : v;
 }
 
+// "a/b/../c/./d" → "a/c/d", in place in names[start .. w); → the new end. Empty and "." segments
+// go, and a ".." takes away the segment before it; a ".." with nothing to take away stays
+// ("../x"). So one file is one path however it is reached (SPEC §16).
+normalize_path(start = 0, w = 0) {
+    r = start;
+    o = start;
+    names[start] == '/' { r = start + 1; o = start + 1; }
+    root = o;
+    nseg = 0;
+    * r < w {
+        e = r;
+        * e < w && names[e] != '/' { e = e + 1; }
+        len = e - r;
+        dot = len == 1 && names[r] == '.';
+        up = len == 2 && names[r] == '.' && names[r + 1] == '.';
+        len > 0 && !dot {
+            up && nseg > 0 && path_seg_up[nseg - 1] == 0 {
+                nseg = nseg - 1;
+                o = path_seg_at[nseg];
+            } || {
+                nseg < MAX_NAMES {
+                    path_seg_at[nseg] = o;
+                    path_seg_up[nseg] = 0;
+                    up { path_seg_up[nseg] = 1; }
+                    nseg = nseg + 1;
+                }
+                o > root { names[o] = '/'; o = o + 1; }
+                i = 0;
+                len { names[o] = names[r + i]; o = o + 1; i = i + 1; }
+            }
+        }
+        r = e + 1;
+    }
+    : o;
+}
+
 // path of file k + included path (constant pathc) → index of the path;
 // resolve_new = false if it had already been included
 resolve_path(k = 0, pathc = 0) {
@@ -108,6 +144,7 @@ resolve_path(k = 0, pathc = 0) {
     }
     i = 0;
     n { names[w] = cst[pathc + i]; w = w + 1; i = i + 1; }
+    w = normalize_path(start, w);
     size = w - start;
     // already included?
     j = 0;
