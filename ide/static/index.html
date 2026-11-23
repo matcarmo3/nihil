@@ -728,7 +728,9 @@ async function changeRecord(op, i, values) {
     index: row && !r.query ? from + i : -1, old: row ? row.cells.join('\x1f') : '' };
   const res = await api('/api/record', body);
   if (res.error) { status((res.errors && res.errors[0] ? res.errors[0].message : res.error), 'bad'); if (res.stale) showTable(path, true, from); return false; }
-  status({ insert: 'Added a record to ', update: 'Changed a record of ', delete: 'Deleted a record of ' }[op] + path);
+  const kf = r.fields.find((f) => f.key);
+  status({ insert: 'Added a record to ', update: 'Changed a record of ', delete: 'Deleted a record of ' }[op] + path
+    + (op === 'insert' && kf && res.key ? ` (${kf.name} ${res.key})` : ''));
   await loadFiles();
   await showTable(path, true, from);
   return true;
@@ -758,7 +760,7 @@ function newRecordRow(copyOf) {
   const tr = document.createElement('tr'); tr.className = 'newrow';
   tr.innerHTML = `<td class="i"><button title="Save (Enter)">✓</button></td>` + r.fields.map((f, j) =>
     `<td class="${f.type === 'INT' || f.type === 'FLOAT' ? 'num' : ''}"><input class="cell" data-f="${esc(f.name)}" spellcheck="false" ` +
-    `placeholder="${esc(f.name)}" ${f.type === 'STRING' ? `maxlength="${f.width}"` : ''} value="${esc(copyOf ? copyOf[j] : f.type === 'BOOL' ? 'T' : '')}"></td>`).join('');
+    `placeholder="${esc(f.auto ? 'auto' : f.name)}" ${f.type === 'STRING' ? `maxlength="${f.width}"` : ''} value="${esc(copyOf && !f.auto ? copyOf[j] : f.type === 'BOOL' ? 'T' : '')}"></td>`).join('');
   table.querySelector('tr').after(tr);
   const save = async () => {
     const values = {}; tr.querySelectorAll('input').forEach((x) => values[x.dataset.f] = x.value);
@@ -816,7 +818,7 @@ async function showTable(path, quiet, from = 0) {
     html = `<div class="head"><b>${esc(path)}</b><span>${count}</span>${pager}${size}<span>no data model in the programs has lines of ${r.width} bytes</span></div>` +
       `<table>${r.raw.map((l, i) => `<tr><td class="i">${first + i}</td><td>${esc(l)}</td></tr>`).join('')}</table>`;
   } else {
-    const head = r.fields.map((f) => `<th class="${f.key ? 'key' : ''}">${f.key ? '#' : ''}${esc(f.name)}<small>${f.type}${f.type === 'BOOL' ? '' : '(' + f.width + ')'}</small></th>`).join('');
+    const head = r.fields.map((f) => `<th class="${f.key ? 'key' : ''}" title="${f.auto ? 'automatic key (#+): numbered by the table' : f.key ? 'key (#): unique' : ''}">${f.auto ? '#+' : f.key ? '#' : ''}${esc(f.name)}<small>${f.type}${f.type === 'BOOL' ? '' : '(' + f.width + ')'}</small></th>`).join('');
     const body = r.rows.map((row, i) => row.bad !== undefined
       ? `<tr class="bad"><td class="i">${first + i}</td><td colspan="${r.fields.length}">does not fit ${esc(r.model)}: ${esc(row.bad)}</td></tr>`
       : `<tr data-i="${i}"><td class="i">${first + i}</td>${row.cells.map((c, j) => {

@@ -285,11 +285,12 @@ no_comments(t = "") {
     : ls.join("\n");
 }
 
-// "#key: INT(5)" → "key|INT|5|1"; "" if it is not a field
+// "#key: INT(5)" → "key|INT|5|1" ("#+id: …" → "…|2": automatic); "" if it is not a field
 field_spec(part = "") {
     p = part.trim();
     key = "0";
     p.starts_with("#") { key = "1"; p = p.slice(1).trim(); }
+    p.starts_with("+") && key == "1" { key = "2"; p = p.slice(1).trim(); }   // #+: an automatic key
     colon? = p.find(":");
     colon == _ { : ""; }
     name = p.slice(0, colon || 0).trim();
@@ -402,7 +403,7 @@ model_rows(chosen = 0, lines = [""], n = 0) {
         f = specs[i].split("|");
         types[i] = f[1];
         widths[i] = f[2].int() || 0;
-        fields[i] = "{\"name\": " + q(f[0]) + ", \"type\": " + q(f[1]) + ", \"key\": " + $(f[3] == "1") + ", \"width\": " + f[2] + "}";
+        fields[i] = "{\"name\": " + q(f[0]) + ", \"type\": " + q(f[1]) + ", \"key\": " + $(f[3] != "0") + ", \"auto\": " + $(f[3] == "2") + ", \"width\": " + f[2] + "}";
         i = i + 1;
     }
     rows = ["" ; n];
@@ -517,6 +518,7 @@ query_program(chosen = 0, path = "", filter = "", order = "") {
         f = specs[i].split("|");
         k = "";
         f[3] == "1" { k = "#"; }
+        f[3] == "2" { k = "#+"; }
         f[1] == "BOOL" { decl[i] = k + f[0] + ": BOOL"; } || { decl[i] = k + f[0] + ": " + f[1] + "(" + f[2] + ")"; }
         i = i + 1;
     }
@@ -689,7 +691,7 @@ record_json(project = "", body = "") {
     width > 0 { total = (size + 1) / (width + 1); }
     keyf = -1;
     i = 0;
-    * i < #specs { specs[i].split("|")[3] == "1" { keyf = i; } i = i + 1; }
+    * i < #specs { specs[i].split("|")[3] != "0" { keyf = i; } i = i + 1; }
     m = M_NAME[chosen];
     // the record as the page saw it: the change is refused if it changed since
     op != "insert" && (keyf < 0 || index >= 0) {
@@ -718,6 +720,7 @@ record_json(project = "", body = "") {
         f = specs[i].split("|");
         k = "";
         f[3] == "1" { k = "#"; }
+        f[3] == "2" { k = "#+"; }
         f[1] == "BOOL" { decl[i] = k + f[0] + ": BOOL"; } || { decl[i] = k + f[0] + ": " + f[1] + "(" + f[2] + ")"; }
         i = i + 1;
     }
@@ -731,7 +734,7 @@ record_json(project = "", body = "") {
         prog = prog + "r = " + m + "();\n" + sets;
         keyf >= 0 {
             kn = specs[keyf].split("|")[0];
-            prog = prog + "had? = " + m + " @?{r." + kn + "} FILE;\nhad != _ { >> \"there is already a record with " + kn + " \" + $r." + kn + "; :: 3; }\n@{}>> FILE, r;\n";
+            prog = prog + "had? = " + m + " @?{r." + kn + "} FILE;\nhad != _ { >> \"there is already a record with " + kn + " \" + $r." + kn + "; :: 3; }\n@{}>> FILE, r;\n>> $r." + kn + ";\n";
         } || { prog = prog + "@+>> FILE, r;\n"; }
     }
     op == "update" {
@@ -773,7 +776,7 @@ record_json(project = "", body = "") {
         #msg == 0 { msg = (err || "").trim().replace(full, rel); }
         : "{\"error\": " + q(msg) + "}";
     }
-    : "{\"ok\": true, \"keyed\": " + $(keyf >= 0) + "}";
+    : "{\"ok\": true, \"keyed\": " + $(keyf >= 0) + ", \"key\": " + q((out || "").trim()) + "}";
 }
 
 // ---- compiling ------------------------------------------------------------------------
