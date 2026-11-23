@@ -615,6 +615,7 @@ function drawDatabase(box) {
     el.style.paddingLeft = '22px'; el.title = `${t.path} · ${t.records.toLocaleString('en-US')} records · ${fmtSize(t.bytes)}`;
     const meta = document.createElement('span'); meta.className = 'meta'; meta.textContent = t.records.toLocaleString('en-US');
     el.append(meta, t.path.slice(t.path.lastIndexOf('/') + 1));
+    el.dataset.table = t.path; el.dataset.records = t.records;
     el.onclick = () => showTable(t.path);
     box.appendChild(el);
   }
@@ -1032,6 +1033,26 @@ function treeMenu() {
     { label: 'Refresh', act: () => loadFiles() },
   ];
 }
+// the Database area: a table, or the empty space around the tables
+function tableMenu(path, records) {
+  return [
+    { label: 'Open', act: () => showTable(path) },
+    { label: 'Copy Path', act: () => clipWrite(path) },
+    '-',
+    { label: '✦ Ask Claude about this table', act: () => askAboutTable(path, records) },
+    '-',
+    { label: 'Refresh', act: () => loadFiles() },
+  ];
+}
+function dbMenu() { return [{ label: 'Refresh', act: () => loadFiles() }]; }
+// a table is binary (.dat), so it is not pinned like a file: the question names it, and Claude reads it
+function askAboutTable(path, records) {
+  toggleChat(true);
+  const f = $('chatText'), n = Number(records || 0).toLocaleString('en-US');
+  f.value = (f.value ? f.value.replace(/\s*$/, '\n') : '') + `About the table ${path} (${n} record${n === '1' ? '' : 's'}): `;
+  f.focus(); f.setSelectionRange(f.value.length, f.value.length);
+  f.dispatchEvent(new Event('input'));
+}
 async function renameFile(path, keep) {
   const t = tabs.find((x) => x.path === path);
   if (!keep && t && t.dirty) { status(`Save ${path} before renaming it`, 'bad'); return; }
@@ -1067,6 +1088,8 @@ addEventListener('contextmenu', (e) => {
   const row = t.closest('#files [data-file], #files [data-folder]');
   if (row) openMenu(e.clientX, e.clientY, row.dataset.file ? fileMenu(row.dataset.file) : folderMenu(row.dataset.folder));
   else if (t.closest('#files')) openMenu(e.clientX, e.clientY, treeMenu());
+  else if (t.closest('#db [data-table]')) { const r = t.closest('#db [data-table]'); openMenu(e.clientX, e.clientY, tableMenu(r.dataset.table, r.dataset.records)); }
+  else if (t.closest('#db')) openMenu(e.clientX, e.clientY, dbMenu());
   else if (t.closest('.CodeMirror')) openMenu(e.clientX, e.clientY, editorMenu());
   else if (t.closest('.xterm')) openMenu(e.clientX, e.clientY, terminalMenu());
   else if (t.matches('textarea, input:not([type=checkbox]):not([type=radio]):not([type=button])')) openMenu(e.clientX, e.clientY, fieldMenu(t));
