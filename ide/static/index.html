@@ -214,6 +214,12 @@ aside .db-group { padding: 4px 12px 0 14px; font-size: 11px; color: var(--dim); 
 #table td.bool-T { color: var(--ok); } #table td.bool-F { color: var(--dim); }
 #table tr.bad td { color: var(--err); }
 #table tr:hover td { background: #22252e; }
+#table td input.cell { font: inherit; width: 100%; min-width: 60px; box-sizing: border-box; background: var(--panel2); color: var(--text);
+  border: 1px solid var(--accent, #22d3ee); border-radius: 4px; padding: 1px 4px; margin: -2px 0; }
+#table td.num input.cell { text-align: right; }
+#table tr.newrow td { background: #1d2a2e; }
+#table tr.saving td { opacity: .5; }
+#table .head .editnote { font-size: 11px; }
 #work { display: grid; grid-template-rows: 1fr 6px 38%; min-height: 0; min-width: 0; }
 #editorPane { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 #editor { flex: 1; min-height: 0; }
@@ -704,6 +710,78 @@ function wireQueryBar(path, r) {
   $('qClear').onclick = () => { tableQ = { path, filter: '', sort: '' }; showTable(path, true, 0); };
   $('qCopy').onclick = () => { if (r.fields || r.program) { clipWrite(queryProgram(path, r)); status('Copied the query as a program: paste it in a new file and run it'); } };
 }
+// ---- changing records: double click a cell to change it, + Record to add one, right click a row
+// to duplicate or delete it. The server does it with a Nihil program (/api/record): by key when
+// the model has one (#), else by record number; a record changed on disk since it was shown is
+// not overwritten.
+let shownTable = null;                            // {path, r, from}: the page of the table shown
+const keyed = (r) => r.fields && r.fields.some((f) => f.key);
+const canEdit = (r) => r.fields && (!r.query || keyed(r));
+function editNote(r) {
+  if (!canEdit(r)) return 'filtered: changes need a key (#) in the model; clear the filter to edit';
+  return 'double click a cell to edit · right click a row' + (keyed(r) ? ' · by key' : '');
+}
+async function changeRecord(op, i, values) {
+  const { path, r, from } = shownTable;
+  const row = i >= 0 ? r.rows[i] : null;
+  const body = { path, op, model: r.model, values: values || {},
+    index: row && !r.query ? from + i : -1, old: row ? row.cells.join('\x1f') : '' };
+  const res = await api('/api/record', body);
+  if (res.error) { status((res.errors && res.errors[0] ? res.errors[0].message : res.error), 'bad'); if (res.stale) showTable(path, true, from); return false; }
+  status({ insert: 'Added a record to ', update: 'Changed a record of ', delete: 'Deleted a record of ' }[op] + path);
+  await loadFiles();
+  await showTable(path, true, from);
+  return true;
+}
+function editCell(td) {
+  if (!shownTable || !canEdit(shownTable.r) || td.querySelector('input')) return;
+  const i = +td.parentElement.dataset.i, j = +td.dataset.c, f = shownTable.r.fields[j];
+  const was = shownTable.r.rows[i].cells[j];
+  if (f.type === 'BOOL') { changeRecord('update', i, { [f.name]: was === 'T' ? 'F' : 'T' }); return; }
+  const inp = document.createElement('input'); inp.className = 'cell'; inp.value = was; inp.spellcheck = false;
+  if (f.type === 'STRING') inp.maxLength = f.width;
+  td.replaceChildren(inp); inp.focus(); inp.select();
+  let done = false;
+  const finish = async (save) => {
+    if (done) return; done = true;
+    if (!save || inp.value === was) { td.textContent = was; return; }
+    td.parentElement.classList.add('saving');
+    if (!(await changeRecord('update', i, { [f.name]: inp.value }))) { td.parentElement.classList.remove('saving'); td.textContent = was; }
+  };
+  inp.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); finish(true); } if (e.key === 'Escape') finish(false); };
+  inp.onblur = () => finish(true);
+}
+function newRecordRow(copyOf) {
+  if (!shownTable || !canEdit(shownTable.r)) return status('Clear the filter to add records (or give the model a key)', 'bad');
+  const r = shownTable.r, table = $('table').querySelector('table');
+  if (table.querySelector('tr.newrow')) return table.querySelector('tr.newrow input').focus();
+  const tr = document.createElement('tr'); tr.className = 'newrow';
+  tr.innerHTML = `<td class="i"><button title="Save (Enter)">✓</button></td>` + r.fields.map((f, j) =>
+    `<td class="${f.type === 'INT' || f.type === 'FLOAT' ? 'num' : ''}"><input class="cell" data-f="${esc(f.name)}" spellcheck="false" ` +
+    `placeholder="${esc(f.name)}" ${f.type === 'STRING' ? `maxlength="${f.width}"` : ''} value="${esc(copyOf ? copyOf[j] : f.type === 'BOOL' ? 'T' : '')}"></td>`).join('');
+  table.querySelector('tr').after(tr);
+  const save = async () => {
+    const values = {}; tr.querySelectorAll('input').forEach((x) => values[x.dataset.f] = x.value);
+    tr.classList.add('saving');
+    if (!(await changeRecord('insert', -1, values))) tr.classList.remove('saving');
+  };
+  tr.querySelector('button').onclick = save;
+  tr.querySelectorAll('input').forEach((x) => x.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); save(); } if (e.key === 'Escape') tr.remove(); });
+  tr.querySelector('input').focus();
+}
+function recordMenu(i) {
+  const r = shownTable.r, row = r.rows[i], ok = canEdit(r);
+  return [
+    { label: 'Duplicate Record', off: !ok, act: () => newRecordRow(row.cells) },
+    { label: 'Delete Record…', off: !ok, act: () => {
+      if (confirm(`Delete this record of ${shownTable.path}?\n\n${row.cells.join('  ·  ')}\n\nThe table file changes on disk.` + (keyed(r) ? '\n(By key: the last record moves into its place.)' : ''))) changeRecord('delete', i);
+    } },
+    '-',
+    { label: 'Add Record', off: !ok, act: () => newRecordRow() },
+    { label: 'Copy Values', act: () => clipWrite(row.cells.join('\t')) },
+  ];
+}
+$('table').addEventListener('dblclick', (e) => { const td = e.target.closest('tr[data-i] td[data-c]'); if (td) editCell(td); });
 async function showTable(path, quiet, from = 0) {
   if (tableQ.path !== path) tableQ = { path, filter: '', sort: '' };
   const q = queryOn(path);
@@ -741,18 +819,20 @@ async function showTable(path, quiet, from = 0) {
     const head = r.fields.map((f) => `<th class="${f.key ? 'key' : ''}">${f.key ? '#' : ''}${esc(f.name)}<small>${f.type}${f.type === 'BOOL' ? '' : '(' + f.width + ')'}</small></th>`).join('');
     const body = r.rows.map((row, i) => row.bad !== undefined
       ? `<tr class="bad"><td class="i">${first + i}</td><td colspan="${r.fields.length}">does not fit ${esc(r.model)}: ${esc(row.bad)}</td></tr>`
-      : `<tr><td class="i">${first + i}</td>${row.cells.map((c, j) => {
+      : `<tr data-i="${i}"><td class="i">${first + i}</td>${row.cells.map((c, j) => {
           const t = r.fields[j].type;
           const cls = t === 'INT' || t === 'FLOAT' ? 'num' : t === 'BOOL' ? 'bool-' + c : '';
-          return `<td class="${cls}">${esc(c)}</td>`; }).join('')}</tr>`).join('');
+          return `<td class="${cls}" data-c="${j}">${esc(c)}</td>`; }).join('')}</tr>`).join('');
     const others = r.others.length ? `<span title="${esc(r.others.join(', '))}">also fits: ${r.others.length}</span>` : '';
     html = `<div class="head"><b>${esc(path)}</b><span>${esc(r.model)} from ${esc(r.from_file)}</span><span>${count}</span>${pager}${size}` +
-      `<span>${r.width + 1} bytes per line · ${(r.bytes / 1048576).toFixed(1)} MB</span>${others}</div>` + queryBar(path, r) +
+      `<span>${r.width + 1} bytes per line · ${(r.bytes / 1048576).toFixed(1)} MB</span>${others}` +
+      `<button id="recAdd" title="Add a record">+ Record</button><span class="editnote">${esc(editNote(r))}</span></div>` + queryBar(path, r) +
       `<table><tr><th>${r.query ? '#' : ''}</th>${head}</tr>${body}</table>`;
   }
   box.classList.toggle('queried', !!r.fields);
   box.innerHTML = html;
-  if (r.fields) wireQueryBar(path, r);
+  if (r.fields) { wireQueryBar(path, r); shownTable = { path, r, from: first }; $('recAdd').onclick = () => newRecordRow(); }
+  else shownTable = null;
   box.querySelectorAll('.pager button').forEach((b) => b.onclick = () => showTable(path, true, +b.dataset.go));
   $('tablePage').onchange = (e) => { tablePage = +e.target.value; showTable(path, true, Math.floor(first / tablePage) * tablePage); };
   if (!quiet) showTab('table');
@@ -1166,6 +1246,8 @@ addEventListener('contextmenu', (e) => {
   const row = t.closest('#files [data-file], #files [data-folder]');
   if (row) openMenu(e.clientX, e.clientY, row.dataset.file ? fileMenu(row.dataset.file) : folderMenu(row.dataset.folder));
   else if (t.closest('#files')) openMenu(e.clientX, e.clientY, treeMenu());
+  else if (t.closest('#table tr[data-i]') && shownTable && !t.closest('input')) openMenu(e.clientX, e.clientY, recordMenu(+t.closest('#table tr[data-i]').dataset.i));
+  else if (t.closest('#table') && shownTable && !t.closest('input')) openMenu(e.clientX, e.clientY, [{ label: 'Add Record', off: !canEdit(shownTable.r), act: () => newRecordRow() }, { label: 'Refresh', act: () => showTable(shownTable.path, true, shownTable.from) }]);
   else if (t.closest('#db [data-table]')) { const r = t.closest('#db [data-table]'); openMenu(e.clientX, e.clientY, tableMenu(r.dataset.table, r.dataset.records)); }
   else if (t.closest('#db')) openMenu(e.clientX, e.clientY, dbMenu());
   else if (t.closest('.CodeMirror')) openMenu(e.clientX, e.clientY, editorMenu());
