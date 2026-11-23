@@ -50,6 +50,17 @@ label.opt { display: flex; gap: 5px; align-items: center; color: var(--dim); mar
 #table .head .pager { display: inline-flex; gap: 4px; }
 #table .head .pager button { padding: 1px 8px; }
 #table .head select { padding: 1px 6px; }
+#table .qbar { display: flex; gap: 8px; align-items: center; padding: 6px 12px; border-bottom: 1px solid var(--line);
+  background: var(--panel); position: sticky; top: 37px; z-index: 1; color: var(--dim); flex-wrap: wrap; }
+#table .qbar input { font: 12px/1.4 ui-monospace, monospace; background: var(--panel2); color: var(--text);
+  border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; }
+#table .qbar #qFilter { flex: 1; min-width: 220px; }
+#table .qbar #qSort { width: 140px; }
+#table .qbar button { padding: 3px 10px; }
+#table .qbar .on { color: var(--text); }
+#table .qbar .bad { color: var(--bad, #f87171); }
+#table .qbar small { font: 11px ui-monospace, monospace; }
+#table.queried th { top: 75px; }
 select { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px;
   padding: 5px 8px; font: inherit; max-width: 240px; cursor: pointer; }
 #current { color: var(--dim); font-family: ui-monospace, monospace; }
@@ -641,16 +652,81 @@ const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>'
 // a table opens with its first 100 records; the buttons page through it (the server reads
 // only the lines shown, so a table of hundreds of MB opens at once)
 let tablePage = 100;
+// a filter and an order, written in Nihil over the fields (rows.where(…).sort(…)), for the table open
+let tableQ = { path: '', filter: '', sort: '' };
+const queryOn = (path) => tableQ.path === path && (tableQ.filter || tableQ.sort);
+const qHistKey = (path) => 'nihil-ide-query:' + project + ':' + path;
+function qHistory(path) { try { return JSON.parse(localStorage.getItem(qHistKey(path)) || '[]'); } catch (e) { return []; } }
+function qRemember(path, filter, sort) {
+  if (!filter && !sort) return;
+  const h = [{ filter, sort }, ...qHistory(path).filter((x) => x.filter !== filter || x.sort !== sort)].slice(0, 12);
+  try { localStorage.setItem(qHistKey(path), JSON.stringify(h)); } catch (e) {}
+}
+function queryBar(path, r) {
+  const fields = r.fields ? r.fields.map((f) => f.name).join(' ') : '';
+  const hist = qHistory(path);
+  const info = r.error ? `<span class="bad">${esc(r.queryError || r.error)}</span>`
+    : r.query ? `<span class="on">${r.total.toLocaleString('en-US')} of ${r.scanned.toLocaleString('en-US')} records · ${r.ms} ms</span>`
+    : `<small>fields: ${esc(fields)}</small>`;
+  return `<div class="qbar"><span>where</span>` +
+    `<input id="qFilter" list="qHist" spellcheck="false" placeholder="${esc(r.fields ? sampleFilter(r.fields) : 'a BOOL expression of the fields')}" value="${esc(tableQ.path === path ? tableQ.filter : '')}">` +
+    `<datalist id="qHist">${hist.filter((x) => x.filter).map((x) => `<option value="${esc(x.filter)}">${x.sort ? 'sort ' + esc(x.sort) : ''}</option>`).join('')}</datalist>` +
+    `<span>sort</span><input id="qSort" spellcheck="false" placeholder="${esc(r.fields ? '-' + (r.fields.find((f) => f.type !== 'BOOL') || r.fields[0]).name : '')}" value="${esc(tableQ.path === path ? tableQ.sort : '')}">` +
+    `<button id="qRun" title="Enter">Filter</button><button id="qClear" ${queryOn(path) ? '' : 'disabled'}>Clear</button>` +
+    `<button id="qCopy" title="Copy the query as a Nihil program">Copy as program</button>${info}</div>`;
+}
+// an example of the language for the placeholder, from the model's own fields
+function sampleFilter(fields) {
+  const parts = [];
+  const num = fields.find((f) => f.type === 'FLOAT') || fields.find((f) => f.type === 'INT' && !f.key), str = fields.find((f) => f.type === 'STRING'), b = fields.find((f) => f.type === 'BOOL');
+  if (num) parts.push(`${num.name} > ${num.type === 'FLOAT' ? '10.0' : '10'}`);
+  if (b) parts.push(b.name);
+  if (str && parts.length < 2) parts.push(`${str.name}.starts_with("A")`);
+  return parts.join(' && ') || fields[0].name;
+}
+function queryProgram(path, r) {
+  if (r.program) return r.program + '>> $sel;\n';
+  const f = r.fields.map((x) => (x.key ? '#' : '') + x.name + ': ' + (x.type === 'BOOL' ? 'BOOL' : `${x.type}(${x.width})`)).join('; ');
+  return `${r.model} = @[${f}];\n\nrows = ${r.model} @ ${JSON.stringify(path)};\n>> $rows;\n`;
+}
+function wireQueryBar(path, r) {
+  const go = () => {
+    tableQ = { path, filter: $('qFilter').value.trim(), sort: $('qSort').value.trim() };
+    qRemember(path, tableQ.filter, tableQ.sort);
+    showTable(path, true, 0);
+  };
+  $('qFilter').onkeydown = $('qSort').onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); go(); } };
+  $('qFilter').oninput = () => {       // a remembered filter brings its order back
+    const h = qHistory(path).find((x) => x.filter === $('qFilter').value);
+    if (h && !$('qSort').value) $('qSort').value = h.sort;
+  };
+  $('qRun').onclick = go;
+  $('qClear').onclick = () => { tableQ = { path, filter: '', sort: '' }; showTable(path, true, 0); };
+  $('qCopy').onclick = () => { if (r.fields || r.program) { clipWrite(queryProgram(path, r)); status('Copied the query as a program: paste it in a new file and run it'); } };
+}
 async function showTable(path, quiet, from = 0) {
-  const r = await api('/api/table?path=' + encodeURIComponent(path) + '&from=' + from + '&limit=' + tablePage);
+  if (tableQ.path !== path) tableQ = { path, filter: '', sort: '' };
+  const q = queryOn(path);
   const box = $('table');
+  if (q) box.querySelector('.qbar span:last-child')?.replaceChildren('filtering…');
+  const r = q ? await api('/api/query', { path, filter: tableQ.filter, sort: tableQ.sort, from, limit: tablePage })
+              : await api('/api/table?path=' + encodeURIComponent(path) + '&from=' + from + '&limit=' + tablePage);
+  if (r.error && q) {
+    const e = (r.errors || [])[0];
+    r.queryError = e ? `${e.message}` : r.error;
+    box.classList.add('queried');
+    box.innerHTML = `<div class="head"><b>${esc(path)}</b><span>the query was not run</span></div>` + queryBar(path, r);
+    wireQueryBar(path, r); $('qFilter').focus();
+    if (!quiet) showTab('table');
+    return;
+  }
   if (r.error) { box.innerHTML = `<div class="empty">${esc(r.error)}</div>`; return; }
   tableOpen = path;
   renderTree();
   const shown = r.fields ? r.rows.length : r.raw.length;
   const first = r.from, last = r.from + shown, lastPage = Math.max(0, Math.floor((r.total - 1) / r.limit) * r.limit);
   const n = (x) => x.toLocaleString('en-US');
-  const count = r.total ? `records ${n(first + (shown ? 1 : 0))}–${n(last)} of ${n(r.total)}` : 'no records';
+  const count = r.total ? `${r.query ? 'matches' : 'records'} ${n(first + (shown ? 1 : 0))}–${n(last)} of ${n(r.total)}` : r.query ? 'no matches' : 'no records';
   const pager = r.total > shown ? `<span class="pager">` +
     `<button data-go="0" ${first === 0 ? 'disabled' : ''} title="first page">⏮</button>` +
     `<button data-go="${Math.max(0, first - r.limit)}" ${first === 0 ? 'disabled' : ''} title="previous ${r.limit}">◀</button>` +
@@ -671,10 +747,12 @@ async function showTable(path, quiet, from = 0) {
           return `<td class="${cls}">${esc(c)}</td>`; }).join('')}</tr>`).join('');
     const others = r.others.length ? `<span title="${esc(r.others.join(', '))}">also fits: ${r.others.length}</span>` : '';
     html = `<div class="head"><b>${esc(path)}</b><span>${esc(r.model)} from ${esc(r.from_file)}</span><span>${count}</span>${pager}${size}` +
-      `<span>${r.width + 1} bytes per line · ${(r.bytes / 1048576).toFixed(1)} MB</span>${others}</div>` +
-      `<table><tr><th></th>${head}</tr>${body}</table>`;
+      `<span>${r.width + 1} bytes per line · ${(r.bytes / 1048576).toFixed(1)} MB</span>${others}</div>` + queryBar(path, r) +
+      `<table><tr><th>${r.query ? '#' : ''}</th>${head}</tr>${body}</table>`;
   }
+  box.classList.toggle('queried', !!r.fields);
   box.innerHTML = html;
+  if (r.fields) wireQueryBar(path, r);
   box.querySelectorAll('.pager button').forEach((b) => b.onclick = () => showTable(path, true, +b.dataset.go));
   $('tablePage').onchange = (e) => { tablePage = +e.target.value; showTable(path, true, Math.floor(first / tablePage) * tablePage); };
   if (!quiet) showTab('table');
