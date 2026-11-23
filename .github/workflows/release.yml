@@ -89,8 +89,11 @@ jobs:
       - name: The IDE server
         run: macos/nihil ide/server.nihil build/macos/ide-server
 
+      - name: The IDE app (Nihil IDE.app)
+        run: macos/ide-app/build.sh build/macos
+
       - name: Package
-        run: dist/package.sh macos-arm64 dist/out build/macos/nihilc1-native build/macos/rt.o build/macos/ide-server
+        run: dist/package.sh macos-arm64 dist/out build/macos/nihilc1-native build/macos/rt.o build/macos/ide-server "build/macos/Nihil IDE.app"
 
       - name: The package installs and compiles a program
         run: |
@@ -100,6 +103,9 @@ jobs:
 
       - name: The installed IDE compiles and runs a program
         run: dist/test-ide.sh "$RUNNER_TEMP/bin/nihil"
+
+      - name: The installed IDE app is there and signed
+        run: codesign -v "$RUNNER_TEMP/nihil/libexec/nihil/Nihil IDE.app"
 
       - uses: actions/upload-artifact@v4
         with:
