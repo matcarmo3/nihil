@@ -1,5 +1,6 @@
 #!/bin/sh
-# macos/ide-app/build.sh OUTDIR — builds OUTDIR/Nihil IDE.app (main.m, the icon from assets/avatar.png).
+# macos/ide-app/build.sh OUTDIR — builds OUTDIR/Nihil IDE.app (main.m and nihil.icns).
+# nihil.icns and ide/static/icon-*.png come from assets/avatar.png, made with macos/ide-app/icons.py.
 set -eu
 cd "$(dirname "$0")/../.."
 out=$1
@@ -9,15 +10,7 @@ rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 clang -arch arm64 -mmacosx-version-min=12.0 -fobjc-arc -O2 -framework Cocoa -framework WebKit \
     -o "$app/Contents/MacOS/nihil-ide" macos/ide-app/main.m
-icons=$(mktemp -d)/nihil.iconset
-mkdir -p "$icons"
-for s in 16 32 128 256 512; do
-    sips -z $s $s assets/avatar.png --out "$icons/icon_${s}x${s}.png" >/dev/null
-    d=$((s * 2))
-    sips -z $d $d assets/avatar.png --out "$icons/icon_${s}x${s}@2x.png" >/dev/null
-done
-iconutil -c icns "$icons" -o "$app/Contents/Resources/nihil.icns"
-rm -rf "$(dirname "$icons")"
+cp macos/ide-app/nihil.icns "$app/Contents/Resources/nihil.icns"
 cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
