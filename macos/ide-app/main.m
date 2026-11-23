@@ -15,13 +15,18 @@
 @end
 
 @implementation IDEWebView
+static NSEvent *lastMouseDown;
+- (void)mouseDown:(NSEvent *)event {
+    lastMouseDown = event;
+    [super mouseDown:event];
+}
 - (void)willOpenMenu:(NSMenu *)menu withEvent:(NSEvent *)event {
     [menu removeAllItems];                      // the page shows its own menu (ide/static/index.html)
     [super willOpenMenu:menu withEvent:event];
 }
 @end
 
-@interface App : NSObject <NSApplicationDelegate, WKUIDelegate, WKNavigationDelegate, WKScriptMessageHandler>
+@interface App : NSObject <NSApplicationDelegate, NSWindowDelegate, WKUIDelegate, WKNavigationDelegate, WKScriptMessageHandler>
 @property (strong) NSWindow *window;
 @property (strong) WKWebView *web;
 @property (strong) NSURL *url;
@@ -132,13 +137,21 @@ static NSString *fetch(NSURL *url) {
     self.web.UIDelegate = self;
     self.web.navigationDelegate = self;
     self.window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 1280, 820)
-        styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable
+        styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable
+                  | NSWindowStyleMaskResizable | NSWindowStyleMaskFullSizeContentView
         backing:NSBackingStoreBuffered defer:NO];
     self.window.title = @"Nihil IDE";
+    // no title bar: the page's header (42 px) is the top of the window, the window's buttons inside it
+    self.window.titleVisibility = NSWindowTitleHidden;
+    self.window.titlebarAppearsTransparent = YES;
+    self.window.backgroundColor = [NSColor colorWithSRGBRed:0x1d / 255.0 green:0x1f / 255.0 blue:0x27 / 255.0 alpha:1];
+    self.window.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
+    self.window.delegate = self;
     self.window.contentView = self.web;
     self.window.frameAutosaveName = @"NihilIDE";
     [self.window center];
     [self.window makeKeyAndOrderFront:nil];
+    [self placeButtons];
     [NSApp activateIgnoringOtherApps:YES];
 
     if ([self serve]) {
@@ -161,8 +174,43 @@ static NSString *fetch(NSURL *url) {
     return NO;
 }
 
+// the window's buttons centered in the page's header (42 px high), 14 px from the left
+- (void)placeButtons {
+    NSButton *close = [self.window standardWindowButton:NSWindowCloseButton];
+    NSView *bar = close.superview.superview;              // the title bar's container
+    if (!bar || (self.window.styleMask & NSWindowStyleMaskFullScreen)) return;
+    CGFloat header = 42;
+    NSRect r = bar.frame;
+    r.size.height = header;
+    r.origin.y = NSHeight(self.window.frame) - header;
+    bar.frame = r;
+    NSWindowButton kinds[] = {NSWindowCloseButton, NSWindowMiniaturizeButton, NSWindowZoomButton};
+    for (int i = 0; i < 3; i++) {
+        NSButton *b = [self.window standardWindowButton:kinds[i]];
+        NSRect f = b.frame;
+        f.origin.x = 14 + i * 20;
+        f.origin.y = (header - NSHeight(f)) / 2;
+        [b setFrameOrigin:f.origin];
+    }
+}
+- (void)windowDidResize:(NSNotification *)n { [self placeButtons]; }
+- (void)windowDidBecomeKey:(NSNotification *)n { [self placeButtons]; }
+- (void)windowDidEnterFullScreen:(NSNotification *)n {
+    [self.web evaluateJavaScript:@"document.documentElement.classList.add('full-screen')" completionHandler:nil];
+}
+- (void)windowDidExitFullScreen:(NSNotification *)n {
+    [self.web evaluateJavaScript:@"document.documentElement.classList.remove('full-screen')" completionHandler:nil];
+    [self placeButtons];
+}
+
 - (void)userContentController:(WKUserContentController *)c didReceiveScriptMessage:(WKScriptMessage *)message {
     if (![message.body isKindOfClass:[NSDictionary class]]) return;
+    NSString *win = message.body[@"window"];
+    if ([win isEqual:@"drag"] && lastMouseDown && ([NSEvent pressedMouseButtons] & 1)) {
+        [self.window performWindowDragWithEvent:lastMouseDown];
+        return;
+    }
+    if ([win isEqual:@"zoom"]) { [self.window performZoom:nil]; return; }
     NSString *edit = message.body[@"edit"];
     NSDictionary *actions = @{@"cut": @"cut:", @"copy": @"copy:", @"paste": @"paste:", @"selectAll": @"selectAll:"};
     if ([edit isKindOfClass:[NSString class]] && actions[edit])

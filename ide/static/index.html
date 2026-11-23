@@ -31,6 +31,10 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
 header { display: flex; align-items: center; gap: 8px; padding: 0 12px; background: var(--panel);
   border-bottom: 1px solid var(--line); }
 header .logo { font-weight: 700; letter-spacing: .5px; margin-right: 10px; }
+/* in Nihil IDE.app the window has no title bar: the header is the top of the window, with the
+   window's buttons (close, minimize, full screen) at its left and dragging it moves the window */
+html.in-app header { padding-left: 84px; }
+html.in-app.full-screen header { padding-left: 12px; }
 header .logo { display: flex; align-items: center; gap: 8px; }
 header .logo img { width: 26px; height: 26px; }
 header .logo span { color: #19e3e8; font-weight: 600; }
@@ -914,6 +918,14 @@ const mac = /Mac/.test(navigator.platform);
 const shortcut = (k) => (mac ? '⌘' : 'Ctrl+') + k;
 const appBridge = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.nihil;
 function nativeEdit(what) { appBridge.postMessage({ edit: what }); }
+if (appBridge) {
+  document.documentElement.classList.add('in-app');
+  // the header's empty parts move the window (a double click zooms it, as a title bar does)
+  const header = document.querySelector('header');
+  const empty = (e) => !e.target.closest('button, select, input, textarea, label, a, [contenteditable="true"]');
+  header.addEventListener('mousedown', (e) => { if (e.button === 0 && e.detail === 1 && empty(e)) appBridge.postMessage({ window: 'drag' }); });
+  header.addEventListener('dblclick', (e) => { if (empty(e)) appBridge.postMessage({ window: 'zoom' }); });
+}
 async function clipText() {
   try { return await navigator.clipboard.readText(); } catch (e) { toast('Paste with ' + shortcut('V')); return ''; }
 }
