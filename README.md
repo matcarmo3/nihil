@@ -98,6 +98,7 @@ nihil run hello.nihil        # compile and run: Hello, Nihil!
 nihil hello.nihil            # or compile into ./hello, a native executable
 nihil version
 nihil ide                    # the IDE, in an app window (your workspace: ~/Nihil)
+nihil ide stop               # stop the IDE's server, which runs in the background
 ```
 
 Releases and checksums: [github.com/nihillang/nihil/releases](https://github.com/nihillang/nihil/releases).
@@ -153,7 +154,9 @@ program.
 `ide/` is a small IDE whose server is written in Nihil (`ide/server.nihil`). With Nihil
 installed, `nihil ide` starts it and opens it in an app window (Chrome, Edge, Brave or
 Chromium with `--app`; the default browser otherwise). Its workspace is `~/Nihil`, where
-the examples are copied the first time. From the repository:
+the examples are copied the first time. The server runs in the background, with its log in
+`~/Nihil/.nihil-ide/server.log`, and `nihil ide stop` stops it; `nihil ide --foreground` keeps
+it in the terminal instead (Ctrl+C stops it). From the repository:
 
 ```sh
 make ide && ./build/ide-server             # then open http://127.0.0.1:8730
