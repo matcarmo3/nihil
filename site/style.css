@@ -93,6 +93,7 @@ nav.top { border-bottom: 1px solid var(--line); }
 nav.top .wrap { display: flex; gap: 20px; align-items: center; height: 56px; flex-wrap: wrap; }
 nav.top a { color: var(--fg); text-decoration: none; font-weight: 500; }
 nav.top a.brand { font-weight: 700; display: flex; align-items: center; gap: 8px; margin-right: auto; }
+nav.top a.brand picture { display: flex; }
 nav.top a.brand img { width: 28px; height: 28px; }
 nav.top a.here { color: var(--accent-strong); }
 .doc h1 { font-size: 34px; margin: 40px 0 8px; }
