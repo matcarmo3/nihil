@@ -4,6 +4,11 @@ What each version of the language added, and why. Appendix A of
 [SPEC.md](SPEC.md) keeps the same history together with the design decisions made
 before v2.0.
 
+## v4.2.4
+
+- Linux: the installer adds a "Nihil IDE" menu entry with the Nihil icon; `nihil ide` opens the IDE in a browser profile of its own (window class `NihilIDE`), so the taskbar and Alt+Tab show the Nihil icon, and closing the window stops the server
+  - *Why:* On Linux the IDE's window showed the browser's icon and needed a terminal
+
 ## v4.2.3
 
 - the IDE's icons are made small (64 colors, no 1024-pixel size): the macOS package goes from 880 KB to about 400 KB
