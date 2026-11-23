@@ -4,6 +4,11 @@ What each version of the language added, and why. Appendix A of
 [SPEC.md](SPEC.md) keeps the same history together with the design decisions made
 before v2.0.
 
+## v4.2.3
+
+- the IDE's icons are made small (64 colors, no 1024-pixel size): the macOS package goes from 880 KB to about 400 KB
+  - *Why:* The icons were most of the package's size
+
 ## v4.2.2
 
 - macOS: `Nihil IDE.app`, the IDE in a native window with the Nihil icon; the installer puts a copy in `~/Applications` (Launchpad, Spotlight), and the app starts the IDE's server itself when it is not running
