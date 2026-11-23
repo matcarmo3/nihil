@@ -58,32 +58,31 @@ static NSString *fetch(NSURL *url) {
 
 @implementation App
 
+// one menu only, "Nihil IDE": the shortcuts of Edit, View and Window are in it as hidden items
+// (the keys work, the menu bar does not show them)
 - (void)menus {
     NSMenu *bar = [NSMenu new];
     NSMenu *app = [NSMenu new];
-    [app addItemWithTitle:@"Hide Nihil IDE" action:@selector(hide:) keyEquivalent:@"h"];
+    [app addItemWithTitle:@"About Nihil IDE" action:@selector(orderFrontStandardAboutPanel:) keyEquivalent:@""];
     [app addItem:[NSMenuItem separatorItem]];
+    [app addItemWithTitle:@"Hide Nihil IDE" action:@selector(hide:) keyEquivalent:@"h"];
     [app addItemWithTitle:@"Quit Nihil IDE" action:@selector(terminate:) keyEquivalent:@"q"];
-    NSMenu *edit = [[NSMenu alloc] initWithTitle:@"Edit"];
-    [edit addItemWithTitle:@"Undo" action:@selector(undo:) keyEquivalent:@"z"];
-    [edit addItemWithTitle:@"Redo" action:@selector(redo:) keyEquivalent:@"Z"];
-    [edit addItem:[NSMenuItem separatorItem]];
-    [edit addItemWithTitle:@"Cut" action:@selector(cut:) keyEquivalent:@"x"];
-    [edit addItemWithTitle:@"Copy" action:@selector(copy:) keyEquivalent:@"c"];
-    [edit addItemWithTitle:@"Paste" action:@selector(paste:) keyEquivalent:@"v"];
-    [edit addItemWithTitle:@"Select All" action:@selector(selectAll:) keyEquivalent:@"a"];
-    NSMenu *view = [[NSMenu alloc] initWithTitle:@"View"];
-    [view addItemWithTitle:@"Reload" action:@selector(reload:) keyEquivalent:@"r"];
-    NSMenu *win = [[NSMenu alloc] initWithTitle:@"Window"];
-    [win addItemWithTitle:@"Minimize" action:@selector(performMiniaturize:) keyEquivalent:@"m"];
-    [win addItemWithTitle:@"Close" action:@selector(performClose:) keyEquivalent:@"w"];
-    for (NSMenu *m in @[app, edit, view, win]) {
-        NSMenuItem *item = [NSMenuItem new];
-        item.submenu = m;
-        [bar addItem:item];
+    NSArray *hidden = @[
+        @[@"Undo", @"undo:", @"z"], @[@"Redo", @"redo:", @"Z"], @[@"Cut", @"cut:", @"x"], @[@"Copy", @"copy:", @"c"],
+        @[@"Paste", @"paste:", @"v"], @[@"Select All", @"selectAll:", @"a"], @[@"Reload", @"reload:", @"r"],
+        @[@"Minimize", @"performMiniaturize:", @"m"], @[@"Close", @"performClose:", @"w"],
+        @[@"Full Screen", @"toggleFullScreen:", @"f"]];
+    for (NSArray *h in hidden) {
+        NSMenuItem *item = [app addItemWithTitle:h[0] action:NSSelectorFromString(h[1]) keyEquivalent:h[2]];
+        if ([h[1] isEqual:@"toggleFullScreen:"])
+            item.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagControl;
+        item.hidden = YES;
+        item.allowsKeyEquivalentWhenHidden = YES;
     }
+    NSMenuItem *top = [NSMenuItem new];
+    top.submenu = app;
+    [bar addItem:top];
     NSApp.mainMenu = bar;
-    NSApp.windowsMenu = win;
 }
 
 - (void)reload:(id)sender { [self.web loadRequest:[NSURLRequest requestWithURL:self.url]]; }
