@@ -10,31 +10,18 @@
 #import <Cocoa/Cocoa.h>
 #import <WebKit/WebKit.h>
 
-// the web view's right-click menu without the browser's items (Reload, Back, Inspect Element,
-// Open Link…): what is left is the text's (Cut, Copy, Paste, Spelling, Look Up)
+// no web view right-click menu (Reload, Back, Inspect Element…): the page has its own
 @interface IDEWebView : WKWebView
 @end
 
 @implementation IDEWebView
 - (void)willOpenMenu:(NSMenu *)menu withEvent:(NSEvent *)event {
-    NSSet *browser = [NSSet setWithArray:@[@"WKMenuItemIdentifierReload", @"WKMenuItemIdentifierGoBack",
-        @"WKMenuItemIdentifierGoForward", @"WKMenuItemIdentifierInspectElement",
-        @"WKMenuItemIdentifierOpenLinkInNewWindow", @"WKMenuItemIdentifierDownloadLinkedFile",
-        @"WKMenuItemIdentifierOpenImageInNewWindow", @"WKMenuItemIdentifierDownloadImage",
-        @"WKMenuItemIdentifierCopyImage", @"WKMenuItemIdentifierOpenFrameInNewWindow",
-        @"WKMenuItemIdentifierShareMenu", @"WKMenuItemIdentifierSearchWeb"]];
-    for (NSMenuItem *item in [menu.itemArray copy])
-        if (item.identifier && [browser containsObject:item.identifier]) [menu removeItem:item];
-    // no separators left at the ends or doubled
-    while (menu.numberOfItems && menu.itemArray.firstObject.isSeparatorItem) [menu removeItemAtIndex:0];
-    while (menu.numberOfItems && menu.itemArray.lastObject.isSeparatorItem) [menu removeItemAtIndex:menu.numberOfItems - 1];
-    for (NSInteger i = menu.numberOfItems - 1; i > 0; i--)
-        if ([menu itemAtIndex:i].isSeparatorItem && [menu itemAtIndex:i - 1].isSeparatorItem) [menu removeItemAtIndex:i];
+    [menu removeAllItems];                      // the page shows its own menu (ide/static/index.html)
     [super willOpenMenu:menu withEvent:event];
 }
 @end
 
-@interface App : NSObject <NSApplicationDelegate, WKUIDelegate, WKNavigationDelegate>
+@interface App : NSObject <NSApplicationDelegate, WKUIDelegate, WKNavigationDelegate, WKScriptMessageHandler>
 @property (strong) NSWindow *window;
 @property (strong) WKWebView *web;
 @property (strong) NSURL *url;
@@ -138,6 +125,9 @@ static NSString *fetch(NSURL *url) {
     self.url = [NSURL URLWithString:u ?: [NSString stringWithFormat:@"http://127.0.0.1:%@/", port]];
 
     WKWebViewConfiguration *cfg = [WKWebViewConfiguration new];
+    // the page's right-click menu asks for cut/copy/paste/select all here: the system's commands,
+    // so pasting needs no permission (the clipboard API would ask each time)
+    [cfg.userContentController addScriptMessageHandler:self name:@"nihil"];
     self.web = [[IDEWebView alloc] initWithFrame:NSMakeRect(0, 0, 1280, 820) configuration:cfg];
     self.web.UIDelegate = self;
     self.web.navigationDelegate = self;
@@ -169,6 +159,14 @@ static NSString *fetch(NSURL *url) {
             if (page && ![token_of(page) isEqualToString:current ?: @""]) [self reload:nil];
         }];
     return NO;
+}
+
+- (void)userContentController:(WKUserContentController *)c didReceiveScriptMessage:(WKScriptMessage *)message {
+    if (![message.body isKindOfClass:[NSDictionary class]]) return;
+    NSString *edit = message.body[@"edit"];
+    NSDictionary *actions = @{@"cut": @"cut:", @"copy": @"copy:", @"paste": @"paste:", @"selectAll": @"selectAll:"};
+    if ([edit isKindOfClass:[NSString class]] && actions[edit])
+        [NSApp sendAction:NSSelectorFromString(actions[edit]) to:nil from:self];
 }
 
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)app { return YES; }

@@ -253,6 +253,13 @@ dialog { background: var(--panel); color: var(--text); border: 1px solid var(--l
 dialog input { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 5px;
   padding: 6px 8px; font: 13px ui-monospace, monospace; width: 320px; }
 dialog::backdrop { background: rgba(0,0,0,.5); }
+#ctxMenu { position: fixed; z-index: 1000; min-width: 190px; padding: 4px; background: var(--panel2);
+  border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.45); }
+#ctxMenu div { display: flex; justify-content: space-between; gap: 24px; padding: 5px 10px; border-radius: 5px; cursor: default; }
+#ctxMenu div:hover { background: var(--sel); }
+#ctxMenu div.off { color: var(--dim); pointer-events: none; }
+#ctxMenu div span { color: var(--dim); }
+#ctxMenu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 2px; }
 </style>
 </head>
 <body>
@@ -900,10 +907,81 @@ $('splitter').onmousedown = (e) => {
   addEventListener('mousemove', move); addEventListener('mouseup', up);
 };
 addEventListener('beforeunload', (e) => { if (tabs.some((t) => t.dirty)) e.preventDefault(); });
-// the browser's own menu (Back, Reload, Inspect…) is not the IDE's: right-click keeps only the
-// text menu (cut, copy, paste) where there is text to edit: the editor, the terminal, the fields
+// ---------------------------------------------------------------- right-click menu
+// The IDE's own menu: never the browser's (Back, Reload, Inspect…). Cut, copy and paste go through the
+// app (Nihil IDE.app: the system's own commands, no permission asked) or the clipboard API (a browser).
+const mac = /Mac/.test(navigator.platform);
+const shortcut = (k) => (mac ? '⌘' : 'Ctrl+') + k;
+const appBridge = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.nihil;
+function nativeEdit(what) { appBridge.postMessage({ edit: what }); }
+async function clipText() {
+  try { return await navigator.clipboard.readText(); } catch (e) { toast('Paste with ' + shortcut('V')); return ''; }
+}
+function clipWrite(text) { if (text) navigator.clipboard.writeText(text).catch(() => toast('Copy with ' + shortcut('C'))); }
+function toast(text) { const st = document.querySelector('#status') || document.body; if (st.id === 'status') st.textContent = text; }
+function closeMenu() { const m = $('ctxMenu'); if (m) m.remove(); }
+function openMenu(x, y, items) {
+  closeMenu();
+  const m = document.createElement('div'); m.id = 'ctxMenu';
+  for (const it of items) {
+    if (it === '-') { m.appendChild(document.createElement('hr')); continue; }
+    const d = document.createElement('div'); if (it.off) d.className = 'off';
+    d.innerHTML = '<b style="font-weight:400"></b><span></span>';
+    d.firstChild.textContent = it.label; d.lastChild.textContent = it.key || '';
+    d.addEventListener('mousedown', (e) => e.preventDefault());       // the focus stays where it was
+    d.addEventListener('click', () => { closeMenu(); it.act(); });
+    m.appendChild(d);
+  }
+  document.body.appendChild(m);
+  const r = m.getBoundingClientRect();
+  m.style.left = Math.min(x, innerWidth - r.width - 4) + 'px';
+  m.style.top = Math.min(y, innerHeight - r.height - 4) + 'px';
+}
+addEventListener('mousedown', (e) => { if (!e.target.closest('#ctxMenu')) closeMenu(); });
+addEventListener('blur', closeMenu);
+addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
+function editorMenu() {
+  const sel = editor.somethingSelected();
+  return [
+    { label: 'Cut', key: shortcut('X'), off: !sel, act: () => { editor.focus(); if (appBridge) nativeEdit('cut'); else { clipWrite(editor.getSelection()); editor.replaceSelection(''); } } },
+    { label: 'Copy', key: shortcut('C'), off: !sel, act: () => { editor.focus(); if (appBridge) nativeEdit('copy'); else clipWrite(editor.getSelection()); } },
+    { label: 'Paste', key: shortcut('V'), act: async () => { editor.focus(); if (appBridge) nativeEdit('paste'); else editor.replaceSelection(await clipText()); } },
+    '-',
+    { label: 'Select All', key: shortcut('A'), act: () => { editor.focus(); editor.execCommand('selectAll'); } },
+    { label: 'Comment / Uncomment', key: shortcut('/'), act: () => { editor.focus(); editor.execCommand('toggleComment'); } },
+    '-',
+    { label: 'Save', key: shortcut('S'), act: () => save() },
+    { label: 'Run', key: shortcut('↵'), act: () => run() },
+  ];
+}
+function terminalMenu() {
+  const sel = term.hasSelection();
+  return [
+    { label: 'Copy', key: shortcut('C'), off: !sel, act: () => { clipWrite(term.getSelection()); term.focus(); } },
+    { label: 'Paste', key: shortcut('V'), act: async () => { term.focus(); if (appBridge) nativeEdit('paste'); else term.paste(await clipText()); } },
+    '-',
+    { label: 'Select All', act: () => term.selectAll() },
+    { label: 'Clear', act: () => term.clear() },
+  ];
+}
+function fieldMenu(f) {
+  const sel = f.selectionStart !== f.selectionEnd;
+  const put = (t) => { f.setRangeText(t, f.selectionStart, f.selectionEnd, 'end'); f.dispatchEvent(new Event('input', { bubbles: true })); };
+  return [
+    { label: 'Cut', key: shortcut('X'), off: !sel || f.readOnly, act: () => { f.focus(); if (appBridge) nativeEdit('cut'); else { clipWrite(f.value.slice(f.selectionStart, f.selectionEnd)); put(''); } } },
+    { label: 'Copy', key: shortcut('C'), off: !sel, act: () => { f.focus(); if (appBridge) nativeEdit('copy'); else clipWrite(f.value.slice(f.selectionStart, f.selectionEnd)); } },
+    { label: 'Paste', key: shortcut('V'), off: f.readOnly, act: async () => { f.focus(); if (appBridge) nativeEdit('paste'); else put(await clipText()); } },
+    '-',
+    { label: 'Select All', key: shortcut('A'), act: () => { f.focus(); f.select(); } },
+  ];
+}
 addEventListener('contextmenu', (e) => {
-  if (!e.target.closest('.CodeMirror, .xterm, input, textarea, [contenteditable="true"]')) e.preventDefault();
+  e.preventDefault();
+  const t = e.target;
+  if (t.closest('.CodeMirror')) openMenu(e.clientX, e.clientY, editorMenu());
+  else if (t.closest('.xterm')) openMenu(e.clientX, e.clientY, terminalMenu());
+  else if (t.matches('textarea, input:not([type=checkbox]):not([type=radio]):not([type=button])')) openMenu(e.clientX, e.clientY, fieldMenu(t));
+  else closeMenu();
 });
 addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); run(); }
