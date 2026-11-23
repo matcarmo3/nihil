@@ -568,7 +568,7 @@ function renderTree() {
       el.style.paddingLeft = (8 + depth * 14) + 'px'; el.title = path;
       const caret = document.createElement('span'); caret.className = 'caret'; caret.textContent = open ? '▾' : '▸';
       const icon = document.createElement('span'); icon.className = 'icon'; icon.textContent = open ? '📂' : '📁';
-      el.append(caret, icon, name);
+      el.append(caret, icon, name); el.dataset.folder = path;
       el.onclick = () => {
         selectedFolder = path;
         if (collapsed.has(path)) collapsed.delete(path); else collapsed.add(path);
@@ -582,7 +582,7 @@ function renderTree() {
       const active = it.table ? it.path === tableOpen : it.path === current;
       el.className = 'file' + (it.table ? ' table' : '') + (active ? ' active' : '');
       el.style.paddingLeft = (22 + depth * 14) + 'px';
-      el.textContent = it.path.slice(it.path.lastIndexOf('/') + 1); el.title = it.path;
+      el.textContent = it.path.slice(it.path.lastIndexOf('/') + 1); el.title = it.path; el.dataset.file = it.path;
       el.onclick = () => { selectedFolder = dirOf(it.path); it.table ? showTable(it.path) : open(it.path); };
       box.appendChild(el);
     }
@@ -1000,10 +1000,74 @@ function fieldMenu(f) {
     { label: 'Select All', key: shortcut('A'), act: () => { f.focus(); f.select(); } },
   ];
 }
+// the file tree: a program, a folder, or the empty space below them
+function fileMenu(path) {
+  return [
+    { label: 'Open', act: () => open(path) },
+    { label: 'Run', act: async () => { await open(path); run(); } },
+    '-',
+    { label: 'Rename…', act: () => renameFile(path, false) },
+    { label: 'Duplicate…', act: () => renameFile(path, true) },
+    { label: 'Delete', act: () => deleteFile(path) },
+    '-',
+    { label: 'Copy Path', act: () => clipWrite(path) },
+    { label: '✦ Ask Claude about this file', act: () => pinFile(path) },
+  ];
+}
+function folderMenu(path) {
+  const shut = collapsed.has(path);
+  return [
+    { label: 'New File Here…', act: () => { selectedFolder = path; $('btnNew').click(); } },
+    { label: 'New Folder Here…', act: () => { selectedFolder = path; $('btnFolder').click(); } },
+    '-',
+    { label: shut ? 'Expand' : 'Collapse', act: () => { shut ? collapsed.delete(path) : collapsed.add(path); saveCollapsed(); renderTree(); } },
+    { label: 'Copy Path', act: () => clipWrite(path) },
+  ];
+}
+function treeMenu() {
+  return [
+    { label: 'New File…', act: () => { selectedFolder = ''; $('btnNew').click(); } },
+    { label: 'New Folder…', act: () => { selectedFolder = ''; $('btnFolder').click(); } },
+    '-',
+    { label: 'Refresh', act: () => loadFiles() },
+  ];
+}
+async function renameFile(path, keep) {
+  const t = tabs.find((x) => x.path === path);
+  if (!keep && t && t.dirty) { status(`Save ${path} before renaming it`, 'bad'); return; }
+  let to = prompt(keep ? `Duplicate ${path} as:` : `Rename ${path} to:`, keep ? path.replace(/\.nihil$/, '-copy.nihil') : path);
+  if (!to || (to = to.trim()) === path) return;
+  if (!to.endsWith('.nihil')) to += '.nihil';
+  const r = await api('/api/rename', { from: path, to, keep });
+  if (r.error) return status(r.error, 'bad');
+  if (!keep && t) {
+    t.path = r.path;
+    if (current === path) { current = r.path; $('current').textContent = r.path; }
+    renderTabs();
+  }
+  await loadFiles();
+  if (keep) open(r.path);
+  status((keep ? 'Duplicated as ' : 'Renamed to ') + r.path);
+}
+async function deleteFile(path) {
+  if (!confirm(`Delete ${path}?\n\nThe file is removed from the disk; this cannot be undone.`)) return;
+  const r = await api('/api/delete', { path });
+  if (r.error) return status(r.error, 'bad');
+  const t = tabs.find((x) => x.path === path);
+  if (t) { t.dirty = false; closeTab(t); }
+  await loadFiles(); status('Deleted ' + path);
+}
+function pinFile(path) {
+  if (!pins.some((p) => p.file === path && p.whole)) pins.push({ file: path, whole: true });
+  renderPins(); toggleChat(true); $('chatText').focus();
+}
 addEventListener('contextmenu', (e) => {
   e.preventDefault();
   const t = e.target;
-  if (t.closest('.CodeMirror')) openMenu(e.clientX, e.clientY, editorMenu());
+  const row = t.closest('#files [data-file], #files [data-folder]');
+  if (row) openMenu(e.clientX, e.clientY, row.dataset.file ? fileMenu(row.dataset.file) : folderMenu(row.dataset.folder));
+  else if (t.closest('#files')) openMenu(e.clientX, e.clientY, treeMenu());
+  else if (t.closest('.CodeMirror')) openMenu(e.clientX, e.clientY, editorMenu());
   else if (t.closest('.xterm')) openMenu(e.clientX, e.clientY, terminalMenu());
   else if (t.matches('textarea, input:not([type=checkbox]):not([type=radio]):not([type=button])')) openMenu(e.clientX, e.clientY, fieldMenu(t));
   else closeMenu();
@@ -1430,7 +1494,7 @@ function selectionSnapshot() {
   const a = from.line + 1, b = to.line + (to.ch === 0 && to.line > from.line ? 0 : 1);
   return { file: current, a, b, text: editor.getSelection() };
 }
-const pinName = (p) => p.file + ':' + (p.a === p.b ? p.a : p.a + '–' + p.b);
+const pinName = (p) => p.whole ? p.file : p.file + ':' + (p.a === p.b ? p.a : p.a + '–' + p.b);
 function renderPins() {
   const box = $('chatPins'); box.innerHTML = '';
   pins.forEach((p, i) => {
@@ -1464,7 +1528,8 @@ function ideContext() {
     if (t && t.dirty) parts.push('The active file has unsaved changes; the text in the editor is:\n' + fence(editor.getValue()));
   }
   const lines = (p) => `line${p.a === p.b ? ' ' + p.a : 's ' + p.a + '–' + p.b}`;
-  for (const p of pins) parts.push(`Code the user brought to this message, from ${p.file}, ${lines(p)}:\n` + fence(p.text));
+  for (const p of pins) parts.push(p.whole ? `File the user brought to this message: ${p.file} (read it in the project)`
+    : `Code the user brought to this message, from ${p.file}, ${lines(p)}:\n` + fence(p.text));
   const live = $('ctxSel').checked ? selectionSnapshot() : null;
   if (live && !pins.some((p) => p.file === live.file && p.a === live.a && p.b === live.b))
     parts.push(`Selected in ${live.file}, ${lines(live)}:\n` + fence(live.text));

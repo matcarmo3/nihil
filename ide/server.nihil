@@ -989,6 +989,37 @@ handle(c = 0, req = "") {
         c.respond(200, "application/json", "{\"ok\": true, \"path\": " + q(rel) + "}");
         :;
     }
+    // the file tree's menu: rename (or duplicate) and delete a program of the project
+    path == "/api/rename" {
+        from = (body.json("from") || "\"\"").json_text() || "";
+        to = (body.json("to") || "\"\"").json_text() || "";
+        keep = (body.json("keep") || "false") == "true";       // duplicate: the original stays
+        !editable(project, from) || !editable(project, to) {
+            c.respond(400, "application/json", "{\"error\": " + q("only .nihil files inside the project can be renamed") + "}"); :;
+        }
+        text? = @? (project + "/" + from);
+        text == _ { c.respond(404, "application/json", "{\"error\": " + q(from + " not found") + "}"); :; }
+        (project + "/" + to).is_file() || (project + "/" + to).is_dir() {
+            c.respond(409, "application/json", "{\"error\": " + q(to + " already exists") + "}"); :;
+        }
+        last = 0;
+        i = 0;
+        * i < #to { to[i] == '/' { last = i; } i = i + 1; }
+        last > 0 { (project + "/" + to.slice(0, last)).make_dir(); }
+        @>> project + "/" + to, text || "";
+        !keep { (project + "/" + from).remove(); }
+        c.respond(200, "application/json", "{\"ok\": true, \"path\": " + q(to) + "}");
+        :;
+    }
+    path == "/api/delete" {
+        rel = (body.json("path") || "\"\"").json_text() || "";
+        !editable(project, rel) {
+            c.respond(400, "application/json", "{\"error\": " + q("only .nihil files inside the project can be deleted") + "}"); :;
+        }
+        !(project + "/" + rel).remove() { c.respond(500, "application/json", "{\"error\": " + q("could not delete " + rel) + "}"); :; }
+        c.respond(200, "application/json", "{\"ok\": true, \"path\": " + q(rel) + "}");
+        :;
+    }
     path == "/api/activity" { c.respond(200, "application/json", activity_json()); :; }
     path == "/api/claude" { c.respond(200, "application/json", claude_json(project, body)); :; }
     path == "/api/claude/auth" { c.respond(200, "application/json", claude_auth_json()); :; }
