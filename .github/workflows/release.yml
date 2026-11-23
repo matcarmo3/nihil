@@ -45,6 +45,9 @@ jobs:
       - name: The installed IDE compiles and runs a program
         run: dist/test-ide.sh "$RUNNER_TEMP/bin/nihil"
 
+      - name: The installer wrote the IDE's menu entry
+        run: grep -q 'StartupWMClass=NihilIDE' "$HOME/.local/share/applications/nihil-ide.desktop"
+
       - uses: actions/upload-artifact@v4
         with:
           name: linux

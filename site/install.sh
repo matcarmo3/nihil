@@ -8,7 +8,8 @@
 # outside your home directory, and no sudo is needed.
 #
 #   NIHIL_HOME=dir      where to unpack it (default ~/.nihil)
-#   NIHIL_APPS=dir      macOS: where the copy of Nihil IDE.app goes (default ~/Applications; none: nowhere)
+#   NIHIL_APPS=dir      macOS: where the copy of Nihil IDE.app goes (default ~/Applications); none: no app
+#                       copy (macOS) and no menu entry (Linux)
 #   NIHIL_BIN=dir       where to link the nihil command (default ~/.local/bin)
 #   NIHIL_VERSION=x.y.z a given release instead of the latest
 set -eu
@@ -85,6 +86,24 @@ if [ "$(uname -s)" = Darwin ] && [ -d "$app" ] && [ "$apps" != none ]; then
         codesign --force --sign - "$copy" >/dev/null 2>&1 || true
         say "The IDE's app: $copy (Launchpad, Spotlight: Nihil IDE)"
     fi
+fi
+
+# Linux: a menu entry for the IDE, with its icon (NIHIL_APPS=none: not)
+if [ "$(uname -s)" = Linux ] && [ -x "$dest/libexec/nihil/ide-server" ] && [ "$apps" != none ]; then
+    menu=${XDG_DATA_HOME:-$HOME/.local/share}/applications
+    mkdir -p "$menu"
+    cat > "$menu/nihil-ide.desktop" <<DESKTOP
+[Desktop Entry]
+Type=Application
+Name=Nihil IDE
+Comment=The IDE of the Nihil language
+Exec="$dest/bin/nihil" ide
+Icon=$dest/share/nihil/ide/static/icon-512.png
+Terminal=false
+Categories=Development;IDE;
+StartupWMClass=NihilIDE
+DESKTOP
+    say "The IDE's menu entry: $menu/nihil-ide.desktop (Nihil IDE)"
 fi
 
 say "Installed $("$dest/bin/nihil" version) in $dest"

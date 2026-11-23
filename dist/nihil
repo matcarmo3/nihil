@@ -56,9 +56,15 @@ open_window() {
         echo "No display: open $url in a browser (through an SSH tunnel from another machine)"
         return
     fi
+    # a browser of its own (its own profile), with the window class NihilIDE: the menu entry the
+    # installer writes (nihil-ide.desktop, StartupWMClass=NihilIDE) gives it the Nihil icon in the
+    # taskbar and in Alt+Tab. Returns when the window is closed.
     for b in google-chrome google-chrome-stable chromium chromium-browser microsoft-edge brave-browser; do
         if command -v "$b" >/dev/null 2>&1; then
-            "$b" --app="$url" --new-window >/dev/null 2>&1 &
+            profile=${XDG_STATE_HOME:-$HOME/.local/state}/nihil/browser
+            mkdir -p "$profile"
+            "$b" --app="$url" --class=NihilIDE --user-data-dir="$profile" --no-first-run \
+                --no-default-browser-check >/dev/null 2>&1
             return
         fi
     done
@@ -87,10 +93,20 @@ ide() {
         exit 0
     fi
     if "$window"; then
+        server_pid=$$      # the server below takes this shell's place (exec)
         (
             i=0
             while [ $i -lt 50 ]; do
-                if curl -fs -o /dev/null "$url" 2>/dev/null; then open_window "$url"; exit 0; fi
+                if curl -fs -o /dev/null "$url" 2>/dev/null; then
+                    started=$(date +%s)
+                    open_window "$url"
+                    # Linux: the window was the IDE's own browser and it was closed, so the server
+                    # stops too (unless it came back at once: the window belonged to another one)
+                    if [ "$(uname -s)" != Darwin ] && [ $(($(date +%s) - started)) -gt 3 ] && [ -n "${profile:-}" ]; then
+                        kill "$server_pid" 2>/dev/null || true
+                    fi
+                    exit 0
+                fi
                 sleep 0.2
                 i=$((i + 1))
             done
