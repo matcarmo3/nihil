@@ -891,6 +891,7 @@ send_static(c = 0, name = "") {
     name.ends_with(".js") { kind = "text/javascript; charset=utf-8"; }
     name.ends_with(".css") { kind = "text/css; charset=utf-8"; }
     name.ends_with(".png") { kind = "image/png"; }
+    name.ends_with(".webmanifest") { kind = "application/manifest+json"; }
     name == "index.html" { t = (t || "").replace("{{NIHIL_TOKEN}}", TOKEN); }
     c.respond(200, kind, t || "");
 }

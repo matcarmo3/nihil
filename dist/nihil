@@ -34,6 +34,13 @@ usage() {
 open_window() {
     url=$1
     if [ "$(uname -s)" = Darwin ]; then
+        # installed as an app from Chrome/Edge/Brave (menu: Install page as app): its own window and icon
+        for pwa in "$HOME/Applications/Chrome Apps.localized/Nihil IDE.app" "$HOME/Applications/Edge Apps.localized/Nihil IDE.app" "$HOME/Applications/Brave Browser Apps.localized/Nihil IDE.app"; do
+            if [ -d "$pwa" ]; then
+                open "$pwa"
+                return
+            fi
+        done
         for app in "Google Chrome" "Microsoft Edge" "Brave Browser" "Chromium"; do
             if [ -d "/Applications/$app.app" ] || [ -d "$HOME/Applications/$app.app" ]; then
                 open -na "$app" --args --app="$url" --new-window
