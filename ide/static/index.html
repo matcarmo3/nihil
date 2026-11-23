@@ -900,6 +900,11 @@ $('splitter').onmousedown = (e) => {
   addEventListener('mousemove', move); addEventListener('mouseup', up);
 };
 addEventListener('beforeunload', (e) => { if (tabs.some((t) => t.dirty)) e.preventDefault(); });
+// the browser's own menu (Back, Reload, Inspect…) is not the IDE's: right-click keeps only the
+// text menu (cut, copy, paste) where there is text to edit: the editor, the terminal, the fields
+addEventListener('contextmenu', (e) => {
+  if (!e.target.closest('.CodeMirror, .xterm, input, textarea, [contenteditable="true"]')) e.preventDefault();
+});
 addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); run(); }
   if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); save(); }

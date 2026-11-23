@@ -10,6 +10,30 @@
 #import <Cocoa/Cocoa.h>
 #import <WebKit/WebKit.h>
 
+// the web view's right-click menu without the browser's items (Reload, Back, Inspect Element,
+// Open Link…): what is left is the text's (Cut, Copy, Paste, Spelling, Look Up)
+@interface IDEWebView : WKWebView
+@end
+
+@implementation IDEWebView
+- (void)willOpenMenu:(NSMenu *)menu withEvent:(NSEvent *)event {
+    NSSet *browser = [NSSet setWithArray:@[@"WKMenuItemIdentifierReload", @"WKMenuItemIdentifierGoBack",
+        @"WKMenuItemIdentifierGoForward", @"WKMenuItemIdentifierInspectElement",
+        @"WKMenuItemIdentifierOpenLinkInNewWindow", @"WKMenuItemIdentifierDownloadLinkedFile",
+        @"WKMenuItemIdentifierOpenImageInNewWindow", @"WKMenuItemIdentifierDownloadImage",
+        @"WKMenuItemIdentifierCopyImage", @"WKMenuItemIdentifierOpenFrameInNewWindow",
+        @"WKMenuItemIdentifierShareMenu", @"WKMenuItemIdentifierSearchWeb"]];
+    for (NSMenuItem *item in [menu.itemArray copy])
+        if (item.identifier && [browser containsObject:item.identifier]) [menu removeItem:item];
+    // no separators left at the ends or doubled
+    while (menu.numberOfItems && menu.itemArray.firstObject.isSeparatorItem) [menu removeItemAtIndex:0];
+    while (menu.numberOfItems && menu.itemArray.lastObject.isSeparatorItem) [menu removeItemAtIndex:menu.numberOfItems - 1];
+    for (NSInteger i = menu.numberOfItems - 1; i > 0; i--)
+        if ([menu itemAtIndex:i].isSeparatorItem && [menu itemAtIndex:i - 1].isSeparatorItem) [menu removeItemAtIndex:i];
+    [super willOpenMenu:menu withEvent:event];
+}
+@end
+
 @interface App : NSObject <NSApplicationDelegate, WKUIDelegate, WKNavigationDelegate>
 @property (strong) NSWindow *window;
 @property (strong) WKWebView *web;
@@ -114,7 +138,7 @@ static NSString *fetch(NSURL *url) {
     self.url = [NSURL URLWithString:u ?: [NSString stringWithFormat:@"http://127.0.0.1:%@/", port]];
 
     WKWebViewConfiguration *cfg = [WKWebViewConfiguration new];
-    self.web = [[WKWebView alloc] initWithFrame:NSMakeRect(0, 0, 1280, 820) configuration:cfg];
+    self.web = [[IDEWebView alloc] initWithFrame:NSMakeRect(0, 0, 1280, 820) configuration:cfg];
     self.web.UIDelegate = self;
     self.web.navigationDelegate = self;
     self.window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 1280, 820)
