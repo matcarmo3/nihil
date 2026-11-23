@@ -4,6 +4,13 @@ What each version of the language added, and why. Appendix A of
 [SPEC.md](SPEC.md) keeps the same history together with the design decisions made
 before v2.0.
 
+## v4.2.2
+
+- macOS: `Nihil IDE.app`, the IDE in a native window with the Nihil icon; the installer puts a copy in `~/Applications` (Launchpad, Spotlight), and the app starts the IDE's server itself when it is not running
+  - *Why:* The app window of v4.2.1 was a browser's: it showed the browser's icon in the Dock and in Cmd+Tab, and it needed a terminal
+- the IDE's page can be installed as an app from the browser (a web manifest and icons)
+  - *Why:* On Linux too the IDE gets a window and an icon of its own
+
 ## v4.2.1
 
 - `nihil ide`: the IDE comes with the packages and opens in an app window; its workspace is `~/Nihil`, with the examples
