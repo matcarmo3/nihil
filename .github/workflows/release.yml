@@ -105,7 +105,11 @@ jobs:
         run: dist/test-ide.sh "$RUNNER_TEMP/bin/nihil"
 
       - name: The installed IDE app is there and signed
-        run: codesign -v "$RUNNER_TEMP/nihil/libexec/nihil/Nihil IDE.app"
+        run: |
+          codesign -v "$RUNNER_TEMP/nihil/libexec/nihil/Nihil IDE.app"
+          NIHIL_URL="file://$PWD/dist/out/nihil-macos-arm64.tar.gz" NIHIL_HOME="$RUNNER_TEMP/nihil" NIHIL_BIN="$RUNNER_TEMP/bin" NIHIL_APPS="$RUNNER_TEMP/Applications" sh site/install.sh
+          codesign -v "$RUNNER_TEMP/Applications/Nihil IDE.app"
+          test "$(cat "$RUNNER_TEMP/Applications/Nihil IDE.app/Contents/Resources/nihil-home")" = "$RUNNER_TEMP/nihil"
 
       - uses: actions/upload-artifact@v4
         with:

@@ -8,6 +8,7 @@
 # outside your home directory, and no sudo is needed.
 #
 #   NIHIL_HOME=dir      where to unpack it (default ~/.nihil)
+#   NIHIL_APPS=dir      macOS: where the copy of Nihil IDE.app goes (default ~/Applications; none: nowhere)
 #   NIHIL_BIN=dir       where to link the nihil command (default ~/.local/bin)
 #   NIHIL_VERSION=x.y.z a given release instead of the latest
 set -eu
@@ -68,6 +69,23 @@ rm -rf "$dest"
 mv "$dest.new" "$dest"
 mkdir -p "$bindir"
 ln -sf "$dest/bin/nihil" "$bindir/nihil"
+
+# macOS: a copy of the IDE's app in ~/Applications, for Launchpad and Spotlight (NIHIL_APPS=none: not)
+apps=${NIHIL_APPS:-$HOME/Applications}
+app="$dest/libexec/nihil/Nihil IDE.app"
+if [ "$(uname -s)" = Darwin ] && [ -d "$app" ] && [ "$apps" != none ]; then
+    copy="$apps/Nihil IDE.app"
+    if [ -d "$copy" ] && ! grep -q 'dev.nihil-lang.ide' "$copy/Contents/Info.plist" 2>/dev/null; then
+        say "$copy exists and is not Nihil's: left as it is"
+    else
+        mkdir -p "$apps"
+        rm -rf "$copy"
+        cp -R "$app" "$copy"
+        printf '%s\n' "$dest" > "$copy/Contents/Resources/nihil-home"
+        codesign --force --sign - "$copy" >/dev/null 2>&1 || true
+        say "The IDE's app: $copy (Launchpad, Spotlight: Nihil IDE)"
+    fi
+fi
 
 say "Installed $("$dest/bin/nihil" version) in $dest"
 case ":$PATH:" in

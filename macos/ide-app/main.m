@@ -5,7 +5,7 @@
 //
 // With no URL it uses http://127.0.0.1:$NIHIL_IDE_PORT/ (8730). If nothing answers there it starts
 // the server itself (`nihil ide --no-window` of the installation the app lives in, at
-// libexec/nihil/Nihil IDE.app) and stops it when the app quits; when `nihil ide` started the
+// libexec/nihil/Nihil IDE.app, or that its copy in ~/Applications names) and stops it when the app quits; when `nihil ide` started the
 // server, it stays the terminal's. Built by macos/ide-app/build.sh.
 #import <Cocoa/Cocoa.h>
 #import <WebKit/WebKit.h>
@@ -75,9 +75,15 @@ static NSString *fetch(NSURL *url) {
 // the server: the one already answering at the URL, or one of our own
 - (BOOL)serve {
     if (fetch(self.url)) return YES;
-    NSString *home = [[[[NSBundle mainBundle] bundlePath] stringByDeletingLastPathComponent]
-                         stringByDeletingLastPathComponent];          // …/libexec/nihil → …/libexec
-    NSString *nihil = [[home stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"bin/nihil"];
+    // inside the installation (libexec/nihil/Nihil IDE.app), or the copy in ~/Applications made by
+    // the installer, which writes the installation's place in Resources/nihil-home
+    NSString *home = [[[[[NSBundle mainBundle] bundlePath] stringByDeletingLastPathComponent]
+                         stringByDeletingLastPathComponent] stringByDeletingLastPathComponent];
+    NSString *mark = [[NSBundle mainBundle] pathForResource:@"nihil-home" ofType:nil];
+    NSString *marked = mark ? [[NSString stringWithContentsOfFile:mark encoding:NSUTF8StringEncoding error:nil]
+                                  stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] : nil;
+    if (marked.length) home = marked;
+    NSString *nihil = [home stringByAppendingPathComponent:@"bin/nihil"];
     if (![[NSFileManager defaultManager] isExecutableFileAtPath:nihil]) return NO;
     NSString *logs = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Logs"];
     [[NSFileManager defaultManager] createDirectoryAtPath:logs withIntermediateDirectories:YES attributes:nil error:nil];

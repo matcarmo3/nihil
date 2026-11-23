@@ -35,8 +35,12 @@ open_window() {
     url=$1
     if [ "$(uname -s)" = Darwin ]; then
         # the package's own app: a window of its own, with the Nihil icon
-        if [ -d "$lib/Nihil IDE.app" ]; then
-            open -a "$lib/Nihil IDE.app" --args "$url"
+        # (its copy in ~/Applications, when it is this installation's, so there is one app in the Dock)
+        app="$lib/Nihil IDE.app"
+        copy="$HOME/Applications/Nihil IDE.app"
+        if [ "$(cat "$copy/Contents/Resources/nihil-home" 2>/dev/null)" = "$home" ]; then app=$copy; fi
+        if [ -d "$app" ]; then
+            open -a "$app" --args "$url"
             return
         fi
         for app in "Google Chrome" "Microsoft Edge" "Brave Browser" "Chromium"; do
