@@ -257,6 +257,12 @@ dialog { background: var(--panel); color: var(--text); border: 1px solid var(--l
 dialog input { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 5px;
   padding: 6px 8px; font: 13px ui-monospace, monospace; width: 320px; }
 dialog::backdrop { background: rgba(0,0,0,.5); }
+#chatPins { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; }
+#chatPins:empty { display: none; }
+#chatPins .pin { display: inline-flex; align-items: center; gap: 6px; padding: 2px 4px 2px 8px; border: 1px solid var(--line);
+  border-radius: 12px; background: var(--panel2); font: 12px ui-monospace, Menlo, monospace; color: var(--accent); }
+#chatPins .pin button { border: 0; background: none; padding: 0 4px; color: var(--dim); cursor: pointer; }
+.msg .pinref { font: 11px ui-monospace, Menlo, monospace; color: var(--dim); margin-bottom: 4px; }
 #ctxMenu { position: fixed; z-index: 1000; min-width: 190px; padding: 4px; background: var(--panel2);
   border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.45); }
 #ctxMenu div { display: flex; justify-content: space-between; gap: 24px; padding: 5px 10px; border-radius: 5px; cursor: default; }
@@ -319,6 +325,7 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
       <details id="activity" open><summary>Activity <span class="live" id="actSummary"></span></summary><div id="actBody"></div></details>
       <div id="chatPane"><div id="chatViews" hidden></div><div id="chatLogs"><div id="shellView" class="chat-log shell-view" hidden></div></div></div>
       <div class="chat-input"><div id="cmdPop" hidden></div>
+        <div id="chatPins" title="Code that goes with the next message (right-click a selection: Ask Claude, or Cmd+L)"></div>
         <textarea id="chatText" rows="3" placeholder="Message (Enter sends, Shift+Enter: new line)"></textarea>
         <div class="chat-buttons"><button id="chatSend" class="primary">Send</button><button id="chatStop" disabled title="Stop Claude in this tab">■ Stop</button></div>
         <div class="chat-opts">
@@ -396,6 +403,7 @@ const editor = CodeMirror($('editor'), {
   extraKeys: {
     'Ctrl-S': save, 'Cmd-S': save, 'Ctrl-Enter': run, 'Cmd-Enter': run,
     'Ctrl-/': 'toggleComment', 'Cmd-/': 'toggleComment',
+    'Ctrl-L': () => pinSelection(), 'Cmd-L': () => pinSelection(),
     Tab: (cm) => cm.somethingSelected() ? cm.indentSelection('add') : cm.replaceSelection('    '),
   },
 });
@@ -961,6 +969,11 @@ function editorMenu() {
     '-',
     { label: 'Select All', key: shortcut('A'), act: () => { editor.focus(); editor.execCommand('selectAll'); } },
     { label: 'Comment / Uncomment', key: shortcut('/'), act: () => { editor.focus(); editor.execCommand('toggleComment'); } },
+    ...(sel ? ['-',
+      { label: '✦ Ask Claude about this', key: shortcut('L'), act: () => pinSelection() },
+      { label: '✦ Explain it', act: () => askAboutSelection('Explain this code.') },
+      { label: '✦ Find problems in it', act: () => askAboutSelection('Find bugs or problems in this code, and say how to fix them.') },
+    ] : []),
     '-',
     { label: 'Save', key: shortcut('S'), act: () => save() },
     { label: 'Run', key: shortcut('↵'), act: () => run() },
@@ -1407,6 +1420,40 @@ $('chatSend').onclick = () => chatSend();
 $('chatStop').onclick = async () => { const t = cur(); if (t && t.run) await api('/api/stop', { id: t.run }); };
 
 // what is open in the IDE, for the message
+// ---- code taken to Claude: a selection kept as it was (file, lines, text) until the next message
+let pins = [];
+function selectionSnapshot() {
+  if (!current || !editor.somethingSelected()) return null;
+  const s = editor.listSelections()[0];
+  const from = s.from(), to = s.to();
+  // a selection that ends at the start of a line does not take that line
+  const a = from.line + 1, b = to.line + (to.ch === 0 && to.line > from.line ? 0 : 1);
+  return { file: current, a, b, text: editor.getSelection() };
+}
+const pinName = (p) => p.file + ':' + (p.a === p.b ? p.a : p.a + '–' + p.b);
+function renderPins() {
+  const box = $('chatPins'); box.innerHTML = '';
+  pins.forEach((p, i) => {
+    const c = document.createElement('span'); c.className = 'pin'; c.textContent = pinName(p);
+    const x = document.createElement('button'); x.textContent = '×'; x.title = 'Remove';
+    x.onclick = () => { pins.splice(i, 1); renderPins(); };
+    c.appendChild(x); box.appendChild(c);
+  });
+}
+function pinSelection() {
+  const p = selectionSnapshot();
+  if (!p) return false;
+  if (!pins.some((q) => q.file === p.file && q.a === p.a && q.b === p.b && q.text === p.text)) pins.push(p);
+  renderPins(); toggleChat(true); $('chatText').focus();
+  return true;
+}
+function askAboutSelection(question) {
+  if (!pinSelection()) return;
+  const t = cur();
+  if (t && t.run) { $('chatText').value = question; return; }     // busy: it waits in the box
+  chatSend(t, question);
+}
+
 function ideContext() {
   const parts = ['Project: ' + project];
   const fence = (t) => '```nihil\n' + t + (t.endsWith('\n') ? '' : '\n') + '```';
@@ -1416,11 +1463,11 @@ function ideContext() {
     const t = tabs.find((x) => x.path === current);
     if (t && t.dirty) parts.push('The active file has unsaved changes; the text in the editor is:\n' + fence(editor.getValue()));
   }
-  if ($('ctxSel').checked && current && editor.somethingSelected()) {
-    const s = editor.listSelections()[0];
-    const a = Math.min(s.anchor.line, s.head.line) + 1, b = Math.max(s.anchor.line, s.head.line) + 1;
-    parts.push(`Selected in ${current}, line${a === b ? ' ' + a : 's ' + a + '–' + b}:\n` + fence(editor.getSelection()));
-  }
+  const lines = (p) => `line${p.a === p.b ? ' ' + p.a : 's ' + p.a + '–' + p.b}`;
+  for (const p of pins) parts.push(`Code the user brought to this message, from ${p.file}, ${lines(p)}:\n` + fence(p.text));
+  const live = $('ctxSel').checked ? selectionSnapshot() : null;
+  if (live && !pins.some((p) => p.file === live.file && p.a === live.a && p.b === live.b))
+    parts.push(`Selected in ${live.file}, ${lines(live)}:\n` + fence(live.text));
   if ($('ctxTabs').checked && tabs.length) parts.push('Open tabs: ' + tabs.map((t) => t.path + (t.dirty ? ' (unsaved)' : '')).join(', '));
   if ($('ctxErr').checked && lastErrors.length)
     parts.push('Last compile errors:\n' + lastErrors.map((e) => (e.line ? `${e.file}:${e.line}:${e.col}: ` : '') + e.message).join('\n'));
@@ -1768,9 +1815,12 @@ async function chatSend(t = cur(), preset = '') {
   }
   if (!t.title) { t.title = text.replace(/\s+/g, ' ').slice(0, 28); saveChatsOf(t.project); }
   if (t.view) setView(t, null);
-  chatAdd('user', esc(text), t);
+  const brought = pins.map(pinName);
+  chatAdd('user', (brought.length ? `<div class="pinref">✦ ${esc(brought.join(', '))}</div>` : '') + esc(text), t);
   // a command goes as it is (the IDE's context would become its arguments)
-  const r = await api('/api/claude', { message: text, context: slash ? '' : ideContext(), session: t.session, mode: t.mode, model: t.model, name: t.title, allow: t.allow.join(' ') });
+  const context = slash ? '' : ideContext();
+  if (!slash) { pins = []; renderPins(); }
+  const r = await api('/api/claude', { message: text, context, session: t.session, mode: t.mode, model: t.model, name: t.title, allow: t.allow.join(' ') });
   if (!r.ok) { chatAdd('error', esc(r.error || 'could not start Claude'), t); renderChatTabs(); return; }
   runStarted(t, r.run, 'starting…');
   const run = r.run, mode = t.mode;
